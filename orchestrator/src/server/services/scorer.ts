@@ -8,8 +8,30 @@ import type { Job } from "@shared/types";
 import type { JsonSchemaDefinition } from "./llm/types";
 import { stripMarkdownCodeFences } from "./llm/utils/json";
 import { createConfiguredLlmService, resolveLlmModel } from "./modelSelection";
-import { renderPromptTemplate } from "./prompt-templates";
+import {
+  type PromptTemplateTokens,
+  renderPromptTemplate,
+} from "./prompt-templates";
 import { getEffectiveSettings } from "./settings";
+
+/**
+ * Static system-prompt template for job scoring: the candidate profile JSON
+ * plus scoring instructions. This is intentionally a plain code constant, not
+ * a customizable settings-registry entry — unlike `scoringPromptTemplate`
+ * (Settings → Prompt Templates), it is not user-editable, keeping this change
+ * low-risk. Its content is identical across every job scored in a single
+ * pipeline run, so sending it as a `system` message lets the Anthropic
+ * provider adapter (see `llm/providers/anthropic.ts`) cache it with
+ * `cache_control: ephemeral` — only the small per-job user message is fresh
+ * input on each call.
+ */
+const SCORING_SYSTEM_TEMPLATE = `
+CANDIDATE PROFILE:
+{{profileJson}}
+
+SCORING INSTRUCTIONS:
+{{scoringInstructionsText}}
+`.trim();
 
 export class LlmNotConfiguredError extends Error {
   constructor(message?: string) {
@@ -108,17 +130,32 @@ export async function scoreJobSuitability(
     ? (options.scoringInstructions ?? "")
     : (settings.scoringInstructions?.value ?? "");
 
-  const prompt = buildScoringPrompt(job, sanitizeProfileForPrompt(profile), {
+  const preferences: ScoringPreferences = {
     instructions: scoringInstructions,
     promptTemplate:
       settings.scoringPromptTemplate?.value ??
       getDefaultPromptTemplate("scoringPromptTemplate"),
-  });
+  };
+  const tokens = buildScoringTokens(
+    job,
+    sanitizeProfileForPrompt(profile),
+    preferences,
+  );
+  // Static across every job scored in this pipeline run — sent as the system
+  // message so the Anthropic provider can cache it (see SCORING_SYSTEM_TEMPLATE).
+  const systemContent = renderPromptTemplate(SCORING_SYSTEM_TEMPLATE, tokens);
+  // Job-specific fields only — still receives profileJson/scoringInstructionsText
+  // as tokens for backward compatibility with custom scoringPromptTemplate
+  // overrides that reference those placeholders directly (see renderPromptTemplate).
+  const userContent = renderPromptTemplate(preferences.promptTemplate, tokens);
 
   const llm = await createConfiguredLlmService("scoring");
   const result = await llm.callJson<{ score: number; reason: string }>({
     model,
-    messages: [{ role: "user", content: prompt }],
+    messages: [
+      { role: "system", content: systemContent },
+      { role: "user", content: userContent },
+    ],
     jsonSchema: SCORING_SCHEMA,
     maxRetries: 2,
     jobId: job.id,
@@ -261,12 +298,12 @@ export function parseJsonFromContent(
   throw new Error("Unable to parse JSON from model response");
 }
 
-function buildScoringPrompt(
+function buildScoringTokens(
   job: Job,
   profile: Record<string, unknown>,
   preferences: ScoringPreferences,
-): string {
-  return renderPromptTemplate(preferences.promptTemplate, {
+): PromptTemplateTokens {
+  return {
     profileJson: JSON.stringify(profile, null, 2),
     jobTitle: job.title,
     employer: job.employer,
@@ -278,7 +315,7 @@ function buildScoringPrompt(
     scoringInstructionsText: preferences.instructions
       ? preferences.instructions
       : "No additional custom scoring instructions.",
-  });
+  };
 }
 
 function sanitizeProfileForPrompt(

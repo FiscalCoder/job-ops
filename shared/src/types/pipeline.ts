@@ -185,6 +185,8 @@ export interface PipelineRunEffectiveConfig {
   compatibleSources: ExtractorSourceId[];
   skippedSources: PipelineRunSkippedSource[];
   blockedCompanyKeywordsCount: number;
+  blockedTitleKeywordsCount: number;
+  rejectionPhrasesCount: number;
   sourceLimits: PipelineRunSourceLimitSnapshot;
   autoSkipScoreThreshold: number | null;
   pdfRenderer: PdfRenderer;

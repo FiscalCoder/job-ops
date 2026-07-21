@@ -316,6 +316,111 @@ describe("scoreJobsStep auto-skip behavior", () => {
     expect(vi.mocked(progressHelpers.scoringComplete)).toHaveBeenCalledWith(2);
   });
 
+  it("auto-rejects a job whose title matches a blocked title keyword without calling the LLM", async () => {
+    const settingsRepo = await import("@server/repositories/settings");
+    const jobsRepo = await import("@server/repositories/jobs");
+    const scorer = await import("@server/services/scorer");
+    const jobBrief = await import("@server/services/job-brief");
+
+    vi.mocked(jobsRepo.getUnscoredDiscoveredJobs).mockResolvedValue([
+      createJob({
+        id: "job-junior",
+        title: "Junior Software Engineer",
+        employer: "Acme Corp",
+        status: "discovered",
+        suitabilityScore: null,
+        suitabilityReason: null,
+      }),
+    ]);
+    vi.mocked(settingsRepo.getSetting).mockImplementation(async (key) => {
+      if (key === "blockedTitleKeywords") return JSON.stringify(["junior"]);
+      return null;
+    });
+
+    const result = await scoreJobsStep({ profile: {} });
+
+    expect(scorer.scoreJobSuitability).not.toHaveBeenCalled();
+    expect(jobBrief.generateJobBrief).not.toHaveBeenCalled();
+    expect(jobsRepo.updateJob).toHaveBeenCalledWith(
+      "job-junior",
+      expect.objectContaining({
+        suitabilityScore: 0,
+        suitabilityReason: expect.stringContaining(
+          'blocked keyword "junior"',
+        ),
+        status: "skipped",
+      }),
+    );
+    expect(result.scoredJobs).toEqual([
+      expect.objectContaining({
+        id: "job-junior",
+        suitabilityScore: 0,
+      }),
+    ]);
+  });
+
+  it("auto-rejects a job whose description matches a rejection phrase without calling the LLM", async () => {
+    const settingsRepo = await import("@server/repositories/settings");
+    const jobsRepo = await import("@server/repositories/jobs");
+    const scorer = await import("@server/services/scorer");
+    const jobBrief = await import("@server/services/job-brief");
+
+    vi.mocked(jobsRepo.getUnscoredDiscoveredJobs).mockResolvedValue([
+      createJob({
+        id: "job-no-sponsor",
+        title: "Software Engineer",
+        employer: "Acme Corp",
+        status: "discovered",
+        suitabilityScore: null,
+        suitabilityReason: null,
+        jobDescription:
+          "Great role, but note: no visa sponsorship is available for this position.",
+      }),
+    ]);
+    vi.mocked(settingsRepo.getSetting).mockImplementation(async (key) => {
+      if (key === "rejectionPhrases")
+        return JSON.stringify(["no visa sponsorship"]);
+      return null;
+    });
+
+    const result = await scoreJobsStep({ profile: {} });
+
+    expect(scorer.scoreJobSuitability).not.toHaveBeenCalled();
+    expect(jobBrief.generateJobBrief).not.toHaveBeenCalled();
+    expect(jobsRepo.updateJob).toHaveBeenCalledWith(
+      "job-no-sponsor",
+      expect.objectContaining({
+        suitabilityScore: 0,
+        suitabilityReason: expect.stringContaining(
+          'rejection phrase "no visa sponsorship"',
+        ),
+        status: "skipped",
+      }),
+    );
+    expect(result.scoredJobs).toEqual([
+      expect.objectContaining({
+        id: "job-no-sponsor",
+        suitabilityScore: 0,
+      }),
+    ]);
+  });
+
+  it("does not auto-reject jobs when title/description do not match any configured keyword or phrase", async () => {
+    const settingsRepo = await import("@server/repositories/settings");
+    const scorer = await import("@server/services/scorer");
+
+    vi.mocked(settingsRepo.getSetting).mockImplementation(async (key) => {
+      if (key === "blockedTitleKeywords") return JSON.stringify(["intern"]);
+      if (key === "rejectionPhrases")
+        return JSON.stringify(["no visa sponsorship"]);
+      return null;
+    });
+
+    await scoreJobsStep({ profile: {} });
+
+    expect(scorer.scoreJobSuitability).toHaveBeenCalled();
+  });
+
   it("stops before processing when cancellation is requested", async () => {
     const jobsRepo = await import("@server/repositories/jobs");
     const scorer = await import("@server/services/scorer");

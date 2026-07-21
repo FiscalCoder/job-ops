@@ -572,6 +572,20 @@ export const settingsRegistry = {
     parse: parseJsonArrayOrNull,
     serialize: serializeNullableJsonArray,
   },
+  blockedTitleKeywords: {
+    kind: "typed" as const,
+    schema: z.array(z.string().trim().min(1).max(200)).max(200),
+    default: (): string[] => [],
+    parse: parseJsonArrayOrNull,
+    serialize: serializeNullableJsonArray,
+  },
+  rejectionPhrases: {
+    kind: "typed" as const,
+    schema: z.array(z.string().trim().min(1).max(200)).max(200),
+    default: (): string[] => [],
+    parse: parseJsonArrayOrNull,
+    serialize: serializeNullableJsonArray,
+  },
   scoringInstructions: {
     kind: "typed" as const,
     schema: z.string().trim().max(4000),
@@ -707,6 +721,13 @@ export const settingsRegistry = {
     serialize: serializeBitBool,
   },
   autoTailorOnManualImport: {
+    kind: "typed" as const,
+    schema: z.boolean(),
+    default: (): boolean => true,
+    parse: parseBitBoolOrNull,
+    serialize: serializeBitBool,
+  },
+  autoTailorOnPipelineRun: {
     kind: "typed" as const,
     schema: z.boolean(),
     default: (): boolean => true,

@@ -84,6 +84,7 @@ const DEFAULT_FORM_VALUES: UpdateSettingsInput = {
   showSponsorInfo: null,
   renderMarkdownInJobDescriptions: null,
   autoTailorOnManualImport: null,
+  autoTailorOnPipelineRun: null,
   chatStyleTone: "",
   chatStyleFormality: "",
   chatStyleConstraints: "",
@@ -107,6 +108,8 @@ const DEFAULT_FORM_VALUES: UpdateSettingsInput = {
   missingSalaryPenalty: null,
   autoSkipScoreThreshold: null,
   blockedCompanyKeywords: [],
+  blockedTitleKeywords: [],
+  rejectionPhrases: [],
   ghostwriterSystemPromptTemplate: "",
   tailoringPromptTemplate: "",
   scoringPromptTemplate: "",
@@ -317,6 +320,8 @@ const SECTION_FIELD_MAP: Record<
     "missingSalaryPenalty",
     "autoSkipScoreThreshold",
     "blockedCompanyKeywords",
+    "blockedTitleKeywords",
+    "rejectionPhrases",
   ],
   "reactive-resume": [
     "pdfRenderer",
@@ -337,6 +342,7 @@ const SECTION_FIELD_MAP: Record<
     "showSponsorInfo",
     "renderMarkdownInJobDescriptions",
     "autoTailorOnManualImport",
+    "autoTailorOnPipelineRun",
   ],
   backup: ["backupEnabled", "backupHour", "backupMaxCount"],
   "danger-zone": [],
@@ -412,6 +418,7 @@ const NULL_SETTINGS_PAYLOAD: UpdateSettingsInput = {
   showSponsorInfo: null,
   renderMarkdownInJobDescriptions: null,
   autoTailorOnManualImport: null,
+  autoTailorOnPipelineRun: null,
   chatStyleTone: null,
   chatStyleFormality: null,
   chatStyleConstraints: null,
@@ -436,6 +443,8 @@ const NULL_SETTINGS_PAYLOAD: UpdateSettingsInput = {
   missingSalaryPenalty: null,
   autoSkipScoreThreshold: null,
   blockedCompanyKeywords: null,
+  blockedTitleKeywords: null,
+  rejectionPhrases: null,
   ghostwriterSystemPromptTemplate: null,
   tailoringPromptTemplate: null,
   scoringPromptTemplate: null,
@@ -504,6 +513,8 @@ const mapSettingsToForm = (data: AppSettings): UpdateSettingsInput => ({
   missingSalaryPenalty: data.missingSalaryPenalty.override,
   autoSkipScoreThreshold: data.autoSkipScoreThreshold.override,
   blockedCompanyKeywords: data.blockedCompanyKeywords.override ?? [],
+  blockedTitleKeywords: data.blockedTitleKeywords.override ?? [],
+  rejectionPhrases: data.rejectionPhrases.override ?? [],
   ghostwriterSystemPromptTemplate:
     data.ghostwriterSystemPromptTemplate.value ?? "",
   tailoringPromptTemplate: data.tailoringPromptTemplate.value ?? "",
@@ -655,6 +666,10 @@ const getDerivedSettings = (settings: AppSettings | null) => {
         effective: settings?.autoTailorOnManualImport?.value ?? true,
         default: settings?.autoTailorOnManualImport?.default ?? true,
       },
+      autoTailorOnPipelineRun: {
+        effective: settings?.autoTailorOnPipelineRun?.value ?? true,
+        default: settings?.autoTailorOnPipelineRun?.default ?? true,
+      },
     },
     chat: {
       tone: {
@@ -740,6 +755,14 @@ const getDerivedSettings = (settings: AppSettings | null) => {
       blockedCompanyKeywords: {
         effective: settings?.blockedCompanyKeywords?.value ?? [],
         default: settings?.blockedCompanyKeywords?.default ?? [],
+      },
+      blockedTitleKeywords: {
+        effective: settings?.blockedTitleKeywords?.value ?? [],
+        default: settings?.blockedTitleKeywords?.default ?? [],
+      },
+      rejectionPhrases: {
+        effective: settings?.rejectionPhrases?.value ?? [],
+        default: settings?.rejectionPhrases?.default ?? [],
       },
     },
     promptTemplates: {
@@ -1197,6 +1220,10 @@ export const SettingsPage: React.FC = () => {
           data.autoTailorOnManualImport,
           display.autoTailorOnManualImport.default,
         ),
+        autoTailorOnPipelineRun: nullIfSame(
+          data.autoTailorOnPipelineRun,
+          display.autoTailorOnPipelineRun.default,
+        ),
         chatStyleTone: normalizeString(data.chatStyleTone),
         chatStyleFormality: normalizeString(data.chatStyleFormality),
         chatStyleConstraints: normalizeString(data.chatStyleConstraints),
@@ -1240,6 +1267,24 @@ export const SettingsPage: React.FC = () => {
           const normalized = normalizeStringArray(data.blockedCompanyKeywords);
           const normalizedDefault = normalizeStringArray(
             scoring.blockedCompanyKeywords.default,
+          );
+          return stringArraysEqual(normalized, normalizedDefault)
+            ? null
+            : normalized;
+        })(),
+        blockedTitleKeywords: (() => {
+          const normalized = normalizeStringArray(data.blockedTitleKeywords);
+          const normalizedDefault = normalizeStringArray(
+            scoring.blockedTitleKeywords.default,
+          );
+          return stringArraysEqual(normalized, normalizedDefault)
+            ? null
+            : normalized;
+        })(),
+        rejectionPhrases: (() => {
+          const normalized = normalizeStringArray(data.rejectionPhrases);
+          const normalizedDefault = normalizeStringArray(
+            scoring.rejectionPhrases.default,
           );
           return stringArraysEqual(normalized, normalizedDefault)
             ? null
@@ -1521,7 +1566,9 @@ export const SettingsPage: React.FC = () => {
           : { label: "Using defaults", variant: "secondary" as const };
       case "scoring":
         return scoring.autoSkipScoreThreshold.effective != null ||
-          scoring.blockedCompanyKeywords.effective.length > 0
+          scoring.blockedCompanyKeywords.effective.length > 0 ||
+          scoring.blockedTitleKeywords.effective.length > 0 ||
+          scoring.rejectionPhrases.effective.length > 0
           ? { label: "Customized", variant: "outline" as const }
           : { label: "Default rules", variant: "secondary" as const };
       case "reactive-resume":

@@ -347,6 +347,14 @@ function RunInsightsBody(props: {
                   value={savedDetails.effectiveConfig.blockedCompanyKeywordsCount.toLocaleString()}
                 />
                 <MetricCard
+                  label="Blocked title filters"
+                  value={savedDetails.effectiveConfig.blockedTitleKeywordsCount.toLocaleString()}
+                />
+                <MetricCard
+                  label="Rejection phrase filters"
+                  value={savedDetails.effectiveConfig.rejectionPhrasesCount.toLocaleString()}
+                />
+                <MetricCard
                   label="Auto-skip threshold"
                   value={
                     savedDetails.effectiveConfig.autoSkipScoreThreshold == null

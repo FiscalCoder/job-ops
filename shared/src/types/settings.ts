@@ -261,6 +261,8 @@ export interface AppSettings {
   onboardingResumeConfirmedSource: Resolved<string>;
   onboardingLegacyMigrationPending: Resolved<boolean>;
   blockedCompanyKeywords: Resolved<string[]>;
+  blockedTitleKeywords: Resolved<string[]>;
+  rejectionPhrases: Resolved<string[]>;
   scoringInstructions: Resolved<string>;
   ghostwriterSystemPromptTemplate: Resolved<string>;
   ghostwriterStopSlopEnabled: Resolved<boolean>;
@@ -278,6 +280,7 @@ export interface AppSettings {
   showSponsorInfo: Resolved<boolean>;
   renderMarkdownInJobDescriptions: Resolved<boolean>;
   autoTailorOnManualImport: Resolved<boolean>;
+  autoTailorOnPipelineRun: Resolved<boolean>;
   chatStyleTone: Resolved<string>;
   chatStyleFormality: Resolved<string>;
   chatStyleConstraints: Resolved<string>;

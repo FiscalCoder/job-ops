@@ -310,15 +310,28 @@ describe("salary penalty", () => {
     vi.clearAllMocks();
   });
 
-  function getScoringPrompt(): string {
+  // The system message carries the static candidate profile + scoring
+  // instructions (cacheable on Anthropic); the user message carries only the
+  // per-job fields. See scorer.ts SCORING_SYSTEM_TEMPLATE.
+  function getSystemPrompt(): string {
     const call = callJsonMock.mock.calls.at(-1)?.[0];
     return call?.messages?.[0]?.content ?? "";
   }
 
+  function getUserPrompt(): string {
+    const call = callJsonMock.mock.calls.at(-1)?.[0];
+    return call?.messages?.[1]?.content ?? "";
+  }
+
+  /** Concatenation of both messages, for assertions that should hold regardless of which message carries the content. */
+  function getAllPromptContent(): string {
+    return `${getSystemPrompt()}\n${getUserPrompt()}`;
+  }
+
   function getPromptProfile(): Record<string, any> {
-    const prompt = getScoringPrompt();
+    const prompt = getSystemPrompt();
     const match = prompt.match(
-      /CANDIDATE PROFILE:\n(?<profile>[\s\S]*?)\n\nJOB LISTING:/,
+      /CANDIDATE PROFILE:\n(?<profile>[\s\S]*?)\n\nSCORING INSTRUCTIONS:/,
     );
     expect(match?.groups?.profile).toBeDefined();
     return JSON.parse(match?.groups?.profile ?? "{}");
@@ -406,11 +419,11 @@ describe("salary penalty", () => {
           description: "Built React features.",
         },
       ]);
-      expect(getScoringPrompt()).not.toContain("private@example.com");
-      expect(getScoringPrompt()).not.toContain("+44 7000 000000");
-      expect(getScoringPrompt()).not.toContain("education-private-id");
-      expect(getScoringPrompt()).not.toContain("role-private-id");
-      expect(getScoringPrompt()).not.toContain(
+      expect(getAllPromptContent()).not.toContain("private@example.com");
+      expect(getAllPromptContent()).not.toContain("+44 7000 000000");
+      expect(getAllPromptContent()).not.toContain("education-private-id");
+      expect(getAllPromptContent()).not.toContain("role-private-id");
+      expect(getAllPromptContent()).not.toContain(
         "https://university.example.com",
       );
     });
@@ -456,7 +469,7 @@ describe("salary penalty", () => {
           location: "Sheffield",
         },
       ]);
-      expect(getScoringPrompt()).not.toContain("private-renderer-layout");
+      expect(getAllPromptContent()).not.toContain("private-renderer-layout");
     });
 
     it("excludes hidden and invisible CV items from prompt content", async () => {
@@ -513,10 +526,10 @@ describe("salary penalty", () => {
       expect(promptProfile.education).toEqual([
         { school: "Visible University", degree: "BSc Computing" },
       ]);
-      expect(getScoringPrompt()).not.toContain("PrivateSkill");
-      expect(getScoringPrompt()).not.toContain("InvisibleSkill");
-      expect(getScoringPrompt()).not.toContain("Hidden University");
-      expect(getScoringPrompt()).not.toContain("Invisible University");
+      expect(getAllPromptContent()).not.toContain("PrivateSkill");
+      expect(getAllPromptContent()).not.toContain("InvisibleSkill");
+      expect(getAllPromptContent()).not.toContain("Hidden University");
+      expect(getAllPromptContent()).not.toContain("Invisible University");
     });
   });
 
@@ -676,10 +689,12 @@ describe("salary penalty", () => {
         expect.objectContaining({
           messages: [
             expect.objectContaining({
+              role: "system",
               content: expect.stringContaining(
                 "Open to relocating, so do not mark down for location discrepancies.",
               ),
             }),
+            expect.objectContaining({ role: "user" }),
           ],
         }),
       );
@@ -761,7 +776,9 @@ describe("salary penalty", () => {
       expect(callJsonMock).toHaveBeenCalledWith(
         expect.objectContaining({
           messages: [
+            expect.objectContaining({ role: "system" }),
             expect.objectContaining({
+              role: "user",
               content: expect.stringContaining(
                 "Custom scoring Backend Engineer Prioritize backend work. {{unknownToken}}",
               ),

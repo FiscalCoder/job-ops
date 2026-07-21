@@ -34,10 +34,15 @@ export const ScoringSettingsSection: React.FC<ScoringSettingsSectionProps> = ({
     missingSalaryPenalty,
     autoSkipScoreThreshold,
     blockedCompanyKeywords,
+    blockedTitleKeywords,
+    rejectionPhrases,
   } = values;
   const { control, watch, setValue } = useFormContext<UpdateSettingsInput>();
   const [blockedCompanyKeywordDraft, setBlockedCompanyKeywordDraft] =
     useState("");
+  const [blockedTitleKeywordDraft, setBlockedTitleKeywordDraft] =
+    useState("");
+  const [rejectionPhraseDraft, setRejectionPhraseDraft] = useState("");
 
   // Watch the current form value to conditionally show/hide penalty input
   const currentPenalizeEnabled =
@@ -47,6 +52,10 @@ export const ScoringSettingsSection: React.FC<ScoringSettingsSectionProps> = ({
   const currentAutoSkipThreshold = watch("autoSkipScoreThreshold");
   const blockedCompanyKeywordValues =
     watch("blockedCompanyKeywords") ?? blockedCompanyKeywords.default;
+  const blockedTitleKeywordValues =
+    watch("blockedTitleKeywords") ?? blockedTitleKeywords.default;
+  const rejectionPhraseValues =
+    watch("rejectionPhrases") ?? rejectionPhrases.default;
 
   return (
     <SettingsSectionFrame
@@ -193,6 +202,72 @@ export const ScoringSettingsSection: React.FC<ScoringSettingsSectionProps> = ({
             | Default:{" "}
             {blockedCompanyKeywords.default.length > 0
               ? blockedCompanyKeywords.default.join(", ")
+              : "None"}
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <label
+            htmlFor="blocked-title-keywords"
+            className="text-sm font-medium leading-none"
+          >
+            Blocked Title Keywords
+          </label>
+          <TokenizedInput
+            id="blocked-title-keywords"
+            values={blockedTitleKeywordValues}
+            draft={blockedTitleKeywordDraft}
+            parseInput={parseTokenizedKeywordInput}
+            onDraftChange={setBlockedTitleKeywordDraft}
+            onValuesChange={(value) =>
+              setValue("blockedTitleKeywords", value, { shouldDirty: true })
+            }
+            placeholder='e.g. "junior", "intern", "devops"'
+            helperText="Jobs whose title contains one of these keywords are auto-rejected before any AI scoring call is made, saving credits."
+            removeLabelPrefix="Remove blocked title keyword"
+            disabled={isLoading || isSaving}
+          />
+          <div className="break-words font-mono text-xs text-muted-foreground">
+            Effective:{" "}
+            {blockedTitleKeywordValues.length > 0
+              ? blockedTitleKeywordValues.join(", ")
+              : "None"}{" "}
+            | Default:{" "}
+            {blockedTitleKeywords.default.length > 0
+              ? blockedTitleKeywords.default.join(", ")
+              : "None"}
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <label
+            htmlFor="rejection-phrases"
+            className="text-sm font-medium leading-none"
+          >
+            Rejection Phrases
+          </label>
+          <TokenizedInput
+            id="rejection-phrases"
+            values={rejectionPhraseValues}
+            draft={rejectionPhraseDraft}
+            parseInput={parseTokenizedKeywordInput}
+            onDraftChange={setRejectionPhraseDraft}
+            onValuesChange={(value) =>
+              setValue("rejectionPhrases", value, { shouldDirty: true })
+            }
+            placeholder='e.g. "no visa sponsorship", "not open to sponsorship"'
+            helperText="Jobs whose description contains one of these phrases are auto-rejected before any AI scoring call is made, saving credits."
+            removeLabelPrefix="Remove rejection phrase"
+            disabled={isLoading || isSaving}
+          />
+          <div className="break-words font-mono text-xs text-muted-foreground">
+            Effective:{" "}
+            {rejectionPhraseValues.length > 0
+              ? rejectionPhraseValues.join(", ")
+              : "None"}{" "}
+            | Default:{" "}
+            {rejectionPhrases.default.length > 0
+              ? rejectionPhrases.default.join(", ")
               : "None"}
           </div>
         </div>

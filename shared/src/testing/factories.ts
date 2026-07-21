@@ -212,6 +212,16 @@ export const createAppSettings = (
     default: [],
     override: null,
   },
+  blockedTitleKeywords: {
+    value: [],
+    default: [],
+    override: null,
+  },
+  rejectionPhrases: {
+    value: [],
+    default: [],
+    override: null,
+  },
   scoringInstructions: {
     value: "",
     default: "",
@@ -273,6 +283,11 @@ export const createAppSettings = (
     override: null,
   },
   autoTailorOnManualImport: {
+    value: true,
+    default: true,
+    override: null,
+  },
+  autoTailorOnPipelineRun: {
     value: true,
     default: true,
     override: null,

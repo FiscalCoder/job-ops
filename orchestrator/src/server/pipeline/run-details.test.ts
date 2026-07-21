@@ -31,6 +31,16 @@ function makeSettings() {
       default: [],
       override: null,
     },
+    blockedTitleKeywords: {
+      value: ["intern"],
+      default: [],
+      override: null,
+    },
+    rejectionPhrases: {
+      value: ["no visa sponsorship"],
+      default: [],
+      override: null,
+    },
     ukvisajobsMaxJobs: { value: 50, default: 50, override: null },
     adzunaMaxJobsPerTerm: { value: 50, default: 50, override: null },
     gradcrackerMaxJobsPerTerm: { value: 50, default: 50, override: null },

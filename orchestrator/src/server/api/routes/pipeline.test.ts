@@ -550,6 +550,8 @@ describe.sequential("Pipeline API routes", () => {
         compatibleSources: ["linkedin", "indeed"],
         skippedSources: [],
         blockedCompanyKeywordsCount: 1,
+        blockedTitleKeywordsCount: 0,
+        rejectionPhrasesCount: 0,
         sourceLimits: {
           ukvisajobsMaxJobs: 50,
           adzunaMaxJobsPerTerm: 50,
@@ -847,6 +849,47 @@ describe.sequential("Pipeline API routes", () => {
     expect(blockedNaukriRes.status).toBe(400);
     expect(blockedNaukriBody.ok).toBe(false);
     expect(blockedNaukriBody.error.message).toContain("incompatible");
+  });
+
+  it("accepts an explicit enableAutoTailoring override and forwards it to runPipeline", async () => {
+    const { runPipeline } = await import("@server/pipeline/index");
+
+    const disabledRes = await fetch(`${baseUrl}/api/pipeline/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sources: ["gradcracker"],
+        enableAutoTailoring: false,
+      }),
+    });
+    const disabledBody = await disabledRes.json();
+    expect(disabledRes.status).toBe(200);
+    expect(disabledBody.ok).toBe(true);
+    expect(runPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({ enableAutoTailoring: false }),
+      expect.objectContaining({ hostedUsageReservationId: null }),
+    );
+
+    const omittedRes = await fetch(`${baseUrl}/api/pipeline/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sources: ["gradcracker"] }),
+    });
+    const omittedBody = await omittedRes.json();
+    expect(omittedRes.status).toBe(200);
+    expect(omittedBody.ok).toBe(true);
+    const lastCallConfig = vi.mocked(runPipeline).mock.calls.at(-1)?.[0];
+    expect(lastCallConfig).not.toHaveProperty("enableAutoTailoring");
+
+    const invalidRes = await fetch(`${baseUrl}/api/pipeline/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sources: ["gradcracker"],
+        enableAutoTailoring: "yes",
+      }),
+    });
+    expect(invalidRes.status).toBe(400);
   });
 
   it("returns a standard quota error when hosted pipeline runs are exhausted", async () => {

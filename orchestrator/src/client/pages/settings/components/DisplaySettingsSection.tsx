@@ -23,6 +23,7 @@ export const DisplaySettingsSection: React.FC<DisplaySettingsSectionProps> = ({
     showSponsorInfo,
     renderMarkdownInJobDescriptions,
     autoTailorOnManualImport,
+    autoTailorOnPipelineRun,
   } = values;
   const { control } = useFormContext<UpdateSettingsInput>();
 
@@ -136,6 +137,42 @@ export const DisplaySettingsSection: React.FC<DisplaySettingsSectionProps> = ({
 
         <Separator />
 
+        <div className="flex items-start space-x-3">
+          <Controller
+            name="autoTailorOnPipelineRun"
+            control={control}
+            render={({ field }) => (
+              <Checkbox
+                id="autoTailorOnPipelineRun"
+                checked={field.value ?? autoTailorOnPipelineRun.default}
+                onCheckedChange={(checked) => {
+                  field.onChange(
+                    checked === "indeterminate" ? null : checked === true,
+                  );
+                }}
+                disabled={isLoading || isSaving}
+              />
+            )}
+          />
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="autoTailorOnPipelineRun"
+              className="text-sm font-medium leading-none cursor-pointer"
+            >
+              Auto-tailor top jobs during pipeline runs
+            </label>
+            <p className="text-xs text-muted-foreground">
+              Automatically tailor CVs and generate PDFs for top-scoring jobs
+              during every pipeline run. Turn off to only tailor a job when
+              you manually approve it — scoring still runs either way, so
+              this only controls whether tailoring/PDF-generation credits are
+              spent before you've chosen a job.
+            </p>
+          </div>
+        </div>
+
+        <Separator />
+
         <div className="grid gap-3 text-sm sm:grid-cols-2">
           <div>
             <div className="text-xs text-muted-foreground">
@@ -185,6 +222,22 @@ export const DisplaySettingsSection: React.FC<DisplaySettingsSectionProps> = ({
             </div>
             <div className="break-words font-mono text-xs font-semibold">
               {autoTailorOnManualImport.default ? "Enabled" : "Disabled"}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">
+              Auto-tailor on pipeline run effective
+            </div>
+            <div className="break-words font-mono text-xs">
+              {autoTailorOnPipelineRun.effective ? "Enabled" : "Disabled"}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">
+              Auto-tailor on pipeline run default
+            </div>
+            <div className="break-words font-mono text-xs font-semibold">
+              {autoTailorOnPipelineRun.default ? "Enabled" : "Disabled"}
             </div>
           </div>
         </div>

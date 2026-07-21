@@ -400,6 +400,54 @@ describe("provider adapters", () => {
     });
   });
 
+  it("caches long system prompts with cache_control, but not short ones", () => {
+    const shortRequest = anthropicStrategy.buildRequest({
+      mode: "json_schema",
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "sk-ant",
+      model: "claude-sonnet-4-6",
+      messages: [
+        { role: "system", content: "You are concise." },
+        { role: "user", content: "hello" },
+      ],
+      jsonSchema: schema,
+    });
+
+    // Short system prompts stay a plain string — below the minimum cacheable
+    // prefix, wrapping in cache_control would only pay the write premium
+    // with no chance of a cache hit.
+    expect(shortRequest.body).toMatchObject({
+      system: "You are concise.",
+    });
+
+    const longSystemPrompt = "You are a careful assistant. "
+      .repeat(200)
+      .trim();
+    expect(longSystemPrompt.length).toBeGreaterThan(4000);
+
+    const longRequest = anthropicStrategy.buildRequest({
+      mode: "json_schema",
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "sk-ant",
+      model: "claude-sonnet-4-6",
+      messages: [
+        { role: "system", content: longSystemPrompt },
+        { role: "user", content: "hello" },
+      ],
+      jsonSchema: schema,
+    });
+
+    expect(longRequest.body).toMatchObject({
+      system: [
+        {
+          type: "text",
+          text: longSystemPrompt,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+    });
+  });
+
   it("strips JSON Schema keywords Anthropic does not support", () => {
     const request = anthropicStrategy.buildRequest({
       mode: "json_schema",

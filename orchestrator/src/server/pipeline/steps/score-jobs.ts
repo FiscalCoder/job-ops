@@ -7,6 +7,7 @@ import * as visaSponsors from "@server/services/visa-sponsors/index";
 import { asyncPool } from "@server/utils/async-pool";
 import type { Job } from "@shared/types";
 import { progressHelpers, updateProgress } from "../progress";
+import { findMatchingKeyword, parseKeywordListSetting } from "./keyword-filters";
 import type { ScoredJob } from "./types";
 
 const SCORING_CONCURRENCY = 4;
@@ -27,6 +28,21 @@ export async function scoreJobsStep(args: {
   const autoSkipThreshold = autoSkipThresholdRaw
     ? parseInt(autoSkipThresholdRaw, 10)
     : null;
+
+  // Cheap, deterministic pre-filters that reject obviously-irrelevant jobs
+  // before any LLM call is made, to cut AI credit usage.
+  const blockedTitleKeywordsRaw = await settingsRepo.getSetting(
+    "blockedTitleKeywords",
+  );
+  const blockedTitleKeywords = parseKeywordListSetting(
+    blockedTitleKeywordsRaw ?? undefined,
+  );
+  const rejectionPhrasesRaw = await settingsRepo.getSetting(
+    "rejectionPhrases",
+  );
+  const rejectionPhrases = parseKeywordListSetting(
+    rejectionPhrasesRaw ?? undefined,
+  );
 
   updateProgress({
     step: "scoring",
@@ -71,6 +87,51 @@ export async function scoreJobsStep(args: {
           ...job,
           suitabilityScore: job.suitabilityScore as number,
           suitabilityReason: job.suitabilityReason ?? "",
+        });
+        return;
+      }
+
+      const matchedTitleKeyword = findMatchingKeyword(
+        job.title,
+        blockedTitleKeywords,
+      );
+      const matchedRejectionPhrase = matchedTitleKeyword
+        ? null
+        : findMatchingKeyword(job.jobDescription, rejectionPhrases);
+
+      if (matchedTitleKeyword || matchedRejectionPhrase) {
+        const suitabilityReason = matchedTitleKeyword
+          ? `Auto-rejected: title matched blocked keyword "${matchedTitleKeyword}"`
+          : `Auto-rejected: description matched rejection phrase "${matchedRejectionPhrase}"`;
+
+        await jobsRepo.updateJob(job.id, {
+          suitabilityScore: 0,
+          suitabilityReason,
+          ...(job.status !== "applied" ? { status: "skipped" as const } : {}),
+        });
+
+        logger.info("Auto-rejected job via keyword/phrase pre-filter", {
+          jobId: job.id,
+          title: job.title,
+          matchedTitleKeyword,
+          matchedRejectionPhrase,
+        });
+
+        completed += 1;
+        progressHelpers.scoringJob(
+          completed,
+          unprocessedJobs.length,
+          {
+            id: job.id,
+            title: job.title,
+            employer: job.employer,
+          },
+          exceptional,
+        );
+        scoredJobs.push({
+          ...job,
+          suitabilityScore: 0,
+          suitabilityReason,
         });
         return;
       }

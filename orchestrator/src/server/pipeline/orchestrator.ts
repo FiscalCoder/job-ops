@@ -14,6 +14,7 @@ import { trackServerProductEvent } from "@infra/product-analytics";
 import { runWithRequestContext } from "@infra/request-context";
 import { getPrivateDataScope } from "@server/tenancy/private-scope";
 import { createLocationIntentFromLegacyInputs } from "@shared/location-domain.js";
+import { settingsRegistry } from "@shared/settings-registry";
 import type {
   JobStatus,
   PipelineConfig,
@@ -169,6 +170,20 @@ async function resolveLocationIntent(
   });
 }
 
+async function resolveEnableAutoTailoring(
+  config: Partial<PipelineConfig>,
+): Promise<boolean> {
+  if (typeof config.enableAutoTailoring === "boolean") {
+    return config.enableAutoTailoring;
+  }
+
+  const raw = await settingsRepo.getSetting("autoTailorOnPipelineRun");
+  const parsed = settingsRegistry.autoTailorOnPipelineRun.parse(
+    raw ?? undefined,
+  );
+  return parsed ?? settingsRegistry.autoTailorOnPipelineRun.default();
+}
+
 // ---------- Challenge pause/resume state ----------
 
 // The pipeline async function stays alive in memory while paused — there's no
@@ -293,7 +308,13 @@ export async function runPipeline(
   tenantState.cancelRequestedAt = null;
   resetProgress();
   const locationIntent = await resolveLocationIntent(config);
-  const mergedConfig = { ...DEFAULT_CONFIG, ...config, locationIntent };
+  const resolvedEnableAutoTailoring = await resolveEnableAutoTailoring(config);
+  const mergedConfig = {
+    ...DEFAULT_CONFIG,
+    ...config,
+    locationIntent,
+    enableAutoTailoring: resolvedEnableAutoTailoring,
+  };
   const configSnapshot = {
     topN: mergedConfig.topN,
     minSuitabilityScore: mergedConfig.minSuitabilityScore,
@@ -511,12 +532,20 @@ export async function runPipeline(
         jobsScored: scoredJobs.length,
         jobsSelected: jobsToProcess.length,
       });
-      const { processedCount } = await processJobsStep({
-        jobsToProcess,
-        processJob,
-        shouldCancel: () =>
-          getPipelineState(scopeKey).cancelRequestedAt !== null,
-      });
+      let processedCount = 0;
+      if (mergedConfig.enableAutoTailoring) {
+        ({ processedCount } = await processJobsStep({
+          jobsToProcess,
+          processJob,
+          shouldCancel: () =>
+            getPipelineState(scopeKey).cancelRequestedAt !== null,
+        }));
+      } else {
+        pipelineLogger.info(
+          "Auto-tailoring disabled — leaving selected jobs for manual review",
+          { jobsSelected: jobsToProcess.length },
+        );
+      }
       jobsProcessed = processedCount;
 
       resultSummary = updatePipelineRunResultSummary(resultSummary, {

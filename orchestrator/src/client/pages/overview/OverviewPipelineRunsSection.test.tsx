@@ -97,6 +97,8 @@ describe("OverviewPipelineRunsSection", () => {
           compatibleSources: ["linkedin", "indeed"],
           skippedSources: [],
           blockedCompanyKeywordsCount: 2,
+          blockedTitleKeywordsCount: 0,
+          rejectionPhrasesCount: 0,
           sourceLimits: {
             ukvisajobsMaxJobs: 50,
             adzunaMaxJobsPerTerm: 50,

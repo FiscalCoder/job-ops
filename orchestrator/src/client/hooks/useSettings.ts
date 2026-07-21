@@ -30,6 +30,7 @@ export function useSettings() {
     renderMarkdownInJobDescriptions:
       settings?.renderMarkdownInJobDescriptions?.value ?? true,
     autoTailorOnManualImport: settings?.autoTailorOnManualImport?.value ?? true,
+    autoTailorOnPipelineRun: settings?.autoTailorOnPipelineRun?.value ?? true,
     refreshSettings,
   };
 }

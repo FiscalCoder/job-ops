@@ -97,6 +97,9 @@ function buildEffectiveConfigSnapshot(args: {
       })),
     blockedCompanyKeywordsCount:
       args.settings.blockedCompanyKeywords.value.length,
+    blockedTitleKeywordsCount:
+      args.settings.blockedTitleKeywords.value.length,
+    rejectionPhrasesCount: args.settings.rejectionPhrases.value.length,
     sourceLimits: {
       ukvisajobsMaxJobs: args.settings.ukvisajobsMaxJobs.value,
       adzunaMaxJobsPerTerm: args.settings.adzunaMaxJobsPerTerm.value,

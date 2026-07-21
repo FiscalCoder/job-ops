@@ -7,6 +7,23 @@ import { createProviderStrategy } from "./factory";
 const DEFAULT_MAX_TOKENS = 4096;
 
 /**
+ * Anthropic prompt caching (`cache_control: {type: "ephemeral"}`) is GA on the
+ * standard Messages API (no beta header needed) but only actually caches a
+ * block once its content clears a minimum token count — below that, the API
+ * silently skips caching (no error; `cache_creation_input_tokens` /
+ * `cache_read_input_tokens` both stay 0). That minimum varies by model, from
+ * ~512 tokens (Claude Fable 5) up to ~4096 tokens (e.g. Opus 4.6/4.5, Haiku
+ * 4.5), and this codebase can point the "scoring" purpose at any current
+ * Anthropic model. 4000 characters (~1000 tokens at a rough ~4 chars/token
+ * proxy) is a conservative middle ground: comfortably above the lowest tier's
+ * floor, and — since the tolerable failure mode below the true minimum is
+ * "no caching happens, no error" rather than any incorrect behavior — a
+ * reasonable line under which wrapping a short system prompt just wastes the
+ * ~1.25x cache-write premium for no benefit.
+ */
+const MIN_CACHEABLE_SYSTEM_CHARS = 4000;
+
+/**
  * Anthropic's structured output (`output_config.format.schema`) only supports a
  * subset of JSON Schema. Validation/constraint keywords such as `maxItems`
  * cause a 400 (e.g. "For 'array' type, property 'maxItems' is not supported").
@@ -105,7 +122,16 @@ export const anthropicStrategy = createProviderStrategy({
     };
 
     if (system) {
-      body.system = system;
+      body.system =
+        system.length > MIN_CACHEABLE_SYSTEM_CHARS
+          ? [
+              {
+                type: "text",
+                text: system,
+                cache_control: { type: "ephemeral" },
+              },
+            ]
+          : system;
     }
 
     if (mode === "json_schema") {

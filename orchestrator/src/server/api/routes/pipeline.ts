@@ -518,6 +518,10 @@ const runPipelineSchema = z.object({
     .optional(),
   searchScope: z.enum(LOCATION_SEARCH_SCOPE_VALUES).optional(),
   matchStrictness: z.enum(LOCATION_MATCH_STRICTNESS_VALUES).optional(),
+  // Optional per-run override for whether selected top-N jobs get
+  // auto-tailored (summary/PDF generation). Omitted falls back to the
+  // persisted `autoTailorOnPipelineRun` setting inside runPipeline().
+  enableAutoTailoring: z.boolean().optional(),
   // Per-#621: optional client-supplied per-run Watchlist source filter.
   // Omitted preserves the legacy "include every saved Watchlist source"
   // behavior; [] disables Watchlist entirely; non-empty restricts to a
@@ -625,6 +629,9 @@ pipelineRouter.post("/run", async (req: Request, res: Response) => {
           runBudget: config.runBudget,
           locationIntent,
           watchlistSelectedSourceIds: config.watchlistSelectedSourceIds,
+          ...(config.enableAutoTailoring !== undefined
+            ? { enableAutoTailoring: config.enableAutoTailoring }
+            : {}),
         },
         {
           hostedUsageReservationId: pipelineUsage.reservation?.id ?? null,

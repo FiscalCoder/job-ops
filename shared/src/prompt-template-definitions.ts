@@ -115,9 +115,6 @@ SCORING CRITERIA:
 - Industry/domain fit: 0-15 points
 - Career growth potential: 0-15 points
 
-CANDIDATE PROFILE:
-{{profileJson}}
-
 JOB LISTING:
 Title: {{jobTitle}}
 Employer: {{employer}}
@@ -128,9 +125,6 @@ Disciplines: {{disciplines}}
 
 JOB DESCRIPTION:
 {{jobDescription}}
-
-SCORING INSTRUCTIONS:
-{{scoringInstructionsText}}
 
 IMPORTANT: Respond with ONLY a valid JSON object. No markdown, no code fences, no explanation outside the JSON.
 
