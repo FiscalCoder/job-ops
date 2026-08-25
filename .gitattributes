@@ -1,0 +1,6 @@
+# Shell scripts are executed directly inside Linux containers (e.g. the
+# Docker ENTRYPOINT). A CRLF-terminated shebang line breaks `exec` with
+# "no such file or directory" on Linux, so force LF regardless of the
+# checking-out machine's core.autocrlf setting.
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf
