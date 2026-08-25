@@ -17,6 +17,11 @@ export const EXTRACTOR_SOURCE_IDS = [
   "fiveamsat",
   "wazzuf",
   "freehire",
+  "remotive",
+  "himalayas",
+  "remoteok",
+  "jobicy",
+  "arbeitnow",
   "manual",
 ] as const;
 
@@ -87,7 +92,12 @@ export const EXTRACTOR_SOURCE_METADATA: Record<
   fiveamsat: { label: "Khamsat", order: 109, category: "pipeline" },
   wazzuf: { label: "WUZZUF", order: 110, category: "pipeline" },
   freehire: { label: "FreeHire", order: 115, category: "pipeline" },
-  manual: { label: "Manual", order: 120, category: "manual" },
+  remotive: { label: "Remotive", order: 120, category: "pipeline" },
+  himalayas: { label: "Himalayas", order: 122, category: "pipeline" },
+  remoteok: { label: "RemoteOK", order: 124, category: "pipeline" },
+  jobicy: { label: "Jobicy", order: 126, category: "pipeline" },
+  arbeitnow: { label: "Arbeitnow", order: 128, category: "pipeline" },
+  manual: { label: "Manual", order: 130, category: "manual" },
 };
 
 export const PIPELINE_EXTRACTOR_SOURCE_IDS = EXTRACTOR_SOURCE_IDS.filter(

@@ -265,6 +265,11 @@ export const DEMO_SOURCE_BASE_URLS: Record<JobSource, string> = {
   fiveamsat: "https://khamsat.com",
   wazzuf: "https://wuzzuf.net",
   freehire: "https://freehire.me",
+  remotive: "https://remotive.com",
+  himalayas: "https://himalayas.app",
+  remoteok: "https://remoteok.com",
+  jobicy: "https://jobicy.com",
+  arbeitnow: "https://arbeitnow.com",
   manual: "https://example.com",
 };
 

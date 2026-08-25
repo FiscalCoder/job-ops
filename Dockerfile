@@ -95,6 +95,11 @@ COPY extractors/seek/package*.json ./extractors/seek/
 COPY extractors/fiveamsat/package*.json ./extractors/fiveamsat/
 COPY extractors/wazzuf/package*.json ./extractors/wazzuf/
 COPY extractors/freehire/package*.json ./extractors/freehire/
+COPY extractors/remotive/package*.json ./extractors/remotive/
+COPY extractors/himalayas/package*.json ./extractors/himalayas/
+COPY extractors/remoteok/package*.json ./extractors/remoteok/
+COPY extractors/jobicy/package*.json ./extractors/jobicy/
+COPY extractors/arbeitnow/package*.json ./extractors/arbeitnow/
 COPY extractors/browser-utils/package*.json ./extractors/browser-utils/
 
 # Install build-time Node dependencies on the native builder platform. The
@@ -126,6 +131,11 @@ COPY extractors/seek ./extractors/seek
 COPY extractors/fiveamsat ./extractors/fiveamsat
 COPY extractors/wazzuf ./extractors/wazzuf
 COPY extractors/freehire ./extractors/freehire
+COPY extractors/remotive ./extractors/remotive
+COPY extractors/himalayas ./extractors/himalayas
+COPY extractors/remoteok ./extractors/remoteok
+COPY extractors/jobicy ./extractors/jobicy
+COPY extractors/arbeitnow ./extractors/arbeitnow
 COPY extractors/browser-utils ./extractors/browser-utils
 
 # ============================================================================
@@ -174,6 +184,11 @@ COPY extractors/seek/package*.json ./extractors/seek/
 COPY extractors/fiveamsat/package*.json ./extractors/fiveamsat/
 COPY extractors/wazzuf/package*.json ./extractors/wazzuf/
 COPY extractors/freehire/package*.json ./extractors/freehire/
+COPY extractors/remotive/package*.json ./extractors/remotive/
+COPY extractors/himalayas/package*.json ./extractors/himalayas/
+COPY extractors/remoteok/package*.json ./extractors/remoteok/
+COPY extractors/jobicy/package*.json ./extractors/jobicy/
+COPY extractors/arbeitnow/package*.json ./extractors/arbeitnow/
 COPY extractors/browser-utils/package*.json ./extractors/browser-utils/
 
 # Install production Node dependencies only.
@@ -270,6 +285,11 @@ COPY extractors/seek ./extractors/seek
 COPY extractors/fiveamsat ./extractors/fiveamsat
 COPY extractors/wazzuf ./extractors/wazzuf
 COPY extractors/freehire ./extractors/freehire
+COPY extractors/remotive ./extractors/remotive
+COPY extractors/himalayas ./extractors/himalayas
+COPY extractors/remoteok ./extractors/remoteok
+COPY extractors/jobicy ./extractors/jobicy
+COPY extractors/arbeitnow ./extractors/arbeitnow
 COPY extractors/browser-utils ./extractors/browser-utils
 
 # Create runtime directories.
