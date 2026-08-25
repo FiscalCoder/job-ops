@@ -353,7 +353,6 @@ describe("scoreJobsStep auto-skip behavior", () => {
     const settingsRepo = await import("@server/repositories/settings");
     const jobsRepo = await import("@server/repositories/jobs");
     const scorer = await import("@server/services/scorer");
-    const jobBrief = await import("@server/services/job-brief");
 
     vi.mocked(jobsRepo.getUnscoredDiscoveredJobs).mockResolvedValue([
       createJob({
@@ -373,7 +372,6 @@ describe("scoreJobsStep auto-skip behavior", () => {
     const result = await scoreJobsStep({ profile: {} });
 
     expect(scorer.scoreJobSuitability).not.toHaveBeenCalled();
-    expect(jobBrief.generateJobBrief).not.toHaveBeenCalled();
     expect(jobsRepo.updateJob).toHaveBeenCalledWith(
       "job-junior",
       expect.objectContaining({
@@ -396,7 +394,6 @@ describe("scoreJobsStep auto-skip behavior", () => {
     const settingsRepo = await import("@server/repositories/settings");
     const jobsRepo = await import("@server/repositories/jobs");
     const scorer = await import("@server/services/scorer");
-    const jobBrief = await import("@server/services/job-brief");
 
     vi.mocked(jobsRepo.getUnscoredDiscoveredJobs).mockResolvedValue([
       createJob({
@@ -419,7 +416,6 @@ describe("scoreJobsStep auto-skip behavior", () => {
     const result = await scoreJobsStep({ profile: {} });
 
     expect(scorer.scoreJobSuitability).not.toHaveBeenCalled();
-    expect(jobBrief.generateJobBrief).not.toHaveBeenCalled();
     expect(jobsRepo.updateJob).toHaveBeenCalledWith(
       "job-no-sponsor",
       expect.objectContaining({

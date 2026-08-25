@@ -363,7 +363,7 @@ describe("salary penalty", () => {
       {},
     );
 
-    const match = getScoringPrompt().match(
+    const match = getUserPrompt().match(
       /JOB DATA \(JSON\):\n(?<job>[^\n]+)\n\n/,
     );
     const job = JSON.parse(match?.groups?.job ?? "{}");
@@ -380,7 +380,7 @@ describe("salary penalty", () => {
     expect(job).not.toHaveProperty("jobBrief");
     expect(job).not.toHaveProperty("tailoredSummary");
     expect(job).not.toHaveProperty("pdfPath");
-    expect(getScoringPrompt()).not.toContain("<strong>");
+    expect(getUserPrompt()).not.toContain("<strong>");
   });
 
   describe("profile prompt sanitization", () => {
@@ -891,13 +891,13 @@ describe("salary penalty", () => {
           }),
         }),
       );
-      expect(getScoringPrompt()).toContain('"jobBrief"');
-      expect(getScoringPrompt()).toContain('"jobPatches"');
-      expect(getScoringPrompt()).toContain(
+      expect(getUserPrompt()).toContain('"jobBrief"');
+      expect(getUserPrompt()).toContain('"jobPatches"');
+      expect(getUserPrompt()).toContain(
         "Do not guess, infer from general knowledge, estimate, annualise compensation",
       );
-      expect(getScoringPrompt()).toContain("JOB DATA (JSON):");
-      expect(getScoringPrompt()).toContain(
+      expect(getUserPrompt()).toContain("JOB DATA (JSON):");
+      expect(getUserPrompt()).toContain(
         '"jobDescription":"Job description content"',
       );
       expect(JSON.parse(result.jobBrief as string)).toEqual(
