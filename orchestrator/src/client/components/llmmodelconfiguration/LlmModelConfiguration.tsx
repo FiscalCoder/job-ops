@@ -2,6 +2,7 @@ import * as api from "@client/api";
 import { ClaudeCliSetupHint } from "@client/components/ClaudeCliSetupHint";
 import { CodexAuthPanel } from "@client/components/CodexAuthPanel";
 import { GeminiCliSetupHint } from "@client/components/GeminiCliSetupHint";
+import FallbackProviderCard from "@client/components/llmmodelconfiguration/FallbackProviderCard";
 import PurposeOverrideCard from "@client/components/llmmodelconfiguration/PurposeOverrideCard";
 import { SettingsInput } from "@client/pages/settings/components/SettingsInput";
 import {
@@ -60,6 +61,20 @@ type PurposeOverrideBinding = {
   onApiKeyChange: (purpose: LlmPurpose, value: string) => void;
 };
 
+export type FallbackProviderBinding = {
+  enabled: boolean;
+  provider: string;
+  baseUrl: string;
+  model: string;
+  apiKeyValue: string;
+  apiKeyHint: string | null;
+  onEnabledChange: (value: boolean) => void;
+  onProviderChange: (value: string) => void;
+  onBaseUrlChange: (value: string) => void;
+  onModelChange: (value: string) => void;
+  onApiKeyChange: (value: string) => void;
+};
+
 type LlmModelConfigurationProps = {
   mode: "compact" | "settings";
   disabled: boolean;
@@ -77,6 +92,7 @@ type LlmModelConfigurationProps = {
   modelTailoring?: TextFieldBinding;
   modelProjectSelection?: TextFieldBinding;
   purposeOverrides?: PurposeOverrideBinding;
+  fallback?: FallbackProviderBinding;
   validationSlot?: React.ReactNode;
   onCodexAuthStatusChange?: React.ComponentProps<
     typeof CodexAuthPanel
@@ -100,6 +116,7 @@ export function LlmModelConfiguration({
   modelTailoring,
   modelProjectSelection,
   purposeOverrides,
+  fallback,
   validationSlot,
   onCodexAuthStatusChange,
 }: LlmModelConfigurationProps) {
@@ -404,6 +421,26 @@ export function LlmModelConfiguration({
         current={previewDefaultModel}
         disabled={disabled || isLoadingModels}
       />
+
+      {fallback ? (
+        <>
+          <Separator />
+          <FallbackProviderCard
+            enabled={fallback.enabled}
+            provider={fallback.provider}
+            baseUrl={fallback.baseUrl}
+            model={fallback.model}
+            apiKeyValue={fallback.apiKeyValue}
+            apiKeyHint={fallback.apiKeyHint}
+            disabled={disabled}
+            onEnabledChange={fallback.onEnabledChange}
+            onProviderChange={fallback.onProviderChange}
+            onBaseUrlChange={fallback.onBaseUrlChange}
+            onModelChange={fallback.onModelChange}
+            onApiKeyChange={fallback.onApiKeyChange}
+          />
+        </>
+      ) : null}
 
       {mode === "settings" ? (
         <>

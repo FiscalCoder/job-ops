@@ -65,6 +65,7 @@ export interface LlmResult<T> {
 export interface LlmError {
   success: false;
   error: string;
+  status?: number;
 }
 
 export type LlmResponse<T> = LlmResult<T> | LlmError;

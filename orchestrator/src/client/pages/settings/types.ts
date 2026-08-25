@@ -17,6 +17,7 @@ export type ModelValues = EffectiveDefault<string> & {
   llmProvider: string;
   llmBaseUrl: string;
   llmApiKeyHint: string | null;
+  llmFallbackApiKeyHint: string | null;
   llmPurposeOverrides: LlmPurposeOverrides;
   llmPurposeApiKeyHints: LlmPurposeApiKeyHints;
 };

@@ -634,6 +634,7 @@ const getDerivedSettings = (settings: AppSettings | null) => {
       llmProvider: settings?.llmProvider?.value ?? "",
       llmBaseUrl: settings?.llmBaseUrl?.value ?? "",
       llmApiKeyHint: settings?.llmApiKeyHint ?? null,
+      llmFallbackApiKeyHint: settings?.llmFallbackApiKeyHint ?? null,
       llmPurposeOverrides: settings?.llmPurposeOverrides?.value ?? {},
       llmPurposeApiKeyHints: settings?.llmPurposeApiKeyHints ?? {},
     },

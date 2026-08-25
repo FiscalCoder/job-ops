@@ -243,6 +243,10 @@ export interface AppSettings {
   llmProvider: Resolved<string>;
   llmBaseUrl: Resolved<string>;
   llmPurposeOverrides: Resolved<LlmPurposeOverrides>;
+  llmFallbackEnabled: Resolved<boolean>;
+  llmFallbackProvider: Resolved<string>;
+  llmFallbackModel: Resolved<string>;
+  llmFallbackBaseUrl: Resolved<string>;
   pipelineWebhookUrl: Resolved<string>;
   jobCompleteWebhookUrl: Resolved<string>;
   resumeProjects: Resolved<ResumeProjectsSettings>;
@@ -310,6 +314,7 @@ export interface AppSettings {
 
   // Secret hints:
   llmApiKeyHint: string | null;
+  llmFallbackApiKeyHint: string | null;
   llmPurposeApiKeyHints: LlmPurposeApiKeyHints;
   rxresumeApiKeyHint: string | null;
   ukvisajobsPasswordHint: string | null;

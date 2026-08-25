@@ -11,6 +11,7 @@ import {
   PATCHABLE_JOB_FIELDS,
   validateAndApplyJobPatches,
 } from "./job-fact-patches";
+import { callJsonWithFallback } from "./llm/fallback";
 import type { JsonSchemaDefinition } from "./llm/types";
 import { stripMarkdownCodeFences } from "./llm/utils/json";
 import { createConfiguredLlmService, resolveLlmModel } from "./modelSelection";
@@ -302,13 +303,13 @@ export async function scoreJobSuitability(
   const userContent = `${renderPromptTemplate(preferences.promptTemplate, tokens)}\n\nJOB DATA (JSON):\n${buildJobDataJson(job)}\n\n${SCORING_OUTPUT_INSTRUCTIONS}`;
 
   const llm = await createConfiguredLlmService("scoring");
-  const result = await llm.callJson<{
+  const result = await callJsonWithFallback<{
     score: number;
     reason: string;
     jobBrief?: JobBrief;
     jobPatches?: JobFactPatch[];
     jobWarnings?: string[];
-  }>({
+  }>(llm, {
     model,
     messages: [
       { role: "system", content: systemContent },

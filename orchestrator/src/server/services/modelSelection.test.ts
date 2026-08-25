@@ -1,7 +1,11 @@
 // src/server/services/modelSelection.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as settingsRepo from "../repositories/settings";
-import { resolveLlmModel, resolveLlmRuntimeSettings } from "./modelSelection";
+import {
+  resolveLlmFallbackRuntimeSettings,
+  resolveLlmModel,
+  resolveLlmRuntimeSettings,
+} from "./modelSelection";
 import { pickProjectIdsForJob } from "./projectSelection";
 import { scoreJobSuitability } from "./scorer";
 import { getEffectiveSettings } from "./settings";
@@ -596,6 +600,108 @@ describe("Model Selection Logic", () => {
       const fetchCall = vi.mocked(fetch).mock.calls[0];
       const body = JSON.parse(fetchCall[1]?.body as string);
       expect(body.model).toBe("global-model");
+    });
+  });
+
+  describe("resolveLlmFallbackRuntimeSettings", () => {
+    const baseSettings = {
+      llmFallbackEnabled: { value: true, default: false, override: true },
+      llmFallbackProvider: { value: "", default: "", override: null },
+      llmFallbackModel: { value: "", default: "", override: null },
+      llmFallbackBaseUrl: { value: "", default: "", override: null },
+    };
+
+    it("returns null when fallback is disabled", async () => {
+      vi.mocked(getEffectiveSettings).mockResolvedValue({
+        ...baseSettings,
+        llmFallbackEnabled: { value: false, default: false, override: null },
+        llmFallbackProvider: {
+          value: "anthropic",
+          default: "",
+          override: "anthropic",
+        },
+      } as any);
+
+      const result = await resolveLlmFallbackRuntimeSettings();
+
+      expect(result).toBeNull();
+    });
+
+    it("returns null when enabled but no provider selected", async () => {
+      vi.mocked(getEffectiveSettings).mockResolvedValue(baseSettings as any);
+
+      const result = await resolveLlmFallbackRuntimeSettings();
+
+      expect(result).toBeNull();
+    });
+
+    it("resolves an explicitly configured provider, model, base URL, and stored API key", async () => {
+      vi.mocked(getEffectiveSettings).mockResolvedValue({
+        ...baseSettings,
+        llmFallbackProvider: {
+          value: "openai_compatible",
+          default: "",
+          override: "openai_compatible",
+        },
+        llmFallbackModel: {
+          value: "deepseek-chat",
+          default: "",
+          override: "deepseek-chat",
+        },
+        llmFallbackBaseUrl: {
+          value: "https://api.deepseek.com",
+          default: "",
+          override: "https://api.deepseek.com",
+        },
+      } as any);
+      vi.mocked(settingsRepo.getAllSettings).mockResolvedValue({
+        llmFallbackApiKey: "stored-deepseek-key",
+      } as any);
+
+      const result = await resolveLlmFallbackRuntimeSettings();
+
+      expect(result).toEqual({
+        provider: "openai_compatible",
+        model: "deepseek-chat",
+        baseUrl: "https://api.deepseek.com",
+        apiKey: "stored-deepseek-key",
+      });
+    });
+
+    it("falls back to a computed default model when none is set", async () => {
+      vi.mocked(getEffectiveSettings).mockResolvedValue({
+        ...baseSettings,
+        llmFallbackProvider: {
+          value: "anthropic",
+          default: "",
+          override: "anthropic",
+        },
+      } as any);
+      vi.mocked(settingsRepo.getAllSettings).mockResolvedValue({
+        llmFallbackApiKey: "stored-key",
+      } as any);
+
+      const result = await resolveLlmFallbackRuntimeSettings();
+
+      expect(result?.model).toBe("claude-sonnet-4-6");
+      expect(result?.baseUrl).toBe("https://api.anthropic.com");
+    });
+
+    it("falls back to LLM_FALLBACK_API_KEY env var when no stored key is set", async () => {
+      process.env.LLM_FALLBACK_API_KEY = "env-fallback-key";
+      vi.mocked(getEffectiveSettings).mockResolvedValue({
+        ...baseSettings,
+        llmFallbackProvider: {
+          value: "anthropic",
+          default: "",
+          override: "anthropic",
+        },
+      } as any);
+      vi.mocked(settingsRepo.getAllSettings).mockResolvedValue({} as any);
+
+      const result = await resolveLlmFallbackRuntimeSettings();
+
+      expect(result?.apiKey).toBe("env-fallback-key");
     });
   });
 });

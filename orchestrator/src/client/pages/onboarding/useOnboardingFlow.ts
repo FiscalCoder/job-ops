@@ -46,6 +46,11 @@ export function useOnboardingFlow() {
       llmBaseUrl: "",
       llmApiKey: "",
       model: "",
+      llmFallbackEnabled: false,
+      llmFallbackProvider: "",
+      llmFallbackBaseUrl: "",
+      llmFallbackModel: "",
+      llmFallbackApiKey: "",
       pdfRenderer: "typst",
       rxresumeUrl: "",
       rxresumeApiKey: "",
@@ -82,6 +87,11 @@ export function useOnboardingFlow() {
       llmBaseUrl: settings.llmBaseUrl?.value || "",
       llmApiKey: "",
       model: settings.model?.override ?? "",
+      llmFallbackEnabled: settings.llmFallbackEnabled?.value ?? false,
+      llmFallbackProvider: settings.llmFallbackProvider?.value || "",
+      llmFallbackBaseUrl: settings.llmFallbackBaseUrl?.value || "",
+      llmFallbackModel: settings.llmFallbackModel?.value || "",
+      llmFallbackApiKey: "",
       pdfRenderer: selectedId ? "rxresume" : "typst",
       rxresumeUrl: settings.rxresumeUrl ?? "",
       rxresumeApiKey: "",
@@ -117,6 +127,27 @@ export function useOnboardingFlow() {
         apiKey: values.llmApiKey.trim() || null,
         model: values.model.trim() || null,
       });
+
+      // Fallback is optional and unvalidated (unlike the primary provider
+      // above) — save it best-effort so a bad fallback config never blocks
+      // onboarding from completing.
+      try {
+        const nextSettings = await api.updateSettings({
+          llmFallbackEnabled: values.llmFallbackEnabled,
+          llmFallbackProvider:
+            values.llmFallbackEnabled && values.llmFallbackProvider.trim()
+              ? normalizeLlmProvider(values.llmFallbackProvider)
+              : null,
+          llmFallbackBaseUrl: values.llmFallbackBaseUrl.trim() || null,
+          llmFallbackModel: values.llmFallbackModel.trim() || null,
+          llmFallbackApiKey: values.llmFallbackApiKey.trim() || undefined,
+        });
+        syncSettingsCache(nextSettings);
+        setValue("llmFallbackApiKey", "");
+      } catch (fallbackError) {
+        showErrorToast(fallbackError, "Failed to save fallback provider");
+      }
+
       await refreshOnboardingState(status);
       trackProductEvent("onboarding_model_verify_completed", {
         result: "success",
@@ -136,7 +167,13 @@ export function useOnboardingFlow() {
     } finally {
       setIsSaving(false);
     }
-  }, [getValues, refreshOnboardingState, selectedProvider]);
+  }, [
+    getValues,
+    refreshOnboardingState,
+    selectedProvider,
+    setValue,
+    syncSettingsCache,
+  ]);
 
   const handleSaveRxresume = useCallback(async () => {
     const values = getValues();
@@ -334,6 +371,7 @@ export function useOnboardingFlow() {
     importingResumeFileName,
     isRxResumeSelfHosted,
     llmKeyHint: settings?.llmApiKeyHint ?? null,
+    llmFallbackKeyHint: settings?.llmFallbackApiKeyHint ?? null,
     resumeSetupMode,
     rxresumeApiKeyHint: settings?.rxresumeApiKeyHint,
     selectedProvider,

@@ -506,7 +506,7 @@ export class LlmService {
           continue;
         }
 
-        return { success: false, error: message };
+        return { success: false, error: message, status };
       }
     }
 

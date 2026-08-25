@@ -10,6 +10,11 @@ export type OnboardingFormData = {
   llmBaseUrl: string;
   llmApiKey: string;
   model: string;
+  llmFallbackEnabled: boolean;
+  llmFallbackProvider: string;
+  llmFallbackBaseUrl: string;
+  llmFallbackModel: string;
+  llmFallbackApiKey: string;
   pdfRenderer: PdfRenderer;
   rxresumeUrl: string;
   rxresumeApiKey: string;

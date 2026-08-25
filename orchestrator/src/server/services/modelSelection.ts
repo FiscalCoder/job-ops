@@ -176,3 +176,52 @@ export async function createConfiguredLlmService(
     apiKey: runtime.apiKey,
   });
 }
+
+/**
+ * Resolve the configured fallback provider's runtime settings, or null when
+ * fallback is disabled or has no provider selected. Deliberately does not
+ * reuse resolveLlmApiKey's LLM_API_KEY fallback — a fallback provider needs
+ * its own credential, never the primary provider's.
+ */
+export async function resolveLlmFallbackRuntimeSettings(): Promise<{
+  model: string;
+  provider: string;
+  baseUrl: string | null;
+  apiKey: string | null;
+} | null> {
+  const [settings, overrides] = await Promise.all([
+    getEffectiveSettings(),
+    "getAllSettings" in settingsRepo
+      ? settingsRepo.getAllSettings()
+      : Promise.resolve({} as Partial<Record<settingsRepo.SettingKey, string>>),
+  ]);
+
+  if (!settings.llmFallbackEnabled.value) return null;
+
+  const provider = readStringSettingValue(settings.llmFallbackProvider);
+  if (!provider) return null;
+
+  const configuredBaseUrl = providerUsesConfiguredBaseUrl(provider)
+    ? readStringSettingValue(settings.llmFallbackBaseUrl)
+    : null;
+  const baseUrl = configuredBaseUrl || getDefaultBaseUrlForProvider(provider);
+  const model =
+    readStringSettingValue(settings.llmFallbackModel) ??
+    getDefaultModelForProvider(provider);
+  const storedApiKey = overrides?.llmFallbackApiKey?.trim() || null;
+  const apiKey =
+    storedApiKey || getOriginalEnvValue("LLM_FALLBACK_API_KEY")?.trim() || null;
+
+  return { model, provider, baseUrl, apiKey };
+}
+
+export async function createConfiguredFallbackLlmService(): Promise<LlmService | null> {
+  const runtime = await resolveLlmFallbackRuntimeSettings();
+  if (!runtime) return null;
+
+  return new LlmService({
+    provider: runtime.provider,
+    baseUrl: runtime.baseUrl,
+    apiKey: runtime.apiKey,
+  });
+}

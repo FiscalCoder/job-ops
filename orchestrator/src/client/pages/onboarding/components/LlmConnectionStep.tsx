@@ -1,5 +1,8 @@
 import type * as api from "@client/api";
-import { LlmModelConfiguration } from "@client/components/llmmodelconfiguration/LlmModelConfiguration";
+import {
+  type FallbackProviderBinding,
+  LlmModelConfiguration,
+} from "@client/components/llmmodelconfiguration/LlmModelConfiguration";
 import {
   getLlmProviderConfig,
   type LlmProviderId,
@@ -20,6 +23,7 @@ export const LlmConnectionStep: React.FC<{
   savedProvider: string | null | undefined;
   selectedProvider: LlmProviderId;
   validation: ValidationState;
+  fallback?: FallbackProviderBinding;
   onApiKeyChange: (value: string) => void;
   onBaseUrlChange: (value: string) => void;
   onCodexAuthStatusChange?: (
@@ -39,6 +43,7 @@ export const LlmConnectionStep: React.FC<{
   savedProvider,
   selectedProvider,
   validation,
+  fallback,
   onApiKeyChange,
   onBaseUrlChange,
   onCodexAuthStatusChange,
@@ -79,6 +84,7 @@ export const LlmConnectionStep: React.FC<{
           value: model,
           onChange: onModelChange,
         }}
+        fallback={fallback}
         validationSlot={
           <InlineValidation
             state={displayValidation}
@@ -87,6 +93,12 @@ export const LlmConnectionStep: React.FC<{
         }
         onCodexAuthStatusChange={onCodexAuthStatusChange}
       />
+      <p className="mt-6 text-xs text-muted-foreground">
+        By default, Job Ops auto-tailors and generates a PDF for the top-scoring
+        jobs on every pipeline run. To review jobs yourself and only tailor the
+        ones you pick, turn off "Auto-tailor top jobs during pipeline runs"
+        later in Settings → Display Settings.
+      </p>
     </div>
   );
 };

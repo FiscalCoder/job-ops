@@ -377,6 +377,46 @@ export const settingsRegistry = {
       return normalized ? JSON.stringify(normalized) : null;
     },
   },
+  llmFallbackEnabled: {
+    kind: "typed" as const,
+    schema: z.boolean(),
+    default: (): boolean => false,
+    parse: parseBitBoolOrNull,
+    serialize: serializeBitBool,
+  },
+  llmFallbackProvider: {
+    kind: "typed" as const,
+    schema: z.preprocess(
+      (v) => (typeof v === "string" ? normalizeLlmProviderOrNull(v) : v),
+      z.enum(LLM_PROVIDER_VALUES).nullable(),
+    ),
+    default: (): string => "",
+    parse: normalizeLlmProviderOrNull,
+    serialize: (value: string | null | undefined): string | null =>
+      value ?? null,
+  },
+  llmFallbackModel: {
+    kind: "typed" as const,
+    schema: z.preprocess(
+      (v) => (v === "" ? null : v),
+      z.string().trim().max(300).nullable(),
+    ),
+    default: (): string => "",
+    parse: parseNonEmptyStringOrNull,
+    serialize: (value: string | null | undefined): string | null =>
+      value ?? null,
+  },
+  llmFallbackBaseUrl: {
+    kind: "typed" as const,
+    schema: z.preprocess(
+      (v) => (v === "" ? null : v),
+      z.string().trim().url().max(2000).nullable(),
+    ),
+    default: (): string => "",
+    parse: parseNonEmptyStringOrNull,
+    serialize: (value: string | null | undefined): string | null =>
+      value ?? null,
+  },
   pipelineWebhookUrl: {
     kind: "typed" as const,
     schema: z.string().trim().max(2000),
@@ -948,6 +988,11 @@ export const settingsRegistry = {
       const normalized = normalizeLlmPurposeApiKeys(value);
       return normalized ? JSON.stringify(normalized) : null;
     },
+  },
+  llmFallbackApiKey: {
+    kind: "secret" as const,
+    envKey: "LLM_FALLBACK_API_KEY",
+    schema: z.string().trim().max(2000),
   },
   rxresumeApiKey: {
     kind: "secret" as const,

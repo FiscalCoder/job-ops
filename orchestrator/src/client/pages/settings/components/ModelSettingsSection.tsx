@@ -84,6 +84,19 @@ export const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
     });
   };
 
+  const setFallbackField = (
+    field: keyof Pick<
+      UpdateSettingsInput,
+      | "llmFallbackProvider"
+      | "llmFallbackBaseUrl"
+      | "llmFallbackModel"
+      | "llmFallbackApiKey"
+    >,
+    value: string,
+  ) => {
+    setValue(field, value, { shouldDirty: true, shouldValidate: true });
+  };
+
   return (
     <SettingsSectionFrame mode={layoutMode} title="Model" value="model">
       <LlmModelConfiguration
@@ -145,6 +158,26 @@ export const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
           },
           onChange: setPurposeOverride,
           onApiKeyChange: setPurposeApiKey,
+        }}
+        fallback={{
+          enabled: watch("llmFallbackEnabled") ?? false,
+          provider: watch("llmFallbackProvider") ?? "",
+          baseUrl: watch("llmFallbackBaseUrl") ?? "",
+          model: watch("llmFallbackModel") ?? "",
+          apiKeyValue: watch("llmFallbackApiKey") ?? "",
+          apiKeyHint: values.llmFallbackApiKeyHint,
+          onEnabledChange: (value) =>
+            setValue("llmFallbackEnabled", value, {
+              shouldDirty: true,
+              shouldValidate: true,
+            }),
+          onProviderChange: (value) =>
+            setFallbackField("llmFallbackProvider", value),
+          onBaseUrlChange: (value) =>
+            setFallbackField("llmFallbackBaseUrl", value),
+          onModelChange: (value) => setFallbackField("llmFallbackModel", value),
+          onApiKeyChange: (value) =>
+            setFallbackField("llmFallbackApiKey", value),
         }}
       />
     </SettingsSectionFrame>

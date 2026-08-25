@@ -585,6 +585,24 @@ function LaunchSetup({
                     savedProvider={flow.settings?.llmProvider.value}
                     selectedProvider={flow.selectedProvider}
                     validation={toValidationState(modelRequirement)}
+                    fallback={{
+                      enabled: flow.watch("llmFallbackEnabled"),
+                      provider: flow.watch("llmFallbackProvider"),
+                      baseUrl: flow.watch("llmFallbackBaseUrl"),
+                      model: flow.watch("llmFallbackModel"),
+                      apiKeyValue: flow.watch("llmFallbackApiKey"),
+                      apiKeyHint: flow.llmFallbackKeyHint,
+                      onEnabledChange: (value) =>
+                        flow.setValue("llmFallbackEnabled", value),
+                      onProviderChange: (value) =>
+                        flow.setValue("llmFallbackProvider", value),
+                      onBaseUrlChange: (value) =>
+                        flow.setValue("llmFallbackBaseUrl", value),
+                      onModelChange: (value) =>
+                        flow.setValue("llmFallbackModel", value),
+                      onApiKeyChange: (value) =>
+                        flow.setValue("llmFallbackApiKey", value),
+                    }}
                     onCodexAuthStatusChange={(codexStatus) => {
                       if (codexStatus.authenticated) return;
                       setSelectedStep("model");
