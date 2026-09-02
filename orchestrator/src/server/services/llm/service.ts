@@ -12,6 +12,7 @@ import {
   rememberSuccessfulMode,
 } from "./policies/mode-selection";
 import {
+  EMPTY_RESPONSE_ERROR,
   getRetryDelayMs,
   parseRetryAfterMs,
   shouldRetryAttempt,
@@ -245,7 +246,8 @@ export class LlmService {
       this.provider !== "glm" &&
       this.provider !== "gemini" &&
       this.provider !== "ollama" &&
-      this.provider !== "requesty"
+      this.provider !== "requesty" &&
+      this.provider !== "orcarouter"
     ) {
       return [];
     }
@@ -264,6 +266,9 @@ export class LlmService {
         return this.listGlmModels();
       }
       if (this.provider === "requesty") {
+        return this.listRequestyModels();
+      }
+      if (this.provider === "orcarouter") {
         return this.listRequestyModels();
       }
       return this.listOllamaModels();
@@ -474,7 +479,7 @@ export class LlmService {
         const content = this.strategy.extractText(data);
 
         if (!content) {
-          throw new Error("No content in response");
+          throw new Error(EMPTY_RESPONSE_ERROR);
         }
 
         const parsed = parseJsonContent<T>(content, jobId);
@@ -695,6 +700,7 @@ function normalizeProvider(
   if (normalized === "ollama") return "ollama";
   if (normalized === "codex") return "codex";
   if (normalized === "requesty") return "requesty";
+  if (normalized === "orcarouter") return "orcarouter";
   if (normalized && normalized !== "openrouter") {
     logger.warn("Unknown LLM provider, defaulting to openrouter", {
       normalized,

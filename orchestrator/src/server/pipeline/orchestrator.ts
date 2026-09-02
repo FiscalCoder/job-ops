@@ -467,14 +467,13 @@ export async function runPipeline(
         jobsDiscovered,
       });
 
-      let unprocessedJobs: import("@shared/types").Job[] = [];
       let scoredJobs: import("./steps/types").ScoredJob[] = [];
 
       ensureNotCancelled(scopeKey);
       await persistResultSummary({ stage: "scoring" });
       while (true) {
         try {
-          ({ unprocessedJobs, scoredJobs } = await scoreJobsStep({
+          ({ scoredJobs } = await scoreJobsStep({
             profile,
             scoringInstructions: mergedConfig.scoringInstructions,
             visaSponsorCountryKey: mergedConfig.locationIntent?.selectedCountry,
@@ -567,7 +566,7 @@ export async function runPipeline(
       await notifyPipelineWebhookStep("pipeline.completed", {
         pipelineRunId: pipelineRun.id,
         jobsDiscovered,
-        jobsScored: unprocessedJobs.length,
+        jobsScored: scoredJobs.length,
         jobsProcessed: processedCount,
       });
 
