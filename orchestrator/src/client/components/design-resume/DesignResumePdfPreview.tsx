@@ -9,6 +9,7 @@ import {
   GlobalWorkerOptions,
   getDocument,
   type PDFDocumentProxy,
+  type PDFPageProxy,
 } from "pdfjs-dist";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trackProductEvent } from "@/lib/analytics";
@@ -243,6 +244,7 @@ export function DesignResumePdfPreview({
     if (!pdfDocument || renderWidth <= 0 || pageCount <= 0) return;
 
     let cancelled = false;
+    let activeRenderTask: ReturnType<PDFPageProxy["render"]> | null = null;
     setIsRenderingPages(true);
 
     void (async () => {
@@ -274,7 +276,9 @@ export function DesignResumePdfPreview({
           canvasContext: context,
           viewport,
         });
+        activeRenderTask = renderTask;
         await renderTask.promise;
+        activeRenderTask = null;
       }
 
       if (cancelled) return;
@@ -296,6 +300,7 @@ export function DesignResumePdfPreview({
 
     return () => {
       cancelled = true;
+      activeRenderTask?.cancel();
     };
   }, [pageCount, pdfDocument, renderWidth]);
 
