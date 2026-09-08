@@ -150,7 +150,7 @@ export const DesignResumePage: React.FC = () => {
   ) : null;
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden">
+    <div className="flex min-h-dvh flex-col">
       <input
         ref={fileInputRef}
         type="file"
@@ -352,7 +352,7 @@ export const DesignResumePage: React.FC = () => {
             <div
               className={
                 activeSection
-                  ? "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden sm:grid sm:grid-rows-[minmax(0,1fr)_minmax(0,1fr)] sm:gap-6 xl:grid-cols-[minmax(442px,0.78fr)_minmax(0,1.22fr)] xl:grid-rows-none"
+                  ? "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden sm:min-h-0 sm:flex-1 sm:gap-6 sm:overflow-visible"
                   : "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden sm:grid sm:grid-cols-[76px_minmax(0,1fr)]"
               }
             >

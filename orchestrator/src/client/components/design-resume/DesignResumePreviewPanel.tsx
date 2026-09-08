@@ -43,9 +43,7 @@ export function DesignResumePreviewPanel({
   className,
 }: DesignResumePreviewPanelProps) {
   return (
-    <section
-      className={cn("flex min-h-0 min-w-0 flex-col overflow-hidden", className)}
-    >
+    <section className={cn("flex min-w-0 flex-col", className)}>
       <div className="flex flex-wrap items-start justify-end gap-4 py-4">
         <Select
           value={pdfRenderer}
@@ -86,7 +84,7 @@ export function DesignResumePreviewPanel({
         ) : null}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="min-w-0">
         <DesignResumePdfPreview
           draft={draft}
           pdfRenderer={pdfRenderer}

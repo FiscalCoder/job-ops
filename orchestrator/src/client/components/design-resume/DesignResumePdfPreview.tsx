@@ -310,12 +310,41 @@ export function DesignResumePdfPreview({
     isRenderingPages;
 
   return (
-    <div className="relative flex h-full min-h-0 items-center justify-center overflow-hidden bg-card">
-      <div className="relative h-full min-h-0 w-full overflow-hidden border border-border/70 shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
+    <div className="relative flex w-full flex-col items-center bg-card">
+      <div className="fixed right-6 top-24 z-30 flex items-center gap-2 rounded-full border border-border/70 bg-card/90 px-2 py-2 shadow-lg backdrop-blur">
+        <button
+          type="button"
+          aria-label="Zoom out PDF preview"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={handleZoomOut}
+          disabled={zoomLevel <= PDF_ZOOM_MIN || showLoader}
+        >
+          <Minus className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          className="rounded-full px-3 py-1 text-xs font-medium text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={handleZoomReset}
+          disabled={zoomLevel === 1 || showLoader}
+        >
+          {zoomPercentLabel}
+        </button>
+        <button
+          type="button"
+          aria-label="Zoom in PDF preview"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={handleZoomIn}
+          disabled={zoomLevel >= PDF_ZOOM_MAX || showLoader}
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="relative min-h-[600px] w-full overflow-hidden border border-border/70 shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
         <div
           ref={viewerRef}
           data-testid="design-resume-pdf-scroll-container"
-          className="h-full overflow-auto bg-[#d9d9d9] px-6 py-8"
+          className="bg-[#d9d9d9] px-6 py-8"
         >
           <div className="mx-auto flex min-w-fit flex-col items-center gap-6">
             {Array.from({ length: pageCount }, (_, index) => index + 1).map(
@@ -339,35 +368,6 @@ export function DesignResumePdfPreview({
               ),
             )}
           </div>
-        </div>
-
-        <div className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-full border border-border/70 bg-card/90 px-2 py-2 shadow-lg backdrop-blur">
-          <button
-            type="button"
-            aria-label="Zoom out PDF preview"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={handleZoomOut}
-            disabled={zoomLevel <= PDF_ZOOM_MIN || showLoader}
-          >
-            <Minus className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className="rounded-full px-3 py-1 text-xs font-medium text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={handleZoomReset}
-            disabled={zoomLevel === 1 || showLoader}
-          >
-            {zoomPercentLabel}
-          </button>
-          <button
-            type="button"
-            aria-label="Zoom in PDF preview"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={handleZoomIn}
-            disabled={zoomLevel >= PDF_ZOOM_MAX || showLoader}
-          >
-            <Plus className="h-4 w-4" />
-          </button>
         </div>
 
         {showLoader ? (

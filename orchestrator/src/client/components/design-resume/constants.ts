@@ -43,7 +43,7 @@ export type DesignResumeNavGroup = {
 export type DesignResumeMobileView = "edit" | "preview";
 
 export const DESIGN_RESUME_PAGE_MAIN_CLASS_NAME =
-  "flex min-h-0 flex-1 flex-col space-y-0 overflow-hidden py-3 pb-3";
+  "flex flex-1 flex-col space-y-0 py-3 pb-3";
 
 export const SECTION_ICON_BY_ID: Record<string, LucideIcon> = {
   profiles: Link2,
