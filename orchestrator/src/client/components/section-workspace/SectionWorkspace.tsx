@@ -172,6 +172,7 @@ type SectionWorkspacePanelProps = {
   children: React.ReactNode;
   footer?: React.ReactNode;
   scrollable?: boolean;
+  className?: string;
 };
 
 export function SectionWorkspacePanel({
@@ -184,6 +185,7 @@ export function SectionWorkspacePanel({
   children,
   footer,
   scrollable = false,
+  className,
 }: SectionWorkspacePanelProps) {
   const header = (
     <header
@@ -231,7 +233,12 @@ export function SectionWorkspacePanel({
 
   if (!scrollable) {
     return (
-      <section className="h-fit space-y-4 rounded-2xl border border-border/70 bg-card p-6">
+      <section
+        className={cn(
+          "h-fit space-y-4 rounded-2xl border border-border/70 bg-card p-6",
+          className,
+        )}
+      >
         {header}
 
         {children}

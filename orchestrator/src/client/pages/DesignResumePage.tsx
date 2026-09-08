@@ -368,7 +368,7 @@ export const DesignResumePage: React.FC = () => {
                 >
                   <DesignResumeDock
                     activeSectionId={activeSection}
-                    className="hidden h-full self-start sm:flex"
+                    className="hidden self-start sm:sticky sm:top-24 sm:flex sm:h-[calc(100dvh-7rem)]"
                     draft={draft}
                     onUpdateResumeJson={updateResumeJson}
                     onSectionSelect={(sectionId) =>
@@ -403,7 +403,7 @@ export const DesignResumePage: React.FC = () => {
                         Sections
                       </Button>
                     }
-                    scrollable
+                    className="sm:min-h-[calc(100dvh-7rem)]"
                   >
                     {rail}
                   </SectionWorkspacePanel>
@@ -441,7 +441,7 @@ export const DesignResumePage: React.FC = () => {
                   </div>
                   <DesignResumeDock
                     activeSectionId={null}
-                    className="hidden h-full self-start sm:flex"
+                    className="hidden self-start sm:sticky sm:top-24 sm:flex sm:h-[calc(100dvh-7rem)]"
                     draft={draft}
                     onUpdateResumeJson={updateResumeJson}
                     onSectionSelect={(sectionId) =>
