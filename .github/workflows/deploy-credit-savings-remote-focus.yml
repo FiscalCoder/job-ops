@@ -1,0 +1,49 @@
+name: Deploy credit-savings-remote-focus to VPS
+
+on:
+  push:
+    branches: [feature/credit-savings-remote-focus]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-credit-savings-remote-focus
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and restart on VPS
+    runs-on: [self-hosted, jobops-vps]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Verify .env exists
+        run: |
+          if [ ! -f .env ]; then
+            echo "::error::.env not found in $(pwd). Create it once by hand from .env.example before the first deploy."
+            exit 1
+          fi
+
+      - name: Build image
+        run: docker compose build
+
+      - name: Restart stack
+        run: docker compose up -d --remove-orphans
+
+      - name: Wait for health check
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3005/health >/dev/null; then
+              echo "Healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Health check did not pass in time"
+          docker compose logs --tail=100 job-ops
+          exit 1
+
+      - name: Prune old images
+        run: docker image prune -f
