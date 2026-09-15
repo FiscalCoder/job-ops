@@ -172,7 +172,7 @@ export function useKeyboardShortcuts(args: UseKeyboardShortcutsArgs): void {
 
       [SHORTCUTS.markApplied.key]: () => {
         if (!selectedJob) return;
-        if (activeTab !== "ready") return;
+        if (!["ready", "discovered"].includes(activeTab)) return;
         if (shortcutActionInFlight.current) return;
         shortcutActionInFlight.current = true;
         const jobId = selectedJob.id;

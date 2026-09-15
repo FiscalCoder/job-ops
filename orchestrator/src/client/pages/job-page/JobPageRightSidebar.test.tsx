@@ -100,6 +100,21 @@ describe("JobPageRightSidebar actions", () => {
     ).toBeInTheDocument();
   });
 
+  it("offers Mark Applied for discovered jobs without tailoring or a PDF", () => {
+    renderRightSidebar({
+      status: "discovered",
+      pdfPath: null,
+      pdfFreshness: "missing",
+    });
+
+    expect(
+      screen.getByRole("button", { name: /mark applied/i }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: /start tailoring/i }),
+    ).toBeInTheDocument();
+  });
+
   it("uses upload wording when the job has no resume PDF", () => {
     renderRightSidebar({ pdfPath: null, pdfFreshness: "missing" });
 

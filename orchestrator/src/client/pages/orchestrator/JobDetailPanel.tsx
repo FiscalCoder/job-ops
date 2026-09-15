@@ -207,6 +207,11 @@ const statusTone: Record<
   },
 };
 
+// Applying without tailoring is a supported path: the server's /apply route
+// has no status gate, so discovered jobs can be marked applied directly.
+const canMarkApplied = (status: Job["status"]): boolean =>
+  status === "ready" || status === "discovered";
+
 const getPrimaryAction = (job: Job): string => {
   if (job.status === "processing") return "Processing";
   if (job.status === "ready") return "Mark Applied";
@@ -435,7 +440,7 @@ export const JobDetailPanel: React.FC<JobDetailPanelProps> = ({
   }, [handleJobMoved, onJobUpdated, selectedJob]);
 
   const handleMarkApplied = useCallback(async () => {
-    if (!selectedJob || selectedJob.status !== "ready") return;
+    if (!selectedJob || !canMarkApplied(selectedJob.status)) return;
     try {
       setIsApplying(true);
       await markAsAppliedMutation.mutateAsync(selectedJob.id);
@@ -957,7 +962,7 @@ export const JobDetailPanel: React.FC<JobDetailPanelProps> = ({
                 className={cn(markAppliedIsPrimary && activeApplyCtaClassName)}
                 size="sm"
                 onClick={() => void handleMarkApplied()}
-                disabled={selectedJob.status !== "ready" || primaryBusy}
+                disabled={!canMarkApplied(selectedJob.status) || primaryBusy}
               >
                 {isApplying ? (
                   <Loader2 className="size-3.5 animate-spin" />

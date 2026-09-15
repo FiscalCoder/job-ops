@@ -123,7 +123,7 @@ export const JobPageRightSidebar: React.FC<JobPageRightSidebarProps> = ({
           </Button>
         )}
 
-        {isReady && (
+        {(isReady || isDiscovered) && (
           <Button
             size="sm"
             className="w-full justify-start"
