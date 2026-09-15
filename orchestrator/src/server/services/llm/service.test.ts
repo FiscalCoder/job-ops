@@ -259,6 +259,49 @@ describe("LlmService provider normalization", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 
+  it("restates the schema in the prompt when falling back from json_schema to json_object", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      // json_schema mode: provider (e.g. DeepSeek) rejects response_format json_schema
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: { message: "response_format type is unavailable" },
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      // json_object mode: succeeds
+      .mockResolvedValueOnce(completionResponse('{"value":"ok"}'));
+
+    const llm = new LlmService({
+      provider: "openai_compatible",
+      baseUrl: "https://schema-fallback.example.com",
+      apiKey: "sk-test",
+    });
+    const result = await llm.callJson<{ value: string }>({
+      model: "deepseek-chat",
+      messages: [{ role: "user", content: "Write a cover letter." }],
+      jsonSchema: TEST_SCHEMA,
+      retryDelayMs: 1,
+    });
+
+    expect(result).toEqual({ success: true, data: { value: "ok" } });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    const firstBody = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
+    expect(firstBody.response_format?.type).toBe("json_schema");
+    expect(firstBody.messages).toHaveLength(1);
+
+    const secondBody = JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body));
+    expect(secondBody.response_format?.type).toBe("json_object");
+    expect(secondBody.messages).toHaveLength(2);
+    const instruction = secondBody.messages.at(-1);
+    expect(instruction.role).toBe("system");
+    expect(instruction.content).toContain("JSON Schema");
+    expect(instruction.content).toContain('"required":["value"]');
+  });
+
   it("lists Requesty models from the /models endpoint", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

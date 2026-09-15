@@ -17,6 +17,7 @@ import {
   parseRetryAfterMs,
   shouldRetryAttempt,
 } from "./policies/retry-policy";
+import { withSchemaInstruction } from "./policies/schema-prompt";
 import { strategies } from "./providers";
 import type {
   JsonSchemaDefinition,
@@ -449,7 +450,7 @@ export class LlmService {
           baseUrl: this.baseUrl,
           apiKey: this.apiKey,
           model,
-          messages,
+          messages: withSchemaInstruction(mode, messages, jsonSchema),
           jsonSchema,
         });
 
