@@ -29,7 +29,8 @@ const SMART_ROUTER_SCHEMA: JsonSchemaDefinition = {
       },
       confidence: {
         type: "integer",
-        description: "Confidence score 0-100 for routing decision.",
+        description:
+          "Confidence 0-100 that this email belongs to the bestMatchIndex job. MUST be 0 when bestMatchIndex is null.",
       },
       stageTarget: {
         type: "string",
@@ -143,15 +144,28 @@ export async function classifyWithSmartRouter(args: {
     {
       role: "system" as const,
       content:
-        "You are a smart router for post-application emails. Return only strict JSON. Ignore sensitive data and include only routing fields.",
+        "You are a strict router for post-application recruitment emails. Return only strict JSON. Ignore sensitive data and include only routing fields.",
     },
     {
       role: "user" as const,
-      content: `Route this email to one active job if possible.
-- Choose bestMatchIndex only from listed job numbers (1-based), or null.
-- confidence is 0..100.
-- stageTarget must be one of: ${POST_APPLICATION_ROUTER_STAGE_TARGETS.join("|")}.
-- isRelevant should be true for recruitment/application lifecycle emails.
+      content: `Classify this email and route it to one of the user's applied jobs only when it clearly belongs to that application.
+
+RELEVANCE — isRelevant is true ONLY for emails about the user's own submitted job applications:
+- application received/acknowledged, interview invitations or scheduling, online assessments or coding tests, recruiter replies about an existing application, offers, rejections, background checks, onboarding.
+isRelevant is false, even when the email is career-themed:
+- job board alerts, digests, or marketing (LinkedIn, Naukri, Indeed, Glassdoor notifications), "recruiters viewed your profile", new-job recommendations
+- course/learning platforms, webinars, bootcamps, newsletters, community digests
+- promotional, transactional, or social-notification email
+- cold recruiter outreach about NEW roles the user has not applied to.
+When unsure, use isRelevant=false.
+
+MATCHING:
+- bestMatchIndex: choose a listed job number (1-based) ONLY when the email explicitly references that job's company or role (or an obvious variant of them). Otherwise null.
+- Never pick a job just because the list is short or it is the only option.
+- confidence: 0-100 that the email belongs to the chosen job. MUST be 0 when bestMatchIndex is null.
+
+OTHER FIELDS:
+- stageTarget must be one of: ${POST_APPLICATION_ROUTER_STAGE_TARGETS.join("|")}. Use no_change for irrelevant emails.
 - stageEventPayload should be minimal structured data or null.
 
 Active jobs (index. company: title):
@@ -200,7 +214,10 @@ ${llmEmailText}`,
 
   return {
     bestMatchId,
-    confidence,
+    // confidence measures the job match; without a match it is meaningless,
+    // so clamp to 0 rather than letting the model's decision-certainty leak
+    // into matchConfidence displays and auto-link thresholds.
+    confidence: bestMatchId ? confidence : 0,
     stageTarget,
     messageType,
     isRelevant: Boolean(result.data.isRelevant),
