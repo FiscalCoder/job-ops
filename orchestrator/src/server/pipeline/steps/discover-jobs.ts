@@ -694,29 +694,11 @@ export async function discoverJobsStep(args: {
       const blockedKeywordsLowerCase = blockedCompanyKeywords.map((value) =>
         value.toLowerCase(),
       );
-      const keywordFilteredJobs = locationFilteredJobs.filter(
+      const filteredDiscoveredJobs = locationFilteredJobs.filter(
         (job) => !isBlockedEmployer(job.employer, blockedKeywordsLowerCase),
       );
       const droppedCount =
-        locationFilteredJobs.length - keywordFilteredJobs.length;
-
-      // Merge the same posting when multiple sources surface it (e.g. LinkedIn
-      // + a remote board both listing the same role) so it's only persisted
-      // and scored once, keeping whichever fields each duplicate filled in.
-      const filteredDiscoveredJobs =
-        deduplicateJobsByTitleAndEmployer(keywordFilteredJobs);
-      const crossSourceDuplicateCount =
-        keywordFilteredJobs.length - filteredDiscoveredJobs.length;
-
-      if (crossSourceDuplicateCount > 0) {
-        logger.info(
-          "Merged cross-source duplicate job postings before persisting",
-          {
-            step: "discover-jobs",
-            crossSourceDuplicateCount,
-          },
-        );
-      }
+        locationFilteredJobs.length - filteredDiscoveredJobs.length;
 
       if (droppedCount > 0) {
         const blockedCompanyKeywordsPreview = blockedCompanyKeywords.slice(

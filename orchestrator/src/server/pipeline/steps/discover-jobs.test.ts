@@ -62,18 +62,12 @@ describe("discoverJobsStep", () => {
     const { manifest: hiringCafeManifest } = await import(
       "../../../../../extractors/hiringcafe/manifest"
     );
-    // Distinct titles so the cross-source duplicate merge keeps all three.
-    const titlesById: Record<string, string> = {
-      "req-1": "Backend Engineer",
-      "req-2": "Data Analyst",
-      "req-3": "Product Designer",
-    };
     const hits = ["req-1", "req-2", "req-3"].map((id) => ({
       original_source_id: id,
       requisition_id: id,
       apply_url: `https://hiringcafe.com/job/${id}`,
       job_information: {
-        title: titlesById[id],
+        title: `Engineer ${id}`,
         ...(id === "req-1" ? { description: "Full description" } : {}),
       },
       v5_processed_job_data: {
@@ -169,7 +163,7 @@ describe("discoverJobsStep", () => {
                 job: {
                   ...hit,
                   job_information: {
-                    title: hit?.job_information.title,
+                    title: `Engineer ${id}`,
                     description: `Full description ${id}`,
                   },
                 },
@@ -1047,73 +1041,6 @@ describe("discoverJobsStep", () => {
 
     expect(result.discoveredJobs).toHaveLength(1);
     expect(result.discoveredJobs[0]?.employer).toBe("Contoso");
-  });
-
-  it("merges the same job posting when multiple sources surface it", async () => {
-    const settingsRepo = await import("@server/repositories/settings");
-    const registryModule = await import("@server/extractors/registry");
-
-    const linkedinManifest = {
-      id: "linkedin-source",
-      displayName: "LinkedIn",
-      providesSources: ["linkedin"],
-      run: vi.fn().mockResolvedValue({
-        success: true,
-        jobs: [
-          {
-            source: "linkedin",
-            title: "Senior Backend Engineer",
-            employer: "Acme Corp",
-            jobUrl: "https://linkedin.com/jobs/1",
-            salary: "$150,000",
-          },
-        ],
-      }),
-    };
-    const remoteBoardManifest = {
-      id: "remote-board",
-      displayName: "Remote Board",
-      providesSources: ["indeed"],
-      run: vi.fn().mockResolvedValue({
-        success: true,
-        jobs: [
-          {
-            source: "indeed",
-            title: "Senior Backend Engineer",
-            employer: "Acme Corp",
-            jobUrl: "https://example.com/remote-board/1",
-            jobDescription: "Full JD here",
-          },
-        ],
-      }),
-    };
-
-    vi.mocked(settingsRepo.getAllSettings).mockResolvedValue({
-      searchTerms: JSON.stringify(["engineer"]),
-    } as any);
-
-    vi.mocked(registryModule.getExtractorRegistry).mockResolvedValue({
-      manifests: new Map([
-        ["linkedin-source", linkedinManifest as any],
-        ["remote-board", remoteBoardManifest as any],
-      ]),
-      manifestBySource: new Map([
-        ["linkedin", linkedinManifest as any],
-        ["indeed", remoteBoardManifest as any],
-      ]),
-      availableSources: ["linkedin", "indeed"],
-    } as any);
-
-    const result = await discoverJobsStep({
-      mergedConfig: {
-        ...baseConfig,
-        sources: ["linkedin", "indeed"],
-      },
-    });
-
-    expect(result.discoveredJobs).toHaveLength(1);
-    expect(result.discoveredJobs[0]?.salary).toBe("$150,000");
-    expect(result.discoveredJobs[0]?.jobDescription).toBe("Full JD here");
   });
 
   it("applies shared city filtering for sources without native city filtering", async () => {
