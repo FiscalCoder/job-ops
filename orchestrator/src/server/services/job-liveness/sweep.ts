@@ -245,10 +245,11 @@ export async function sweepJobs(
  */
 export async function sweepOpenJobsInScope(
   options: LivenessSweepOptions = {},
+  excludeJobIds: ReadonlySet<string> = new Set(),
 ): Promise<LivenessSweepSummary> {
   const openJobs = await jobsRepo.getAllJobs([...LIVENESS_CHECKED_STATUSES]);
-  const oldestFirst = [...openJobs].sort((a, b) =>
-    a.discoveredAt.localeCompare(b.discoveredAt),
-  );
+  const oldestFirst = openJobs
+    .filter((job) => !excludeJobIds.has(job.id))
+    .sort((a, b) => a.discoveredAt.localeCompare(b.discoveredAt));
   return sweepJobs(oldestFirst, options);
 }

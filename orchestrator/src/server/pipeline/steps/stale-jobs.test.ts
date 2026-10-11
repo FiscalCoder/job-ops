@@ -15,6 +15,19 @@ vi.mock("@server/services/job-liveness/sweep", () => ({
   sweepJobs: vi.fn(),
 }));
 
+vi.mock("@server/services/job-liveness/scheduler", () => ({
+  startSweepForScope: vi.fn(() => true),
+}));
+
+vi.mock("@server/tenancy/private-scope", () => ({
+  getPrivateDataScope: () => ({
+    tenantId: "tenant_default",
+    userId: "user-1",
+    enforceUserIsolation: false,
+    scopeKey: "tenant_default",
+  }),
+}));
+
 vi.mock("../progress", () => ({
   updateProgress: vi.fn(),
 }));
@@ -130,6 +143,66 @@ describe("stale-jobs pipeline step", () => {
       cancelled = false;
       vi.advanceTimersByTime(61_000);
       expect(shouldStop?.()).toBe(true);
+    });
+
+    it("re-checks the remaining open jobs in the background", async () => {
+      vi.stubEnv("JOB_LIVENESS_ENABLED", "true");
+      const jobsRepo = await import("@server/repositories/jobs");
+      const { sweepJobs } = await import("@server/services/job-liveness/sweep");
+      const { startSweepForScope } = await import(
+        "@server/services/job-liveness/scheduler"
+      );
+      const { expireClosedJobsStep } = await import("./stale-jobs");
+      vi.mocked(jobsRepo.getUnscoredDiscoveredJobs).mockResolvedValue([
+        createJob({ id: "job-1" }),
+      ]);
+      vi.mocked(sweepJobs).mockResolvedValue({
+        total: 1,
+        checked: 1,
+        live: 1,
+        unknown: 0,
+        expired: 0,
+        notReached: 0,
+        expiredJobs: [],
+      });
+
+      await expireClosedJobsStep({});
+
+      expect(startSweepForScope).toHaveBeenCalledWith(
+        { tenantId: "tenant_default", userId: undefined },
+        new Set(["job-1"]),
+      );
+    });
+
+    it("starts the background re-check even with nothing new to score", async () => {
+      vi.stubEnv("JOB_LIVENESS_ENABLED", "true");
+      const jobsRepo = await import("@server/repositories/jobs");
+      const { startSweepForScope } = await import(
+        "@server/services/job-liveness/scheduler"
+      );
+      const { expireClosedJobsStep } = await import("./stale-jobs");
+      vi.mocked(jobsRepo.getUnscoredDiscoveredJobs).mockResolvedValue([]);
+
+      await expect(expireClosedJobsStep({})).resolves.toBeNull();
+      expect(startSweepForScope).toHaveBeenCalledWith(
+        { tenantId: "tenant_default", userId: undefined },
+        new Set(),
+      );
+    });
+
+    it("skips the background re-check when JOB_LIVENESS_SWEEP_ON_SEARCH is off", async () => {
+      vi.stubEnv("JOB_LIVENESS_ENABLED", "true");
+      vi.stubEnv("JOB_LIVENESS_SWEEP_ON_SEARCH", "false");
+      const jobsRepo = await import("@server/repositories/jobs");
+      const { startSweepForScope } = await import(
+        "@server/services/job-liveness/scheduler"
+      );
+      const { expireClosedJobsStep } = await import("./stale-jobs");
+      vi.mocked(jobsRepo.getUnscoredDiscoveredJobs).mockResolvedValue([]);
+
+      await expireClosedJobsStep({});
+
+      expect(startSweepForScope).not.toHaveBeenCalled();
     });
 
     it("never fails the pipeline when the check throws", async () => {

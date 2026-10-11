@@ -3,10 +3,12 @@ import { sanitizeUnknown } from "@infra/sanitize";
 import * as jobsRepo from "@server/repositories/jobs";
 import { getJobLivenessConfig } from "@server/services/job-liveness/config";
 import { partitionByPostingAge } from "@server/services/job-liveness/posting-age";
+import { startSweepForScope } from "@server/services/job-liveness/scheduler";
 import {
   type LivenessSweepSummary,
   sweepJobs,
 } from "@server/services/job-liveness/sweep";
+import { getPrivateDataScope } from "@server/tenancy/private-scope";
 import type { CreateJobInput } from "@shared/types";
 import { updateProgress } from "../progress";
 
@@ -34,9 +36,28 @@ export function dropStalePostings(
 }
 
 /**
+ * Re-check every other open job (already scored, or ready) in the background
+ * so each search run also clears out postings that closed since the last one.
+ * Does not hold up the pipeline.
+ */
+function startBackgroundSweep(alreadyCheckedJobIds: ReadonlySet<string>): void {
+  const scope = getPrivateDataScope();
+  startSweepForScope(
+    {
+      tenantId: scope.tenantId,
+      userId: scope.enforceUserIsolation
+        ? (scope.userId ?? undefined)
+        : undefined,
+    },
+    alreadyCheckedJobIds,
+  );
+}
+
+/**
  * Check freshly imported jobs against their posting pages before any LLM
- * credits are spent scoring them. Never fails the pipeline: a job that cannot
- * be checked is simply scored as before.
+ * credits are spent scoring them, then kick off a background re-check of the
+ * rest. Never fails the pipeline: a job that cannot be checked is simply
+ * scored as before.
  */
 export async function expireClosedJobsStep(args: {
   shouldCancel?: () => boolean;
@@ -46,7 +67,10 @@ export async function expireClosedJobsStep(args: {
 
   try {
     const unscoredJobs = await jobsRepo.getUnscoredDiscoveredJobs();
-    if (unscoredJobs.length === 0) return null;
+    if (unscoredJobs.length === 0) {
+      if (config.sweepOnSearch) startBackgroundSweep(new Set());
+      return null;
+    }
 
     updateProgress({
       detail: `Checking ${unscoredJobs.length} postings are still open`,
@@ -66,6 +90,15 @@ export async function expireClosedJobsStep(args: {
       unknown: summary.unknown,
       notReached: summary.notReached,
     });
+
+    if (config.sweepOnSearch && args.shouldCancel?.() !== true) {
+      // Skip the jobs just checked, unless the time budget cut the check short.
+      startBackgroundSweep(
+        summary.notReached === 0
+          ? new Set(unscoredJobs.map((job) => job.id))
+          : new Set(),
+      );
+    }
     return summary;
   } catch (error) {
     logger.warn("Closed-posting check failed; continuing to scoring", {

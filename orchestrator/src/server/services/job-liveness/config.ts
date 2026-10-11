@@ -6,6 +6,7 @@
  *
  *   JOB_LIVENESS_ENABLED            "true" | "false"  (default: true)
  *   JOB_LIVENESS_CHECK_HOUR         0-23, UTC         (default: 3)
+ *   JOB_LIVENESS_SWEEP_ON_SEARCH    "true" | "false"  (default: true)
  *   JOB_MAX_POSTING_AGE_DAYS        0 disables        (default: 30)
  *   JOB_EXPIRE_UNVERIFIED_AFTER_DAYS 0 disables       (default: 45)
  */
@@ -15,6 +16,8 @@ export interface JobLivenessConfig {
   enabled: boolean;
   /** UTC hour at which the daily sweep runs. */
   checkHour: number;
+  /** Also re-check every open job in the background on each search run. */
+  sweepOnSearch: boolean;
   /** Postings older than this are dropped at discovery. 0 disables. */
   maxPostingAgeDays: number;
   /** Jobs that cannot be verified are expired once this old. 0 disables. */
@@ -47,19 +50,20 @@ function readInteger(
   return parsed;
 }
 
-function readEnabled(env: NodeJS.ProcessEnv): boolean {
-  const raw = env.JOB_LIVENESS_ENABLED?.trim().toLowerCase();
-  if (raw === "true" || raw === "1") return true;
-  if (raw === "false" || raw === "0") return false;
-  // Never make outbound posting checks from the test suite unless asked to.
-  return env.NODE_ENV !== "test";
+function readBoolean(raw: string | undefined, fallback: boolean): boolean {
+  const normalized = raw?.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") return true;
+  if (normalized === "false" || normalized === "0") return false;
+  return fallback;
 }
 
 export function getJobLivenessConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): JobLivenessConfig {
   return {
-    enabled: readEnabled(env),
+    // Never make outbound posting checks from the test suite unless asked to.
+    enabled: readBoolean(env.JOB_LIVENESS_ENABLED, env.NODE_ENV !== "test"),
+    sweepOnSearch: readBoolean(env.JOB_LIVENESS_SWEEP_ON_SEARCH, true),
     checkHour: readInteger(env.JOB_LIVENESS_CHECK_HOUR, DEFAULT_CHECK_HOUR, {
       min: 0,
       max: 23,

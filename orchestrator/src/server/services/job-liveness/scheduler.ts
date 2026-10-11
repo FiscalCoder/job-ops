@@ -65,6 +65,7 @@ async function listScopesWithOpenJobs(): Promise<SweepScope[]> {
  */
 async function runSweepForScope(
   scope: SweepScope,
+  excludeJobIds?: ReadonlySet<string>,
 ): Promise<LivenessSweepSummary | null> {
   const scopeKey = toScopeKey(scope);
   if (activeScopeKeys.has(scopeKey)) return null;
@@ -73,7 +74,7 @@ async function runSweepForScope(
   try {
     const summary = await runWithRequestContext(
       { tenantId: scope.tenantId, userId: scope.userId },
-      () => sweepOpenJobsInScope(),
+      () => sweepOpenJobsInScope({}, excludeJobIds),
     );
     lastResultByScopeKey.set(scopeKey, {
       finishedAt: new Date().toISOString(),
@@ -97,11 +98,15 @@ export function getSweepStatus(scope: SweepScope): SweepStatus {
 
 /**
  * Start a sweep without waiting for it; a full sweep can take minutes.
- * Returns false if one is already running for the scope.
+ * Returns false if one is already running for the scope. Jobs in
+ * `excludeJobIds` were just checked by the caller and are skipped.
  */
-export function startSweepForScope(scope: SweepScope): boolean {
+export function startSweepForScope(
+  scope: SweepScope,
+  excludeJobIds?: ReadonlySet<string>,
+): boolean {
   if (activeScopeKeys.has(toScopeKey(scope))) return false;
-  void runSweepForScope(scope).catch((error) => {
+  void runSweepForScope(scope, excludeJobIds).catch((error) => {
     logger.warn("Job liveness sweep failed", {
       tenantId: scope.tenantId,
       error: sanitizeUnknown(error),
