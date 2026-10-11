@@ -104,12 +104,14 @@ No manual updates. No spreadsheets. See the [tracking docs](https://jobops.dakhe
 
 JobOps works with the model provider you already use:
 
+- Atlas Cloud
 - Codex (local app-server in Docker, authenticated with `codex login`)
 - OpenAI
 - Claude (Anthropic)
 - GLM / Zhipu AI
 - Google Gemini
 - OpenRouter
+- Requesty
 - Any OpenAI-compatible endpoint (Ollama, LM Studio, etc.)
 
 ---

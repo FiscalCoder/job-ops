@@ -21,6 +21,7 @@ It lets you configure:
 - Reactive Resume project selection
 - Tracer Links readiness verification
 - Backup and scoring rules
+- Hosted plan, billing, and monthly usage
 - Data-clearing actions in the Danger Zone
 
 ## Why it exists
@@ -38,12 +39,18 @@ Settings gives you runtime overrides for the key parts of discovery, scoring, ta
 
 ## Section-by-section guide
 
+### Plan & Billing
+
+This section appears in hosted deployments. It shows your current Free or Pro plan, subscription controls, and monthly usage for job-source searches, pipeline runs, AI operations, Ghostwriter generations, and PDF exports.
+
+Each meter includes completed usage and work currently in progress. Limits reset monthly. If hosted quotas are disabled for the workspace, the section says so instead of showing meters.
+
 ### Model
 
 ![Model settings section](/img/features/settings-model-section.png)
 
 - In hosted deployments with platform-managed LLM enabled, this section is hidden because provider, API key, and model selection are managed by the hosted platform.
-- Choose provider (`openrouter`, `orcarouter`, `requesty`, `lmstudio`, `ollama`, `openai`, `glm`, `gemini`, `gemini_cli`, `claude_cli`, `codex`)
+- Choose provider (`atlascloud`, `openrouter`, `orcarouter`, `requesty`, `lmstudio`, `ollama`, `openai`, `glm`, `gemini`, `gemini_cli`, `claude_cli`, `codex`)
 - Set provider-specific base URL/API key when required
 - Configure the default model/runtime, plus purpose-specific overrides for:
   - Scoring
@@ -52,12 +59,14 @@ Settings gives you runtime overrides for the key parts of discovery, scoring, ta
 - Purpose overrides can inherit the default provider or use a different provider, base URL, API key, and model. For example, you can use `ollama` locally by default and route tailoring to `openai` or `openrouter`.
 - Purpose API keys are stored as secrets. The settings response shows only redacted hints.
 - Provider defaults are applied automatically when the model fields are left blank:
+  - `atlascloud` defaults to `deepseek-ai/deepseek-v3.2`
   - `openai` defaults to `gpt-5.4-mini`
   - `codex` defaults to `gpt-5.4-mini`
   - `glm` defaults to `glm-5.1`
   - `gemini` and `gemini_cli` default to `google/gemini-3-flash-preview`
   - `claude_cli` defaults to `claude-sonnet-5`
 - The settings page shows provider-aware model pickers for:
+  - `atlascloud`: console-visible text models from the live Atlas Cloud catalog
   - `openai`: available text-generation models only
   - `glm`: available GLM text-generation models from the configured BigModel-compatible endpoint
   - `gemini`: available Gemini text-generation models only
@@ -173,15 +182,22 @@ Defaults and constraints:
 - When Typst is selected, choose a Typst theme:
   - Classic
   - Compact
+- Choose the paper size for generated PDFs:
+  - Renderer default: RxResume export keeps the page format saved on the resume, LaTeX renders US Letter, and Typst renders A4
+  - A4
+  - US Letter
+  - With RxResume export, a resume saved as free-form in Reactive Resume stays a single continuous page regardless of this setting
 - JobOps uses the selected RxResume resume as the source of truth for import and project data
 - Invalid Reactive Resume credentials or other `4xx` config failures block the save and stay visible as an inline error
 - Temporary Reactive Resume downtime shows an inline warning, but the save still succeeds
-- Changing PDF-affecting settings (`pdfRenderer`, `typstTheme`, `rxresumeBaseResumeId`, RxResume URL/key) auto-queues regeneration for ready jobs that currently use system-generated PDFs
+- Changing PDF-affecting settings (`pdfRenderer`, `typstTheme`, `pdfPaperSize`, `rxresumeBaseResumeId`, RxResume URL/key, or resume project policy) auto-queues regeneration for ready jobs that currently use system-generated PDFs
 - Select a template/base resume
 - Configure project selection behavior:
-  - Max projects
-  - Must-include projects
-  - AI-selectable projects
+  - Target project count
+  - **Must include**: always available to AI and always included in tailored resumes
+  - **AI can select**: available to AI and to per-job automatic/manual selection
+  - **Don't include**: excluded from AI prompts and tailored resumes
+- The target cannot be lower than the Must-include count. Automatic selection fills available slots; manual selection may use fewer but cannot exceed the target.
 - JobOps briefly caches successful Reactive Resume resume data to reduce repeated API calls across settings, profile, and PDF flows
 
 ### Tracer Links
@@ -237,7 +253,8 @@ Per-search ranking preferences now live in **Run search**. Add them to the natur
 
 - Clear jobs by selected statuses
 - Clear jobs below a score threshold
-- Clear the full database
+- In hosted mode, job-clearing actions affect only the signed-in user's jobs
+- Clear the full database as a system admin; this affects every workspace
 
 ## API examples
 

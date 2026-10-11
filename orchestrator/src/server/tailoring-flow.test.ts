@@ -20,6 +20,7 @@ vi.mock("./services/pdf-fingerprint", () => ({
     designResumeUpdatedAt: null,
     pdfRenderer: "latex",
     typstTheme: "classic",
+    pdfPaperSize: "auto",
     rxresumeBaseResumeId: null,
   }),
 }));
@@ -37,7 +38,13 @@ describe("Tailoring Flow", () => {
       designResumeUpdatedAt: null,
       pdfRenderer: "latex",
       typstTheme: "classic",
+      pdfPaperSize: "auto",
       rxresumeBaseResumeId: null,
+      resumeProjects: {
+        maxProjects: 3,
+        lockedProjectIds: [],
+        aiSelectableProjectIds: [],
+      },
     });
     vi.mocked(jobsRepo.finalizeGeneratedPdfIfCurrent).mockResolvedValue(
       {} as any,

@@ -7,11 +7,16 @@ import { existsSync } from "node:fs";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { AppError, type AppErrorCode, notFound } from "@infra/errors";
 import { logger } from "@infra/logger";
+import { getJobOpsAppConfig } from "@server/config/app-mode";
 import { getSetting } from "@server/repositories/settings";
 import { getJobOpsPublicAvailability } from "@server/services/tracer-links";
 import { safePdfFileName } from "@shared/filename-sanitizer";
 import { settingsRegistry } from "@shared/settings-registry";
-import type { DesignResumePdfResponse, PdfRenderer } from "@shared/types";
+import type {
+  DesignResumePdfResponse,
+  PdfPaperSize,
+  PdfRenderer,
+} from "@shared/types";
 import { getCurrentDesignResume } from "./design-resume";
 import { resolveWritingOutputLanguageForResumeJson } from "./output-language";
 import {
@@ -34,6 +39,7 @@ import {
   mergeReactiveResumeV5Content,
   prepareReactiveResumeV5DocumentForExternalUse,
 } from "./rxresume/document";
+import { applyPdfPaperSizeToResumeData } from "./rxresume/paper-size";
 import { parseV5ResumeData } from "./rxresume/schema/v5";
 import { getWritingStyle } from "./writing-style";
 
@@ -68,6 +74,14 @@ async function resolvePdfRenderer(): Promise<PdfRenderer> {
   return (
     settingsRegistry.pdfRenderer.parse(storedValue ?? undefined) ??
     settingsRegistry.pdfRenderer.default()
+  );
+}
+
+async function resolvePdfPaperSize(): Promise<PdfPaperSize> {
+  const storedValue = await getSetting("pdfPaperSize");
+  return (
+    settingsRegistry.pdfPaperSize.parse(storedValue ?? undefined) ??
+    settingsRegistry.pdfPaperSize.default()
   );
 }
 
@@ -147,17 +161,21 @@ async function renderRxResumePdf(args: {
   jobId: string;
   name?: string;
   requestOrigin?: string | null;
+  paperSize: PdfPaperSize;
 }): Promise<void> {
   const { preparedResume, outputPath, jobId } = args;
   let importedResumeId: string | null = null;
-  const importData = prepareReactiveResumeV5DocumentForExternalUse(
-    await stripPictureWhenJobOpsIsNotHosted({
-      data: preparedResume.data,
-      requestOrigin: args.requestOrigin ?? null,
-    }),
-    {
-      requestOrigin: args.requestOrigin ?? null,
-    },
+  const importData = applyPdfPaperSizeToResumeData(
+    prepareReactiveResumeV5DocumentForExternalUse(
+      await stripPictureWhenJobOpsIsNotHosted({
+        data: preparedResume.data,
+        requestOrigin: args.requestOrigin ?? null,
+      }),
+      {
+        requestOrigin: args.requestOrigin ?? null,
+      },
+    ),
+    args.paperSize,
   );
 
   try {
@@ -377,6 +395,7 @@ export async function generatePdf(
     }
 
     const outputPath = getTenantJobPdfPath(jobId);
+    const paperSize = await resolvePdfPaperSize();
     if (renderer !== "rxresume") {
       const [language, typstTheme] = await Promise.all([
         resolveLocalResumeLanguage(preparedResume.data, jobDescription),
@@ -389,6 +408,7 @@ export async function generatePdf(
         language,
         renderer,
         typstTheme,
+        paperSize,
       });
     } else {
       await renderRxResumePdf({
@@ -396,6 +416,7 @@ export async function generatePdf(
         outputPath,
         jobId,
         requestOrigin: options?.requestOrigin ?? null,
+        paperSize,
       });
     }
 
@@ -415,6 +436,19 @@ export async function generatePdf(
 export async function generateDesignResumePdf(options?: {
   requestOrigin?: string | null;
 }): Promise<DesignResumePdfResponse> {
+  if (getJobOpsAppConfig().appMode !== "hosted") {
+    return generateDesignResumePdfImpl(options);
+  }
+  const { withHostedUsageReservation } = await import("./hosted-usage");
+  return withHostedUsageReservation({ action: "pdf_export" }, async () => ({
+    result: await generateDesignResumePdfImpl(options),
+    usedUnits: 1,
+  }));
+}
+
+async function generateDesignResumePdfImpl(options?: {
+  requestOrigin?: string | null;
+}): Promise<DesignResumePdfResponse> {
   const renderer = await resolvePdfRenderer();
   const designResume = await resolveDesignResumeForRenderer({
     renderer,
@@ -430,7 +464,10 @@ export async function generateDesignResumePdf(options?: {
   };
 
   await ensureOutputDir();
-  const language = await resolveLocalResumeLanguage(designResume.data);
+  const [language, paperSize] = await Promise.all([
+    resolveLocalResumeLanguage(designResume.data),
+    resolvePdfPaperSize(),
+  ]);
 
   logger.info("Generating Design Resume PDF", {
     renderer,
@@ -447,6 +484,7 @@ export async function generateDesignResumePdf(options?: {
       language,
       renderer,
       typstTheme,
+      paperSize,
     });
   } else {
     await renderRxResumePdf({
@@ -455,6 +493,7 @@ export async function generateDesignResumePdf(options?: {
       jobId: "design-resume",
       name: designResume.title,
       requestOrigin: options?.requestOrigin ?? null,
+      paperSize,
     });
   }
 

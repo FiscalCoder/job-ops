@@ -47,6 +47,8 @@ type LlmRuntimeSettings = {
   provider: string | null;
   baseUrl: string | null;
   apiKey: string | null;
+  allowEnvironmentCredentials?: boolean;
+  allowCliProviders?: boolean;
 };
 
 const abortControllers = new Map<string, AbortController>();
@@ -336,6 +338,7 @@ async function imageInputCapabilityReason(
   }
 
   if (
+    provider === "atlascloud" ||
     provider === "openrouter" ||
     provider === "orcarouter" ||
     provider === "openai_compatible" ||
@@ -767,6 +770,8 @@ async function runAssistantReply(
       provider: llmConfig.provider,
       baseUrl: llmConfig.baseUrl,
       apiKey: llmConfig.apiKey,
+      allowEnvironmentCredentials: llmConfig.allowEnvironmentCredentials,
+      allowCliProviders: llmConfig.allowCliProviders,
     });
 
     const llmResult = await llm.callJson<{ response: string }>({

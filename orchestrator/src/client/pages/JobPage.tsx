@@ -1,3 +1,4 @@
+import { resolveResumeProjectSelection } from "@shared/resume-projects";
 import {
   type ApplicationStage,
   type ApplicationTask,
@@ -214,19 +215,30 @@ export const JobPage: React.FC = () => {
     activeMemoryView === "note" ? null : notesQuery.error,
     "Failed to load notes. Please try again.",
   );
-  const selectedProjectIds = React.useMemo(
+  const storedSelectedProjectIds = React.useMemo(
     () => parseSelectedProjectIds(job?.selectedProjectIds),
     [job?.selectedProjectIds],
   );
-  const selectedProjectIdsKey = selectedProjectIds.join(",");
+  const effectiveSelectedProjectIds = React.useMemo(() => {
+    const resumeProjects = settings?.resumeProjects.value;
+    if (!resumeProjects || catalog.length === 0) {
+      return storedSelectedProjectIds;
+    }
+
+    return resolveResumeProjectSelection({
+      catalog,
+      resumeProjects,
+      selectedProjectIds: storedSelectedProjectIds,
+    }).effectiveSelectedIds;
+  }, [catalog, settings?.resumeProjects.value, storedSelectedProjectIds]);
   const selectedProjects = React.useMemo(
     () =>
-      selectedProjectIds.map(
+      effectiveSelectedProjectIds.map(
         (projectId) =>
           catalog.find((project) => project.id === projectId)?.name ??
           projectId,
       ),
-    [catalog, selectedProjectIds],
+    [catalog, effectiveSelectedProjectIds],
   );
   const sourceLabel = job
     ? (sourceLabels[job.source] ?? formatJobSourceLabel(job.source))
@@ -254,13 +266,6 @@ export const JobPage: React.FC = () => {
   React.useEffect(() => {
     let isCancelled = false;
 
-    if (selectedProjectIdsKey.length === 0) {
-      setCatalog([]);
-      return () => {
-        isCancelled = true;
-      };
-    }
-
     void api
       .getResumeProjectsCatalog()
       .then((nextCatalog) => {
@@ -277,7 +282,7 @@ export const JobPage: React.FC = () => {
     return () => {
       isCancelled = true;
     };
-  }, [selectedProjectIdsKey]);
+  }, []);
 
   const loadData = React.useCallback(async () => {
     if (!id) return;
@@ -376,17 +381,6 @@ export const JobPage: React.FC = () => {
       if (!job) return;
       await markAsAppliedMutation.mutateAsync(job.id);
       toast.success("Marked as applied");
-    });
-  };
-
-  const handleMoveToInProgress = async () => {
-    await runAction("move-in-progress", async () => {
-      if (!job) return;
-      await updateJobMutation.mutateAsync({
-        id: job.id,
-        update: { status: "in_progress" },
-      });
-      toast.success("Moved to in progress");
     });
   };
 
@@ -496,7 +490,8 @@ export const JobPage: React.FC = () => {
     : null;
   const isClosedStage = currentStage === "closed";
   const isInProgress = job?.status === "in_progress";
-  const canLogEvents = isInProgress && !isClosedStage;
+  const isApplied = job?.status === "applied";
+  const canLogEvents = (isInProgress || isApplied) && !isClosedStage;
   const jobLink = job ? job.applicationLink || job.jobUrl : null;
   const isBusy = activeAction !== null;
   const isRegeneratingPdf = isPdfRegenerating(job);
@@ -508,7 +503,6 @@ export const JobPage: React.FC = () => {
   const pdfActionsDisabled = !job?.pdfPath || isRegeneratingPdf;
   const isDiscovered = job?.status === "discovered";
   const isReady = job?.status === "ready";
-  const isApplied = job?.status === "applied";
   const baseJobPath = id ? `/job/${id}` : "";
   const latestNote = notes[0] ?? null;
   const latestEvent = events.at(-1) ?? null;
@@ -836,12 +830,13 @@ export const JobPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="p-4">
-                  {!isInProgress && (
+                  {!isInProgress && !isApplied && (
                     <div className="mb-4 rounded-md border border-dashed border-border/60 p-3 text-sm text-muted-foreground">
-                      Move this job to In Progress to track application stages.
+                      Mark this job as applied to start tracking application
+                      stages.
                     </div>
                   )}
-                  {isInProgress && isClosedStage && (
+                  {(isInProgress || isApplied) && isClosedStage && (
                     <div className="mb-4 rounded-md border border-dashed border-border/60 p-3 text-sm text-muted-foreground">
                       This application is closed. Stage logging is disabled.
                     </div>
@@ -849,8 +844,8 @@ export const JobPage: React.FC = () => {
                   <JobTimeline
                     events={events}
                     discoveredAt={job.discoveredAt}
-                    onEdit={isInProgress ? handleEditEvent : undefined}
-                    onDelete={isInProgress ? confirmDeleteEvent : undefined}
+                    onEdit={canLogEvents ? handleEditEvent : undefined}
+                    onDelete={canLogEvents ? confirmDeleteEvent : undefined}
                   />
                 </div>
               </section>
@@ -895,7 +890,6 @@ export const JobPage: React.FC = () => {
               pdfDownloadLabel={pdfLabels.download}
               onStartTailoring={() => navigate(`/jobs/discovered/${job.id}`)}
               onMarkApplied={() => void handleMarkApplied()}
-              onMoveToInProgress={() => void handleMoveToInProgress()}
               onOpenLogEvent={() => setIsLogModalOpen(true)}
               onEditTailoring={() => navigate(`/jobs/ready/${job.id}`)}
               onViewPdf={() => {

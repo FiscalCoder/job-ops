@@ -6,6 +6,7 @@ import { logger } from "@infra/logger";
 import { getDefaultPromptTemplate } from "@shared/prompt-template-definitions.js";
 import type { Job, JobBrief, UpdateJobInput } from "@shared/types";
 import { stripHtmlTags } from "@shared/utils/string";
+import { withHostedUsageReservation } from "./hosted-usage";
 import {
   type JobFactPatch,
   PATCHABLE_JOB_FIELDS,
@@ -20,6 +21,7 @@ import {
   type PromptTemplateTokens,
   renderPromptTemplate,
 } from "./prompt-templates";
+import { filterProfileProjectsForAi } from "./resumeProjects";
 import { getEffectiveSettings } from "./settings";
 
 /**
@@ -284,11 +286,22 @@ function applySalaryPenalty(
 export async function scoreJobSuitability(
   job: Job,
   profile: Record<string, unknown>,
-  options: { scoringInstructions?: string } = {},
+  options: { scoringInstructions?: string; skipHostedUsage?: boolean } = {},
 ): Promise<SuitabilityResult> {
-  const [model, settings] = await Promise.all([
+  if (!options.skipHostedUsage) {
+    return withHostedUsageReservation({ action: "tailoring" }, async () => ({
+      result: await scoreJobSuitability(job, profile, {
+        ...options,
+        skipHostedUsage: true,
+      }),
+      usedUnits: 1,
+    }));
+  }
+
+  const [model, settings, aiProfile] = await Promise.all([
     resolveLlmModel("scoring"),
     getEffectiveSettings(),
+    filterProfileProjectsForAi(profile),
   ]);
   const scoringInstructions = Object.hasOwn(options, "scoringInstructions")
     ? (options.scoringInstructions ?? "")
@@ -302,7 +315,7 @@ export async function scoreJobSuitability(
   };
   const tokens = buildScoringTokens(
     job,
-    sanitizeProfileForPrompt(profile),
+    sanitizeProfileForPrompt(aiProfile),
     preferences,
   );
   // Static across every job scored in this pipeline run — sent as the system

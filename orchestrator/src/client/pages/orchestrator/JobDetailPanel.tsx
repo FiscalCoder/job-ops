@@ -28,6 +28,7 @@ import {
   STALE_PDF_MESSAGE,
 } from "@client/lib/pdf-freshness";
 import { downloadJobPdf, openJobPdf } from "@client/lib/private-pdf";
+import { resolveResumeProjectSelection } from "@shared/resume-projects";
 import type {
   Job,
   JobListItem,
@@ -55,6 +56,7 @@ import {
 } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { parseJobBrief } from "@/client/components/JobBriefPane";
 import { showErrorToast } from "@/client/lib/error-toast";
@@ -216,7 +218,7 @@ const getPrimaryAction = (job: Job): string => {
   if (job.status === "processing") return "Processing";
   if (job.status === "ready") return "Mark Applied";
   if (job.status === "discovered") return "Start Tailoring";
-  if (job.status === "applied") return "Move to In Progress";
+  if (job.status === "applied") return "View in Progress Board";
   if (job.status === "in_progress") return "In Progress";
   if (job.status === "skipped") return "Skipped";
   if (job.status === "expired") return "Expired";
@@ -294,10 +296,10 @@ export const JobDetailPanel: React.FC<JobDetailPanelProps> = ({
   onPauseRefreshChange,
   onRetrySelectedJob,
 }) => {
+  const navigate = useNavigate();
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("brief");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
-  const [isMoving, setIsMoving] = useState(false);
   const [isEditDetailsOpen, setIsEditDetailsOpen] = useState(false);
   const [catalog, setCatalog] = useState<ResumeProjectCatalogItem[]>([]);
   const [isUploadingPdf, setIsUploadingPdf] = useState(false);
@@ -323,16 +325,28 @@ export const JobDetailPanel: React.FC<JobDetailPanelProps> = ({
         language: filenameLanguage,
       })}.pdf`
     : "resume.pdf";
-  const selectedProjectIds = useMemo(
+  const storedSelectedProjectIds = useMemo(
     () => selectedJob?.selectedProjectIds?.split(",").filter(Boolean) ?? [],
     [selectedJob?.selectedProjectIds],
   );
+  const effectiveSelectedProjectIds = useMemo(() => {
+    const resumeProjects = settings?.resumeProjects.value;
+    if (!resumeProjects || catalog.length === 0) {
+      return storedSelectedProjectIds;
+    }
+
+    return resolveResumeProjectSelection({
+      catalog,
+      resumeProjects,
+      selectedProjectIds: storedSelectedProjectIds,
+    }).effectiveSelectedIds;
+  }, [catalog, settings?.resumeProjects.value, storedSelectedProjectIds]);
   const selectedProjects = useMemo(
     () =>
-      selectedProjectIds
+      effectiveSelectedProjectIds
         .map((id) => catalog.find((project) => project.id === id)?.name ?? id)
         .filter(Boolean),
-    [catalog, selectedProjectIds],
+    [catalog, effectiveSelectedProjectIds],
   );
   const hasTailoredSummary = Boolean(selectedJob?.tailoredSummary);
   const hasTailoredSkills = Boolean(selectedJob?.tailoredSkills);
@@ -473,26 +487,17 @@ export const JobDetailPanel: React.FC<JobDetailPanelProps> = ({
       return;
     }
     if (selectedJob.status === "applied") {
-      try {
-        setIsMoving(true);
-        await api.updateJob(selectedJob.id, { status: "in_progress" });
-        trackProductEvent("jobs_job_action_completed", {
-          action: "move_in_progress",
-          result: "success",
-          from_status: selectedJob.status,
-          to_status: "in_progress",
-        });
-        toast.success("Moved to in progress");
-        await onJobUpdated();
-      } catch (error) {
-        showErrorToast(error, "Failed to move to in progress");
-      } finally {
-        setIsMoving(false);
-      }
+      trackProductEvent("jobs_job_action_completed", {
+        action: "view_in_progress_board",
+        result: "success",
+        from_status: selectedJob.status,
+        to_status: selectedJob.status,
+      });
+      navigate("/applications/in-progress");
       return;
     }
     setInspectorTab("brief");
-  }, [handleMarkApplied, onJobUpdated, selectedJob]);
+  }, [handleMarkApplied, navigate, selectedJob]);
 
   const handleJobListingOpened = useCallback(() => {
     if (!selectedJob) return;
@@ -675,10 +680,7 @@ export const JobDetailPanel: React.FC<JobDetailPanelProps> = ({
   }
 
   const primaryBusy =
-    isProcessing ||
-    isApplying ||
-    isMoving ||
-    selectedJob.status === "processing";
+    isProcessing || isApplying || selectedJob.status === "processing";
   const canGenerate = ["discovered", "ready"].includes(selectedJob.status);
   const canSkip = ["discovered", "ready"].includes(selectedJob.status);
   const isRegeneratingPdf = isPdfRegenerating(selectedJob);
@@ -997,8 +999,8 @@ export const JobDetailPanel: React.FC<JobDetailPanelProps> = ({
                 <KitStatus
                   icon={<FolderKanban className="h-4 w-4" />}
                   label="Selected projects"
-                  ready={selectedProjectIds.length > 0}
-                  readyLabel={`${selectedProjectIds.length} included`}
+                  ready={effectiveSelectedProjectIds.length > 0}
+                  readyLabel={`${effectiveSelectedProjectIds.length} included`}
                 />
                 <KitStatus
                   icon={<Link2 className="h-4 w-4" />}

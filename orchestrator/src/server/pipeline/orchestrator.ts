@@ -14,8 +14,10 @@ import { trackServerProductEvent } from "@infra/product-analytics";
 import { runWithRequestContext } from "@infra/request-context";
 import { getPrivateDataScope } from "@server/tenancy/private-scope";
 import { createLocationIntentFromLegacyInputs } from "@shared/location-domain.js";
+import { resolveResumeProjectSelection } from "@shared/resume-projects";
 import { settingsRegistry } from "@shared/settings-registry";
 import type {
+  CreateJobInput,
   JobStatus,
   PipelineConfig,
   PipelineRunSavedDetails,
@@ -271,7 +273,37 @@ function buildRepeatedChallengeMessage(args: {
       ? ` Details: ${args.sourceErrors.join("; ")}`
       : "";
 
-  return `${extractorNames} still returned a Cloudflare challenge after the solve step, so the pipeline stopped instead of completing with zero jobs.${sourceDetails}`;
+  return `${extractorNames} still returned a Cloudflare challenge after the solve step, so the pipeline stopped before importing incomplete jobs.${sourceDetails}`;
+}
+
+function mergeRetriedJobs(
+  originalJobs: CreateJobInput[],
+  retriedJobs: CreateJobInput[],
+): CreateJobInput[] {
+  const merged = [...originalJobs];
+  for (const retried of retriedJobs) {
+    const index = merged.findIndex(
+      (original) =>
+        original.source === retried.source &&
+        ((original.sourceJobId &&
+          retried.sourceJobId &&
+          original.sourceJobId === retried.sourceJobId) ||
+          original.jobUrl === retried.jobUrl),
+    );
+    if (index < 0) {
+      merged.push(retried);
+      continue;
+    }
+
+    const existing = merged[index];
+    merged[index] = {
+      ...existing,
+      ...Object.fromEntries(
+        Object.entries(retried).filter(([, value]) => value != null),
+      ),
+    };
+  }
+  return merged;
 }
 
 /**
@@ -383,7 +415,7 @@ export async function runPipeline(
       });
 
       // ---------- Challenge pause/resume ----------
-      if (pendingChallenges.length > 0) {
+      while (pendingChallenges.length > 0) {
         pipelineLogger.info("Challenges detected, pausing pipeline", {
           challenges: pendingChallenges.map((c) => ({
             extractorId: c.extractorId,
@@ -399,6 +431,12 @@ export async function runPipeline(
         // Cancellation still works: the cancel endpoint sets cancelRequestedAt,
         // and ensureNotCancelled() fires after the Promise resolves.
         const challengedSources = pendingChallenges.flatMap((c) => c.sources);
+        const retryChallengeUrls = Object.fromEntries(
+          pendingChallenges.map((challenge) => [
+            challenge.extractorId,
+            challenge.url,
+          ]),
+        );
 
         await new Promise<void>((resolve) => {
           tenantState.activeChallengeState = {
@@ -423,38 +461,71 @@ export async function runPipeline(
           includeWatchlist: false,
           preserveFanout: true,
           fanoutSeedJobs: discoveredJobs,
+          retryChallengeUrls,
           shouldCancel: () =>
             getPipelineState(scopeKey).cancelRequestedAt !== null,
         });
 
-        discoveredJobs = [...discoveredJobs, ...retryResult.discoveredJobs];
+        discoveredJobs = mergeRetriedJobs(
+          discoveredJobs,
+          retryResult.discoveredJobs,
+        );
         sourceErrors = [...sourceErrors, ...retryResult.sourceErrors];
-        pendingChallenges = retryResult.pendingChallenges;
 
-        // If the retry itself hits challenges again (e.g. no reusable cookie was
-        // persisted, or the cookie was rejected), keep partial results only when
-        // something useful was discovered. Otherwise stop loudly instead of
-        // presenting a successful zero-job run.
+        // A partial extractor result must never be imported if the retry is
+        // still challenged. Other sources retain their existing partial-result
+        // behavior when the retry found useful jobs.
         if (retryResult.pendingChallenges.length > 0) {
-          const message = buildRepeatedChallengeMessage({
-            challenges: retryResult.pendingChallenges,
-            sourceErrors: retryResult.sourceErrors,
-          });
-
-          if (discoveredJobs.length === 0) {
-            throw new Error(message);
+          const detailChallenges = retryResult.pendingChallenges.filter(
+            (challenge) => challenge.pauseOnRepeat,
+          );
+          const ordinaryChallenges = retryResult.pendingChallenges.filter(
+            (challenge) => !challenge.pauseOnRepeat,
+          );
+          const unrecoveredOrdinary = ordinaryChallenges.filter(
+            (challenge) =>
+              !discoveredJobs.some((job) =>
+                challenge.sources.some((source) => source === job.source),
+              ),
+          );
+          if (unrecoveredOrdinary.length > 0) {
+            throw new Error(
+              buildRepeatedChallengeMessage({
+                challenges: unrecoveredOrdinary,
+                sourceErrors: retryResult.sourceErrors,
+              }),
+            );
           }
 
-          pipelineLogger.warn(message, {
-            retryPendingChallenges: retryResult.pendingChallenges.map(
-              (c) => c.extractorId,
-            ),
-            retrySourceErrors: retryResult.sourceErrors,
-          });
-        }
+          if (ordinaryChallenges.length > 0) {
+            pipelineLogger.warn(
+              buildRepeatedChallengeMessage({
+                challenges: ordinaryChallenges,
+                sourceErrors: retryResult.sourceErrors,
+              }),
+              {
+                retryPendingChallenges: ordinaryChallenges.map(
+                  (challenge) => challenge.extractorId,
+                ),
+              },
+            );
+          }
 
-        progressHelpers.crawlingComplete(discoveredJobs.length);
+          pendingChallenges = detailChallenges;
+          if (detailChallenges.length > 0) {
+            pipelineLogger.warn("Detail challenge persists; pausing again", {
+              retryPendingChallenges: detailChallenges.map(
+                (c) => c.extractorId,
+              ),
+            });
+            continue;
+          }
+          break;
+        }
+        pendingChallenges = [];
       }
+
+      progressHelpers.crawlingComplete(discoveredJobs.length);
 
       ensureNotCancelled(scopeKey);
       jobsDiscovered = discoveredJobs.length;
@@ -477,6 +548,7 @@ export async function runPipeline(
             profile,
             scoringInstructions: mergedConfig.scoringInstructions,
             visaSponsorCountryKey: mergedConfig.locationIntent?.selectedCountry,
+            hostedUsageReserved: true,
             shouldCancel: () =>
               getPipelineState(scopeKey).cancelRequestedAt !== null,
           }));
@@ -641,7 +713,7 @@ export async function runPipeline(
 
 export type ProcessJobOptions = {
   force?: boolean;
-  fields?: Array<"summary" | "headline" | "skills">;
+  fields?: Array<"summary" | "headline" | "skills" | "projects">;
   requestOrigin?: string | null;
   analyticsOrigin?:
     | "move_to_ready"
@@ -703,6 +775,8 @@ export async function summarizeJob(
         shouldUpdateAllTailoring || requestedFields.includes("headline");
       const shouldUpdateSkills =
         shouldUpdateAllTailoring || requestedFields.includes("skills");
+      const shouldUpdateProjects =
+        shouldUpdateAllTailoring || requestedFields.includes("projects");
       const shouldGenerateTailoring =
         shouldUpdateSummary || shouldUpdateHeadline || shouldUpdateSkills;
 
@@ -742,7 +816,7 @@ export async function summarizeJob(
 
       // 2. Suggest Projects
       let selectedProjectIds = job.selectedProjectIds;
-      if (shouldUpdateAllTailoring) {
+      if (shouldUpdateProjects) {
         try {
           const existingSelectedProjectIds =
             parseProjectIdsCsv(selectedProjectIds);
@@ -755,46 +829,47 @@ export async function summarizeJob(
             overrideRaw: overrideResumeProjectsRaw,
           });
 
-          const locked = resumeProjects.lockedProjectIds;
-          const desiredCount = Math.max(
-            0,
-            resumeProjects.maxProjects - locked.length,
+          const currentSelection = resolveResumeProjectSelection({
+            catalog,
+            resumeProjects,
+            selectedProjectIds: existingSelectedProjectIds,
+          });
+          const mustIncludeSet = new Set(currentSelection.mustIncludeIds);
+          const currentAiIds = currentSelection.effectiveSelectedIds.filter(
+            (id) => !mustIncludeSet.has(id),
           );
-          const eligibleSet = new Set(resumeProjects.aiSelectableProjectIds);
+          const storedSelectionIsValid =
+            existingSelectedProjectIds.length > 0 &&
+            existingSelectedProjectIds.length === currentAiIds.length &&
+            existingSelectedProjectIds.every(
+              (id, index) => id === currentAiIds[index],
+            );
+          const emptySelection = resolveResumeProjectSelection({
+            catalog,
+            resumeProjects,
+          });
+          const eligibleSet = new Set(emptySelection.aiSelectableIds);
           const eligibleProjects = selectionItems.filter((p) =>
             eligibleSet.has(p.id),
           );
-          const allowedProjectIds = new Set([
-            ...locked,
-            ...eligibleProjects.map((project) => project.id),
-          ]);
-          const missingLockedProjectIds = locked.filter(
-            (id) => !existingSelectedProjectIds.includes(id),
-          );
-          const disallowedExistingProjectIds =
-            existingSelectedProjectIds.filter(
-              (id) => !allowedProjectIds.has(id),
-            );
-          const existingSelectionExceedsMax =
-            existingSelectedProjectIds.length > resumeProjects.maxProjects;
-          const existingSelectionValid =
-            existingSelectedProjectIds.length > 0 &&
-            disallowedExistingProjectIds.length === 0 &&
-            missingLockedProjectIds.length === 0 &&
-            !existingSelectionExceedsMax;
-
-          if (existingSelectionValid && !options?.force) {
-            selectedProjectIds = existingSelectedProjectIds.join(",");
+          if (storedSelectionIsValid && !options?.force) {
+            selectedProjectIds = currentAiIds.join(",");
           } else {
-            await reserveTailoringUsage();
-            const picked = await pickProjectIdsForJob({
-              jobDescription: job.jobDescription || "",
-              eligibleProjects,
-              desiredCount,
-            });
-
-            tailoringUsageSucceeded = true;
-            selectedProjectIds = [...locked, ...picked].join(",");
+            if (
+              emptySelection.remainingSlots > 0 &&
+              eligibleProjects.length > 0
+            ) {
+              await reserveTailoringUsage();
+              const picked = await pickProjectIdsForJob({
+                jobDescription: job.jobDescription || "",
+                eligibleProjects,
+                desiredCount: emptySelection.remainingSlots,
+              });
+              tailoringUsageSucceeded = true;
+              selectedProjectIds = picked.join(",");
+            } else {
+              selectedProjectIds = "";
+            }
           }
         } catch (error) {
           jobLogger.warn("Failed to suggest projects", { error });
@@ -811,7 +886,7 @@ export async function summarizeJob(
         ...(shouldUpdateSkills
           ? { tailoredSkills: tailoredSkills ?? undefined }
           : {}),
-        ...(shouldUpdateAllTailoring
+        ...(shouldUpdateProjects
           ? { selectedProjectIds: selectedProjectIds ?? undefined }
           : {}),
       });

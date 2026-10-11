@@ -7,5 +7,7 @@ export * from "./ghostwriter-note-context";
 export * from "./job-document-classification";
 export * from "./language-detection";
 export * from "./location-support";
+export * from "./resume-projects";
+export * from "./stage-history";
 export * from "./types";
 export * from "./utils/type-conversion";

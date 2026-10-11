@@ -15,7 +15,9 @@ import {
   type LlmProviderId,
   type LlmPurposeApiKeys,
   type LlmPurposeOverrides,
+  PDF_PAPER_SIZE_VALUES,
   PDF_RENDERER_VALUES,
+  type PdfPaperSize,
   type PdfRenderer,
   type ResumeProjectsSettings,
   TYPST_THEME_VALUES,
@@ -81,6 +83,7 @@ function normalizeLlmProviderOrNull(raw: string | undefined): string | null {
 }
 
 export const DEFAULT_GEMINI_MODEL = "google/gemini-3-flash-preview";
+export const DEFAULT_ATLAS_CLOUD_MODEL = "deepseek-ai/deepseek-v3.2";
 export const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
 export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 export const DEFAULT_GLM_MODEL = "glm-5.1";
@@ -97,6 +100,13 @@ export function getDefaultModelForProvider(
   }
 
   const normalizedProvider = normalizeLlmProviderOrNull(provider ?? undefined);
+
+  if (
+    normalizedProvider === "atlascloud" ||
+    normalizedProvider === "atlas_cloud"
+  ) {
+    return DEFAULT_ATLAS_CLOUD_MODEL;
+  }
 
   if (normalizedProvider === "openai") {
     return DEFAULT_OPENAI_MODEL;
@@ -194,6 +204,7 @@ const parseChatStyleManualLanguageOrNull = createEnumParser(
 );
 const parsePdfRendererOrNull = createEnumParser(PDF_RENDERER_VALUES);
 const parseTypstThemeOrNull = createEnumParser(TYPST_THEME_VALUES);
+const parsePdfPaperSizeOrNull = createEnumParser(PDF_PAPER_SIZE_VALUES);
 
 const llmPurposeOverrideSchema = z.object({
   provider: z.preprocess(
@@ -475,6 +486,14 @@ export const settingsRegistry = {
     default: (): TypstTheme => "classic",
     parse: parseTypstThemeOrNull,
     serialize: (value: TypstTheme | null | undefined): string | null =>
+      value ?? null,
+  },
+  pdfPaperSize: {
+    kind: "typed" as const,
+    schema: z.enum(PDF_PAPER_SIZE_VALUES),
+    default: (): PdfPaperSize => "auto",
+    parse: parsePdfPaperSizeOrNull,
+    serialize: (value: PdfPaperSize | null | undefined): string | null =>
       value ?? null,
   },
   ukvisajobsMaxJobs: {

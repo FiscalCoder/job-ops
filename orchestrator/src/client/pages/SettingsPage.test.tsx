@@ -15,6 +15,9 @@ const render = (ui: Parameters<typeof renderWithQueryClient>[0]) =>
   renderWithQueryClient(ui);
 
 vi.mock("../api", () => ({
+  getBillingStatus: vi.fn(),
+  createBillingCheckout: vi.fn(),
+  createBillingPortal: vi.fn(),
   getAppStatus: vi.fn(),
   getSettings: vi.fn(),
   getLlmModels: vi.fn().mockResolvedValue([]),
@@ -193,6 +196,27 @@ describe("SettingsPage", () => {
     });
     _resetTracerReadinessCache();
     vi.mocked(api.getAppStatus).mockResolvedValue(localAppStatus);
+    vi.mocked(api.getBillingStatus).mockResolvedValue({
+      plan: "free",
+      platformAiIncluded: false,
+      userEditableLlmSettings: true,
+      hostedLimits: {
+        job_search: 100,
+        pipeline_run: 25,
+        tailoring: 250,
+        ghostwriter: 250,
+        pdf_export: 250,
+      },
+      subscription: null,
+      priceGbpMonthly: 30,
+      usage: {
+        tenantId: "tenant_default",
+        userId: "user-1",
+        period: "2026-09",
+        quotasEnabled: true,
+        actions: [],
+      },
+    });
     vi.mocked(api.getTracerReadiness).mockResolvedValue({
       status: "ready",
       isPubliclyAvailable: true,
@@ -208,6 +232,33 @@ describe("SettingsPage", () => {
       message: "Missing credentials",
       status: 400,
     });
+  });
+
+  it("does not show or request billing in local mode", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue(baseSettings);
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Models" });
+    expect(screen.queryByRole("button", { name: /plan.*billing/i })).toBeNull();
+    expect(api.getBillingStatus).not.toHaveBeenCalled();
+  });
+
+  it("does not request system backups for non-admin users", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue(baseSettings);
+    renderPage();
+
+    await waitFor(() => expect(api.getCurrentAuthUser).toHaveBeenCalled());
+    expect(api.getBackups).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("hides installation-wide database clearing from non-admin users", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue(baseSettings);
+    renderPage();
+
+    await openDangerZoneSection();
+    await waitFor(() => expect(api.getCurrentAuthUser).toHaveBeenCalled());
+    expect(screen.queryByText("Clear Entire Database")).not.toBeInTheDocument();
   });
 
   afterAll(() => {
@@ -601,6 +652,31 @@ describe("SettingsPage", () => {
 
   it("hides model settings and defaults to writing style for hosted platform LLM", async () => {
     vi.mocked(api.getAppStatus).mockResolvedValue(hostedPlatformLlmStatus);
+    vi.mocked(api.getBillingStatus).mockResolvedValue({
+      plan: "pro",
+      platformAiIncluded: true,
+      userEditableLlmSettings: false,
+      hostedLimits: {
+        job_search: 500,
+        pipeline_run: 100,
+        tailoring: 1000,
+        ghostwriter: 1000,
+        pdf_export: 1000,
+      },
+      subscription: {
+        status: "active",
+        currentPeriodEnd: 1_800_000_000,
+        cancelAtPeriodEnd: false,
+      },
+      priceGbpMonthly: 30,
+      usage: {
+        tenantId: "tenant_default",
+        userId: "user-1",
+        period: "2026-09",
+        quotasEnabled: true,
+        actions: [],
+      },
+    });
     vi.mocked(api.getSettings).mockResolvedValue(baseSettings);
 
     render(
@@ -612,9 +688,7 @@ describe("SettingsPage", () => {
     await openNavGroup(/^ai$/i);
 
     expect(screen.queryByRole("button", { name: /models/i })).toBeNull();
-    expect(
-      await screen.findByRole("heading", { name: /writing style/i }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Current plan")).toBeInTheDocument();
   });
 
   it("does not mark Reactive Resume settings dirty when project catalog hydration finishes", async () => {
@@ -793,6 +867,36 @@ describe("SettingsPage", () => {
       expect.objectContaining({
         rxresumeUrl: "https://resume.example.com",
       }),
+    );
+  });
+
+  it("saves the PDF paper size from the Reactive Resume section", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue(baseSettings);
+    vi.mocked(api.updateSettings).mockResolvedValue(
+      createAppSettings({
+        pdfPaperSize: { value: "letter", default: "auto", override: "letter" },
+      }),
+    );
+
+    renderPage();
+    await openReactiveResumeSection();
+
+    const paperSizeSelect = screen.getByRole("combobox", {
+      name: /paper size/i,
+    });
+    await waitFor(() => expect(paperSizeSelect).toBeEnabled());
+    expect(paperSizeSelect).toHaveTextContent("Renderer default");
+
+    fireEvent.click(paperSizeSelect);
+    fireEvent.click(await screen.findByText("US Letter"));
+
+    const saveButton = getSaveButton();
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalled());
+    expect(api.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ pdfPaperSize: "letter" }),
     );
   });
 

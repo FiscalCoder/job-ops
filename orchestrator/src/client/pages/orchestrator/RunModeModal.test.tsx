@@ -1,14 +1,26 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { trackProductEvent } from "@/lib/analytics";
 import { RunModeModal } from "./RunModeModal";
+
+vi.mock("@/lib/analytics", () => ({
+  trackProductEvent: vi.fn(),
+}));
 
 vi.mock("@client/components/ManualImportFlow", () => ({
   ManualImportFlow: () => <div data-testid="manual-flow">Manual flow</div>,
 }));
 
 vi.mock("./AutomaticRunTab", () => ({
-  AutomaticRunTab: () => (
-    <div data-testid="automatic-tab">Automatic run tab</div>
+  AutomaticRunTab: ({
+    showPromptIntro = true,
+  }: {
+    showPromptIntro?: boolean;
+  }) => (
+    <div data-testid="automatic-tab">
+      {showPromptIntro ? <h1>What kind of jobs are you looking for?</h1> : null}
+      Automatic run tab
+    </div>
   ),
 }));
 
@@ -33,6 +45,18 @@ describe("RunModeModal", () => {
 
     expect(screen.getByTestId("automatic-tab")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /manual/i })).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("heading", {
+        name: /what kind of jobs are you looking for\?/i,
+      }),
+    ).toHaveLength(1);
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: /manual/i }));
+
+    expect(trackProductEvent).toHaveBeenCalledWith(
+      "jobs_search_composer_mode_changed",
+      { from_mode: "automatic", to_mode: "manual" },
+    );
   });
 
   it("can hide mode tabs for the full-page composer", () => {

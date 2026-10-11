@@ -65,6 +65,9 @@ value in this browser. If you picked **Custom**, it reopens in Custom mode with
 the same values. The pipeline run itself still derives per-source caps from the
 saved budget when you start the run.
 
+Run Search also remembers whether you last used **Automatic** or **Manual** in
+this browser and reopens that mode next time.
+
 #### Search area
 
 **Map radius** is the default search-area mode. It does not require an address or postcode.
@@ -177,6 +180,11 @@ For accepted input formats, inference behavior, and limits, see [Manual Import E
 - Ensure at least one compatible source is selected.
 - Select a country and, in Map radius mode, place a centre point.
 - Wait for active save/run operations to finish.
+
+### Search says system admin access is required
+
+- Search settings saved by the Run Search form are scoped to the signed-in user's workspace and do not require system admin access.
+- If the request also changes a protected setting, remove that change or ask a system admin to update it in **Settings**.
 
 ### Radius search cannot resolve nearby places
 
