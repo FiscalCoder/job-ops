@@ -19,6 +19,7 @@ import { attachChallengeViewerUpgradeProxy } from "./services/challenge-viewer";
 import { initializeDemoModeServices } from "./services/demo-mode";
 import { applyStoredEnvOverrides } from "./services/envSettings";
 import { initializeHistoricalServerEventReplaySafely } from "./services/historical-product-analytics";
+import { initializeJobLiveness } from "./services/job-liveness/scheduler";
 import { initialize as initializeVisaSponsors } from "./services/visa-sponsors/index";
 
 const AUTH_SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
@@ -141,6 +142,14 @@ async function startServer() {
       await initializeDemoModeServices();
     } catch (error) {
       logger.warn("Failed to initialize demo mode services", {
+        error: sanitizeUnknown(error),
+      });
+    }
+
+    try {
+      initializeJobLiveness();
+    } catch (error) {
+      logger.warn("Failed to initialize job liveness sweep", {
         error: sanitizeUnknown(error),
       });
     }

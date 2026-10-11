@@ -63,6 +63,7 @@ import {
   scoreJobsStep,
   selectJobsStep,
 } from "./steps";
+import { dropStalePostings, expireClosedJobsStep } from "./steps/stale-jobs";
 
 const DEFAULT_CONFIG: PipelineConfig = {
   topN: 10,
@@ -530,7 +531,11 @@ export async function runPipeline(
       ensureNotCancelled(scopeKey);
       jobsDiscovered = discoveredJobs.length;
       const { created, skipped, fuzzyMerged } = await importJobsStep({
-        discoveredJobs,
+        discoveredJobs: dropStalePostings(discoveredJobs),
+      });
+      await expireClosedJobsStep({
+        shouldCancel: () =>
+          getPipelineState(scopeKey).cancelRequestedAt !== null,
       });
 
       await persistResultSummary({ stage: "import" });
