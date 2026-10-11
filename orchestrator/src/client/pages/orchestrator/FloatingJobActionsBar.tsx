@@ -12,6 +12,8 @@ interface FloatingJobActionsBarProps {
   onSkipSelected: () => void;
   onRescoreSelected: () => void;
   onClear: () => void;
+  /** Extra action buttons rendered before Clear. */
+  extraActions?: React.ReactNode;
 }
 
 export const FloatingJobActionsBar: React.FC<FloatingJobActionsBarProps> = ({
@@ -24,6 +26,7 @@ export const FloatingJobActionsBar: React.FC<FloatingJobActionsBarProps> = ({
   onSkipSelected,
   onRescoreSelected,
   onClear,
+  extraActions,
 }) => {
   return (
     <AnimatePresence initial={false}>
@@ -76,6 +79,7 @@ export const FloatingJobActionsBar: React.FC<FloatingJobActionsBarProps> = ({
                   Recalculate match
                 </Button>
               )}
+              {extraActions}
               <Button
                 type="button"
                 size="sm"

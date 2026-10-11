@@ -79,6 +79,7 @@ import {
   safeFilenamePart,
 } from "@/lib/utils";
 import type { FilterTab } from "./constants";
+import { MarkExpiredMenuItem } from "./ExpireJobsControls";
 import type { SelectedJobLoadState } from "./useOrchestratorData";
 
 interface JobDetailPanelProps {
@@ -836,6 +837,13 @@ export const JobDetailPanel: React.FC<JobDetailPanelProps> = ({
                       <XCircle className="mr-2 h-4 w-4" />
                       Skip job
                     </DropdownMenuItem>
+                    <MarkExpiredMenuItem
+                      jobId={selectedJob.id}
+                      onExpired={async () => {
+                        handleJobMoved(selectedJob.id);
+                        await onJobUpdated();
+                      }}
+                    />
                   </>
                 )}
               </DropdownMenuContent>

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { VirtualListHandle } from "@/client/lib/virtual-list";
 import type { FilterTab } from "./constants";
 import { tabs } from "./constants";
+import { ExpireSelectedButton } from "./ExpireJobsControls";
 import { FloatingJobActionsBar } from "./FloatingJobActionsBar";
 import { OrchestratorJobsWorkspace } from "./OrchestratorJobsWorkspace";
 import { OrchestratorMobileJobDrawer } from "./OrchestratorMobileJobDrawer";
@@ -287,6 +288,18 @@ export const OrchestratorJobWorkspaceContainer: React.FC<
         onSkipSelected={() => void runJobAction("skip")}
         onRescoreSelected={() => void runJobAction("rescore")}
         onClear={clearSelection}
+        extraActions={
+          <ExpireSelectedButton
+            selectedJobs={activeJobs.filter((job) =>
+              selectedJobIds.has(job.id),
+            )}
+            disabled={jobActionInFlight !== null}
+            onExpired={async (failedJobIds) => {
+              await loadJobs();
+              if (failedJobIds.size === 0) clearSelection();
+            }}
+          />
+        }
       />
 
       {!ui.isDesktop && (
