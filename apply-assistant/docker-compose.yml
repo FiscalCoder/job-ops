@@ -11,7 +11,7 @@ services:
       APPLY_DATA_DIR: /data
       APPLY_PORT: "3006"
     ports:
-      # Localhost only; nginx (CloudPanel vhost) proxies https://<job-ops-domain>/apply/ here.
+      # Localhost only; a CloudPanel reverse-proxy site (https://apply.hueint.com) forwards here.
       - "127.0.0.1:3006:3006"
     volumes:
       # Beside Job Ops' jobs.db in the persisted ./data folder (deploys use checkout clean: false).

@@ -113,8 +113,8 @@ Success after 20 real applications:
 | Port | `127.0.0.1:3006` (free) | Localhost only; reached through nginx |
 | Data | `./data/apply-assistant/apply.db` (host), mounted into the container | Lives beside `jobs.db` in the persisted `./data` folder; survives deploys (`clean: false`) and any folder-level backup |
 | Talks to Job Ops | Joins the `job-ops` compose network as an external network; calls `http://job-ops:3001/api/...` | Internal only, never via the public domain |
-| Public URL | `https://job-ops.hueint.com/apply/` | Same domain, same TLS certificate; the extension only needs one host permission |
-| nginx change | Add a `location ^~ /apply/ { proxy_pass http://127.0.0.1:3006/; … }` block, **through CloudPanel's Vhost editor** (or `clpctl`), not by hand-editing the file | CloudPanel regenerates vhost files, so hand edits can be lost. **Needs your OK at deploy time** (production change) |
+| Public URL | `https://apply.hueint.com` (live since 2026-10-20) | Own subdomain: Job Ops' vhost is never touched, the app (and its M2 web page) sits at `/` with no base-path handling, and its browser storage is isolated from Job Ops |
+| nginx / DNS | Cloudflare `A apply → VPS` (DNS only) + CloudPanel **Reverse Proxy site** → `http://127.0.0.1:3006`, Let's Encrypt certificate | CloudPanel owns the vhost; no hand edits. The global `client_max_body_size 64M` covers lookup uploads |
 | Deploy | New fork-owned workflow `deploy-apply-assistant.yml` (paths `apply-assistant/**`), same self-hosted runner | Independent of the Job Ops deploy; upstream files untouched |
 | Auth | apply-assistant validates your **Job Ops login** (login is proxied to Job Ops `/api/auth/login`; the token is checked against Job Ops on each session) | One account; no new passwords |
 
