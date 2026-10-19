@@ -47,6 +47,7 @@ const BY_REF: Record<string, FieldRule> = {
     fallbackKey: "identity.first_name",
   },
   email: profile("email"),
+  country: bank("location.current_country"),
   phone: profile("phone"),
   resume: { kind: "resume-file" },
   cover_letter: { kind: "cover-letter" },

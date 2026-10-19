@@ -394,10 +394,30 @@ function summarise(entries: readonly PlanEntry[]): PlanSummary {
   };
 }
 
+/**
+ * Greenhouse's phone input has its own Country dropdown that the API doesn't list. It must be
+ * set before the number (M0), so it is planned right before the phone, from your bank.
+ */
+const PHONE_COUNTRY: FormField = {
+  ref: "country",
+  label: "Phone country",
+  type: "select",
+  required: false,
+  options: [],
+  section: "main",
+};
+
+const withPhoneCountry = (fields: readonly FormField[]): FormField[] =>
+  fields.flatMap((field) =>
+    field.ref === "phone" && !fields.some((f) => f.ref === "country")
+      ? [PHONE_COUNTRY, field]
+      : [field],
+  );
+
 export function buildPlan(input: PlanInput): FillPlan {
   const jobCountry =
     countryOf(input.schema.location) ?? countryOf(input.jobLocation ?? "");
-  const entries = input.schema.fields.map((field) =>
+  const entries = withPhoneCountry(input.schema.fields).map((field) =>
     planField(field, input, jobCountry),
   );
   return {

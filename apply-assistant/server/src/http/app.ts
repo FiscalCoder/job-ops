@@ -9,11 +9,13 @@ import { createApplyTargetsRepo } from "../store/apply-targets-repo.js";
 import { createFillPlansRepo } from "../store/fill-plans-repo.js";
 import { createFormSchemasRepo } from "../store/form-schemas-repo.js";
 import { createGhBoardsRepo } from "../store/gh-boards-repo.js";
+import { createRunsRepo } from "../store/runs-repo.js";
 import { createAnswerBankRoutes } from "./answer-bank-routes.js";
 import { createAuthMiddleware, sendJobOpsFailure } from "./auth.js";
 import { sendError, sendOk } from "./envelope.js";
 import { createLookupRoutes } from "./lookup-routes.js";
 import { createPlanRoutes } from "./plan-routes.js";
+import { createRunRoutes } from "./run-routes.js";
 import {
   createApiLimiter,
   createLoginLimiter,
@@ -81,6 +83,10 @@ export function createApp({ jobOps, db, authCacheSeconds }: AppDeps) {
 
   app.use(requireUser, createAnswerBankRoutes(answers));
   app.use(requireUser, createPlanRoutes(plans));
+  app.use(
+    requireUser,
+    createRunRoutes({ jobOps, runs: createRunsRepo(db), answers }),
+  );
   app.use(
     requireUser,
     createLookupRoutes({

@@ -238,4 +238,19 @@ describe("buildPlan", () => {
     expect(summary.needsYou).toBeGreaterThan(0);
     expect(summary.estMinutes).toBeGreaterThan(1);
   });
+
+  it("sets the phone's country right before the phone number", () => {
+    const plan = buildPlan({
+      schema: parseGreenhouseSchema(newrelic),
+      resume,
+      bank: fullBank,
+    });
+    const refs = plan.entries.map((e) => e.ref);
+    expect(refs.indexOf("country")).toBe(refs.indexOf("phone") - 1);
+    expect(entry(plan, "country")).toMatchObject({
+      status: "fill",
+      value: "India",
+      required: false,
+    });
+  });
 });
