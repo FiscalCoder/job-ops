@@ -7,6 +7,24 @@
   "scripts": {
     "spike:inspect": "node spike/inspect-form.mjs",
     "spike:fake": "node spike/fill-trusted.mjs",
-    "spike:db": "tsx spike/db-dry-run.ts"
+    "spike:db": "tsx spike/db-dry-run.ts",
+    "dev": "tsx watch server/src/index.ts",
+    "start": "node --no-warnings=ExperimentalWarning --import tsx server/src/index.ts",
+    "test": "vitest run --exclude \"server/test/contract/**\"",
+    "test:coverage": "vitest run --coverage --coverage.include=\"server/src/**\" --coverage.exclude=server/src/index.ts --exclude \"server/test/contract/**\"",
+    "test:contract": "vitest run server/test/contract",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "express": "4.22.2",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "4.17.21",
+    "@types/node": "22.10.1",
+    "@vitest/coverage-v8": "4.0.16",
+    "tsx": "4.22.4",
+    "typescript": "5.7.2",
+    "vitest": "4.0.16"
   }
 }
