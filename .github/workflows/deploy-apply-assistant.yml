@@ -1,0 +1,48 @@
+name: Deploy apply-assistant to VPS
+
+# Fork-owned workflow (upstream has no apply-assistant). Manual by default; deploys the
+# separate apply-assistant compose project next to Job Ops without touching it.
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  # Same group as the Job Ops deploy, so the two never run at once in the shared checkout.
+  group: deploy-credit-savings-remote-focus
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and restart apply-assistant
+    runs-on: [self-hosted, jobops-vps]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Unit tests (in a throwaway Node container; the VPS host has no Node)
+        run: |
+          docker run --rm -v "$PWD/apply-assistant:/src:ro" node:24.14.0-slim sh -c \
+            "cp -r /src /work && cd /work && rm -rf node_modules && npm ci --no-audit --no-fund && npm test"
+
+      - name: Build and start
+        run: |
+          mkdir -p data/apply-assistant
+          docker compose -p apply-assistant -f apply-assistant/docker-compose.yml up -d --build
+
+      - name: Wait for health check
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3006/health >/dev/null; then
+              echo "Healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::apply-assistant health check did not pass in time"
+          docker compose -p apply-assistant -f apply-assistant/docker-compose.yml logs --tail=100
+          exit 1
+
+      - name: Contract check against Job Ops (read-only, internal)
+        run: |
+          docker exec apply-assistant node -e "fetch('http://job-ops:3001/health').then(r=>{if(!r.ok)process.exit(1);console.log('job-ops reachable')}).catch(()=>process.exit(1))"

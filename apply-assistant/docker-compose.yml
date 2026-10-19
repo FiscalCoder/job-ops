@@ -1,0 +1,26 @@
+# apply-assistant runs as its OWN compose project, so Job Ops' `docker compose up --remove-orphans`
+# never removes it. Start from the repo root:
+#   docker compose -p apply-assistant -f apply-assistant/docker-compose.yml up -d --build
+services:
+  apply-assistant:
+    build: .
+    container_name: apply-assistant
+    restart: unless-stopped
+    environment:
+      JOBOPS_BASE_URL: http://job-ops:3001
+      APPLY_DATA_DIR: /data
+      APPLY_PORT: "3006"
+    ports:
+      # Localhost only; nginx (CloudPanel vhost) proxies https://<job-ops-domain>/apply/ here.
+      - "127.0.0.1:3006:3006"
+    volumes:
+      # Beside Job Ops' jobs.db in the persisted ./data folder (deploys use checkout clean: false).
+      - ../data/apply-assistant:/data
+    networks:
+      - jobops
+
+networks:
+  jobops:
+    # Job Ops' default network (compose project "job-ops"): reach it at http://job-ops:3001.
+    name: job-ops_default
+    external: true
