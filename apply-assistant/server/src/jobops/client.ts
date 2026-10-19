@@ -61,6 +61,8 @@ export interface JobOpsApi {
   updateJob(token: string, jobId: string, update: JobUpdate): Promise<void>;
   addNote(token: string, jobId: string, note: JobNote): Promise<void>;
   getPdf(token: string, jobId: string): Promise<Uint8Array>;
+  /** Resume Studio document (Reactive Resume JSON): the source the tailored PDFs are built from. */
+  getDesignResume(token: string): Promise<unknown>;
 }
 
 const errorEnvelope = z.object({
@@ -72,6 +74,7 @@ const loginData = z.object({ token: z.string().min(1), expiresIn: z.number() });
 const meData = z.object({
   user: z.object({ id: z.string(), username: z.string() }),
 });
+const designResumeData = z.object({ resumeJson: z.unknown() });
 const jobShape = z
   .object({
     id: z.string(),
@@ -176,6 +179,13 @@ export class JobOpsClient implements JobOpsApi {
     );
     if (!res.ok) throw await toJobOpsError(res);
     return new Uint8Array(await res.arrayBuffer());
+  }
+
+  async getDesignResume(token: string): Promise<unknown> {
+    const data = await this.request("/api/design-resume", designResumeData, {
+      token,
+    });
+    return data.resumeJson;
   }
 
   private async request<T>(

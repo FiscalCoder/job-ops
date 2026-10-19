@@ -36,6 +36,17 @@ What you'll see:
 
 In the terminal, each field shows ✓/✗ with its source (profile / resume / default), and every required question without an answer is listed under "needs you". That list is what the answer bank (M2) will cover.
 
+## End-to-end dry run on your real Job Ops data (M1 + M2)
+
+Runs a local apply-assistant against the real Job Ops, with this PC playing the extension: find each company's Greenhouse board, match the job, fetch the form, build the fill plan. Job Ops is **read-only** here: link and note write-backs are only printed.
+
+```bash
+set -a && . ./.env && set +a      # username / password for Job Ops
+npx tsx apply-assistant/spike/e2e-real.ts
+```
+
+It prints each lookup, the matched posting with its title/description scores, and every plan entry that will fill or needs you.
+
 ## Findings
 
 See §12A of `PHASE1_GREENHOUSE_PLAN.md`.

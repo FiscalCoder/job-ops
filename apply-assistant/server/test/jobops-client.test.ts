@@ -167,6 +167,16 @@ describe("JobOpsClient", () => {
     expect(new TextDecoder().decode(pdf)).toBe("%PDF-1.5 test");
   });
 
+  it("reads the design resume document", async () => {
+    const resumeJson = { basics: { email: "a@b.c" }, sections: {} };
+    const { fetchImpl, calls } = fakeFetch(() =>
+      json({ ok: true, data: { id: "r1", title: "Resume", resumeJson } }),
+    );
+    const client = new JobOpsClient(BASE, fetchImpl);
+    expect(await client.getDesignResume("tok")).toEqual(resumeJson);
+    expect(calls[0]?.url).toBe(`${BASE}/api/design-resume`);
+  });
+
   it("turns an error envelope into a JobOpsError with the status and message", async () => {
     const { fetchImpl } = fakeFetch(() =>
       json(

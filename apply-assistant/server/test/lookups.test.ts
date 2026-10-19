@@ -4,6 +4,8 @@ import { createApp } from "../src/http/app.js";
 import type { JobOpsApi, JobOpsJob, JobUpdate } from "../src/jobops/client.js";
 import { JobOpsError } from "../src/jobops/client.js";
 import { openStore } from "../src/store/db.js";
+import { fakeDesignResume } from "./fixtures/fake-resume.js";
+import newrelic from "./fixtures/gh-newrelic.json" with { type: "json" };
 
 const JD =
   "We are looking for a senior backend engineer to design and build scalable services in Go and Kubernetes. " +
@@ -101,6 +103,7 @@ function fakeJobOps(log: {
       log.notes.push([id, note.title]);
     },
     getPdf: async () => new Uint8Array(),
+    getDesignResume: async () => fakeDesignResume,
   };
 }
 
@@ -135,7 +138,16 @@ async function start() {
       json: (await res.json()) as { ok: boolean; data: any; error?: any },
     };
   };
-  return { call, log };
+  const put = async (path: string, body: unknown) =>
+    fetch(`http://127.0.0.1:${port}${path}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer good",
+      },
+      body: JSON.stringify(body),
+    });
+  return { call, put, log };
 }
 
 describe("lookups", () => {
@@ -264,11 +276,11 @@ describe("lookups", () => {
       ],
     ]);
 
-    // The board is cached for the employer: next time the task is list-board, not find-board.
+    // Matched: the next task for this job is fetching its form so it can be planned.
     const pending = await call("/lookups/pending");
     expect(
-      pending.json.data.find((p: any) => p.jobId === "linkedin"),
-    ).toBeUndefined();
+      pending.json.data.find((p: any) => p.jobId === "linkedin")?.task,
+    ).toEqual({ type: "fetch-schema", token: "gammalabs", ghJobId: "77" });
   });
 
   it("remembers that a company has no Greenhouse board", async () => {
@@ -347,5 +359,121 @@ describe("lookups", () => {
         greenhouse: { status: "pending" },
       }),
     ]);
+  });
+
+  describe("forms and plans", () => {
+    const matchDirect = (call: Awaited<ReturnType<typeof start>>["call"]) =>
+      call("/lookups/results", {
+        type: "job",
+        jobId: "direct",
+        token: "acme",
+        ghJobId: "11",
+        url: "https://job-boards.greenhouse.io/acme/jobs/11",
+        live: true,
+      });
+    const formFor11 = { ...structuredClone(newrelic), id: 11 };
+
+    it("asks for the form of a matched posting, plans it, then stops asking", async () => {
+      const { call } = await start();
+      await matchDirect(call);
+      const before = await call("/lookups/pending");
+      expect(
+        before.json.data.find((p: any) => p.jobId === "direct")?.task,
+      ).toEqual({
+        type: "fetch-schema",
+        token: "acme",
+        ghJobId: "11",
+      });
+
+      const res = await call("/lookups/results", {
+        type: "schema",
+        jobId: "direct",
+        token: "acme",
+        ghJobId: "11",
+        payload: formFor11,
+      });
+      expect(res.status).toBe(200);
+      expect(res.json.data.status).toBe("planned");
+      expect(res.json.data.summary.needsYou).toBeGreaterThan(0);
+
+      const after = await call("/lookups/pending");
+      expect(
+        after.json.data.find((p: any) => p.jobId === "direct"),
+      ).toBeUndefined();
+
+      const queue = await call("/queue");
+      const direct = queue.json.data.find((q: any) => q.jobId === "direct");
+      expect(direct.plan.summary).toEqual(res.json.data.summary);
+    });
+
+    it("rejects a form for another posting or a non-Greenhouse payload", async () => {
+      const { call } = await start();
+      await matchDirect(call);
+      const wrongPosting = await call("/lookups/results", {
+        type: "schema",
+        jobId: "direct",
+        token: "acme",
+        ghJobId: "99",
+        payload: formFor11,
+      });
+      expect(wrongPosting.status).toBe(400);
+      expect(wrongPosting.json.error.code).toBe("INVALID_LOOKUP");
+      const notAForm = await call("/lookups/results", {
+        type: "schema",
+        jobId: "direct",
+        token: "acme",
+        ghJobId: "11",
+        payload: { nope: true },
+      });
+      expect(notAForm.status).toBe(400);
+      const mismatchedId = await call("/lookups/results", {
+        type: "schema",
+        jobId: "direct",
+        token: "acme",
+        ghJobId: "11",
+        payload: newrelic,
+      });
+      expect(mismatchedId.status).toBe(400);
+    });
+
+    it("serves a plan, says why when a job can't be planned, and rebuilds after bank edits", async () => {
+      const { call, put } = await start();
+      const notYet = await call("/plans/direct");
+      expect(notYet.status).toBe(409);
+      expect(notYet.json.error.code).toBe("NOT_PLANNABLE");
+
+      await matchDirect(call);
+      expect((await call("/plans/direct")).status).toBe(409);
+      await call("/lookups/results", {
+        type: "schema",
+        jobId: "direct",
+        token: "acme",
+        ghJobId: "11",
+        payload: formFor11,
+      });
+
+      const plan = await call("/plans/direct");
+      expect(plan.status).toBe(200);
+      const firstName = plan.json.data.entries.find(
+        (e: any) => e.ref === "first_name",
+      );
+      expect(firstName.status).toBe("needs-you");
+
+      const queueBefore = await call("/queue");
+      const needsBefore = queueBefore.json.data.find(
+        (q: any) => q.jobId === "direct",
+      ).plan.summary.needsYou;
+      await put("/answer-bank/identity.first_name", { value: "Test" });
+      const rebuilt = await call("/plans/rebuild", {});
+      expect(rebuilt.json.data).toEqual({ rebuilt: 1, failed: [] });
+      const queueAfter = await call("/queue");
+      // First name also covers "Preferred First Name", which falls back to it.
+      expect(
+        queueAfter.json.data.find((q: any) => q.jobId === "direct").plan.summary
+          .needsYou,
+      ).toBe(needsBefore - 2);
+
+      expect((await call("/plans/nope")).status).toBe(409);
+    });
   });
 });

@@ -1,11 +1,14 @@
 import { type Response, Router } from "express";
 import { JobOpsError } from "../jobops/client.js";
-import { createLookups, lookupResultSchema } from "../resolver/lookups.js";
+import {
+  createLookups,
+  InvalidLookupError,
+  type LookupsDeps,
+  lookupResultSchema,
+} from "../resolver/lookups.js";
 import type { AuthedRequest } from "./auth.js";
 import { sendJobOpsFailure } from "./auth.js";
 import { sendError, sendOk } from "./envelope.js";
-
-type LookupsDeps = Parameters<typeof createLookups>[0];
 
 /** Resolver endpoints used by the extension, plus the queue the side panel shows. */
 export function createLookupRoutes(deps: LookupsDeps) {
@@ -37,6 +40,10 @@ export function createLookupRoutes(deps: LookupsDeps) {
     try {
       sendOk(res, await lookups.apply(tokenOf(req), parsed.data));
     } catch (error) {
+      if (error instanceof InvalidLookupError) {
+        sendError(res, 400, "INVALID_LOOKUP", error.message);
+        return;
+      }
       if (error instanceof JobOpsError && error.status === 404) {
         sendError(res, 404, "JOB_NOT_FOUND", "Job Ops has no job with that id");
         return;

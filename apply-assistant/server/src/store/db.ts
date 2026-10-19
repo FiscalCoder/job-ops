@@ -86,6 +86,15 @@ const MIGRATIONS: readonly string[] = [
      decoded_url text,
      captured_at text not null default (datetime('now'))
    );`,
+  // M2: Greenhouse form payloads fetched by the extension, one per posting.
+  `create table form_schemas (
+     gh_token text not null,
+     gh_job_id text not null,
+     payload_json text not null,
+     schema_hash text not null,
+     fetched_at text not null default (datetime('now')),
+     primary key (gh_token, gh_job_id)
+   );`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

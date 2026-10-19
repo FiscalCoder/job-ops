@@ -1,9 +1,14 @@
 import { z } from "zod";
 import type { JobOpsApi, JobOpsJob } from "../jobops/client.js";
+import { parseGreenhouseSchema } from "../plan/gh-schema.js";
+import type { PlanSummary } from "../plan/planner.js";
+import type { PlansService } from "../plan/plans-service.js";
 import type {
   ApplyTarget,
   ApplyTargetsRepo,
 } from "../store/apply-targets-repo.js";
+import type { FillPlansRepo } from "../store/fill-plans-repo.js";
+import type { FormSchemasRepo } from "../store/form-schemas-repo.js";
 import type { GhBoardsRepo } from "../store/gh-boards-repo.js";
 import { classifyApplyUrl } from "./greenhouse-url.js";
 import { matchOnBoard } from "./match.js";
@@ -33,7 +38,8 @@ export type LookupTask =
   | { type: "resolve-embedded"; ghJobId: string; pageUrl: string }
   | { type: "follow-short-link"; url: string }
   | { type: "list-board"; token: string }
-  | { type: "find-board"; employer: string };
+  | { type: "find-board"; employer: string }
+  | { type: "fetch-schema"; token: string; ghJobId: string };
 
 export interface PendingLookup {
   readonly jobId: string;
@@ -67,6 +73,14 @@ export const lookupResultSchema = z.discriminatedUnion("type", [
     jobs: z.array(boardJob).max(2000).optional(),
     details: z.record(z.string(), z.string().max(200_000)).optional(),
   }),
+  z.object({
+    type: z.literal("schema"),
+    jobId: z.string().min(1),
+    token: z.string().min(1),
+    ghJobId: z.string().min(1),
+    /** Greenhouse's `?questions=true` job payload, as fetched. */
+    payload: z.unknown(),
+  }),
 ]);
 export type LookupResult = z.infer<typeof lookupResultSchema>;
 
@@ -78,17 +92,31 @@ export type ResultOutcome =
       titleScore: number | null;
       descScore: number | null;
     }
-  | { status: "none" | "closed"; reason: string };
+  | { status: "none" | "closed"; reason: string }
+  | { status: "planned"; summary: PlanSummary };
+
+/** A lookup result the server can't accept (wrong posting, not a Greenhouse form). */
+export class InvalidLookupError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidLookupError";
+  }
+}
 
 const isSettled = (target: ApplyTarget | null) =>
   target !== null && target.status !== "none";
 
-export function createLookups(deps: {
-  jobOps: JobOpsApi;
-  targets: ApplyTargetsRepo;
-  boards: GhBoardsRepo;
-}) {
-  const { jobOps, targets, boards } = deps;
+export interface LookupsDeps {
+  readonly jobOps: JobOpsApi;
+  readonly targets: ApplyTargetsRepo;
+  readonly boards: GhBoardsRepo;
+  readonly schemas: FormSchemasRepo;
+  readonly plans: PlansService;
+  readonly planStore: FillPlansRepo;
+}
+
+export function createLookups(deps: LookupsDeps) {
+  const { jobOps, targets, boards, schemas, plans, planStore } = deps;
 
   const taskFor = (job: JobOpsJob): LookupTask | null => {
     const link = classifyApplyUrl(job.applicationLink ?? job.jobUrl);
@@ -113,12 +141,26 @@ export function createLookups(deps: {
     return { type: "find-board", employer: job.employer };
   };
 
+  /** Matched postings need their form fetched (again, once it goes stale) to be planned. */
+  const nextTaskFor = (job: JobOpsJob): LookupTask | null => {
+    const target = targets.get(job.id);
+    if (!isSettled(target)) return taskFor(job);
+    if (target?.status !== "matched" || !target.ghToken || !target.ghJobId)
+      return null;
+    return schemas.getFresh(target.ghToken, target.ghJobId)
+      ? null
+      : {
+          type: "fetch-schema",
+          token: target.ghToken,
+          ghJobId: target.ghJobId,
+        };
+  };
+
   async function pending(token: string): Promise<PendingLookup[]> {
     const { jobs } = await jobOps.listJobs(token, LOOKUP_STATUSES);
     return jobs
       .filter(worthLookingUp)
-      .filter((job) => !isSettled(targets.get(job.id)))
-      .map((job) => ({ job, task: taskFor(job) }))
+      .map((job) => ({ job, task: nextTaskFor(job) }))
       .filter(
         (entry): entry is { job: JobOpsJob; task: LookupTask } =>
           entry.task !== null,
@@ -147,6 +189,7 @@ export function createLookups(deps: {
     token: string,
     result: LookupResult,
   ): Promise<ResultOutcome> {
+    if (result.type === "schema") return applySchema(token, result);
     const job = await jobOps.getJob(token, result.jobId);
 
     if (result.type === "job") {
@@ -252,7 +295,36 @@ export function createLookups(deps: {
     };
   }
 
+  async function applySchema(
+    token: string,
+    result: Extract<LookupResult, { type: "schema" }>,
+  ): Promise<ResultOutcome> {
+    const target = targets.get(result.jobId);
+    if (
+      target?.status !== "matched" ||
+      target.ghToken !== result.token ||
+      target.ghJobId !== result.ghJobId
+    )
+      throw new InvalidLookupError(
+        "That form isn't the Greenhouse posting matched to this job",
+      );
+    let schema: ReturnType<typeof parseGreenhouseSchema>;
+    try {
+      schema = parseGreenhouseSchema(result.payload);
+    } catch (error) {
+      throw new InvalidLookupError(
+        error instanceof Error ? error.message : "Not a Greenhouse form",
+      );
+    }
+    if (schema.ghJobId !== result.ghJobId)
+      throw new InvalidLookupError("The form is for a different posting");
+    schemas.save(result.token, result.ghJobId, result.payload, schema.hash);
+    const plan = await plans.build(token, result.jobId);
+    return { status: "planned", summary: plan.summary };
+  }
+
   async function queue(token: string) {
+    const summaries = planStore.summaries();
     const { jobs } = await jobOps.listJobs(token, QUEUE_STATUSES);
     return [...jobs]
       .sort((a, b) => (b.suitabilityScore ?? 0) - (a.suitabilityScore ?? 0))
@@ -271,6 +343,7 @@ export function createLookups(deps: {
                 descScore: target.descScore,
               }
             : { status: "pending" as const },
+          plan: summaries.get(job.id) ?? null,
         };
       });
   }

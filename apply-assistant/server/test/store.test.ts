@@ -21,6 +21,7 @@ describe("openStore", () => {
         "captured_links",
         "employer_domains",
         "fill_plans",
+        "form_schemas",
         "gh_boards",
         "question_map",
         "run_actions",

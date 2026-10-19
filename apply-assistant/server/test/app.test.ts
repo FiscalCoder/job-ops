@@ -4,6 +4,7 @@ import { createApp } from "../src/http/app.js";
 import type { JobOpsApi } from "../src/jobops/client.js";
 import { JobOpsError } from "../src/jobops/client.js";
 import { openStore } from "../src/store/db.js";
+import { fakeDesignResume } from "./fixtures/fake-resume.js";
 
 function fakeJobOps(overrides: Partial<JobOpsApi> = {}): JobOpsApi {
   return {
@@ -23,6 +24,7 @@ function fakeJobOps(overrides: Partial<JobOpsApi> = {}): JobOpsApi {
     updateJob: async () => undefined,
     addNote: async () => undefined,
     getPdf: async () => new Uint8Array(),
+    getDesignResume: async () => fakeDesignResume,
     ...overrides,
   };
 }
@@ -120,25 +122,48 @@ describe("apply-assistant HTTP app", () => {
     expect(meCalls).toBe(1);
   });
 
-  it("stores and returns answer bank entries", async () => {
+  it("returns the answer-bank catalogue with your saved values, plus custom keys", async () => {
     const { call } = await start();
-    const put = await call("/answer-bank/notice_period", {
+    const put = await call("/answer-bank/work.notice_period", {
       method: "PUT",
       token: "good",
-      body: JSON.stringify({ value: "30 days, negotiable", isProtected: true }),
+      body: JSON.stringify({ value: "30 days, negotiable" }),
     });
     expect(put.status).toBe(200);
-    const list = await (await call("/answer-bank", { token: "good" })).json();
-    expect(list).toMatchObject({
-      ok: true,
-      data: [
-        {
-          key: "notice_period",
-          value: "30 days, negotiable",
-          isProtected: true,
-        },
-      ],
+    await call("/answer-bank/custom.thing", {
+      method: "PUT",
+      token: "good",
+      body: JSON.stringify({ value: "x" }),
     });
+    const { data } = await (
+      await call("/answer-bank", { token: "good" })
+    ).json();
+    const notice = data.keys.find(
+      (k: { key: string }) => k.key === "work.notice_period",
+    );
+    expect(notice).toMatchObject({
+      label: "Notice period",
+      group: "Work authorisation",
+      protected: true,
+      value: "30 days, negotiable",
+    });
+    const city = data.keys.find(
+      (k: { key: string }) => k.key === "location.current_city",
+    );
+    expect(city).toMatchObject({ value: null, protected: false });
+    expect(data.custom).toEqual([
+      expect.objectContaining({ key: "custom.thing", value: "x" }),
+    ]);
+  });
+
+  it("always stores catalogue-protected keys as protected", async () => {
+    const { call } = await start();
+    const res = await call("/answer-bank/comp.expected", {
+      method: "PUT",
+      token: "good",
+      body: JSON.stringify({ value: "30 LPA", isProtected: false }),
+    });
+    expect((await res.json()).data).toMatchObject({ isProtected: true });
   });
 
   it("validates answer bank input", async () => {
