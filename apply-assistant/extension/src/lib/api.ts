@@ -57,6 +57,45 @@ export class ApplyClient {
     return this.request(`/plans/${encodeURIComponent(jobId)}`);
   }
 
+  startRun(jobId: string): Promise<{ id: string }> {
+    return this.request("/runs", { jobId });
+  }
+
+  logAction(runId: string, action: Record<string, unknown>): Promise<unknown> {
+    return this.request(`/runs/${encodeURIComponent(runId)}/actions`, action);
+  }
+
+  completeRun(
+    runId: string,
+    outcome: "submitted" | "aborted",
+  ): Promise<unknown> {
+    return this.request(`/runs/${encodeURIComponent(runId)}/complete`, {
+      outcome,
+    });
+  }
+
+  /** The job's tailored PDF, as base64 plus the file name the server chose. */
+  async resumePdf(jobId: string): Promise<{ base64: string; name: string }> {
+    const res = await this.fetchImpl(
+      `${this.baseUrl.replace(/\/+$/, "")}/jobs/${encodeURIComponent(jobId)}/resume.pdf`,
+      { headers: this.token ? { authorization: `Bearer ${this.token}` } : {} },
+    );
+    if (!res.ok)
+      throw new ApiError(
+        res.status,
+        "RESUME_UNAVAILABLE",
+        "The tailored PDF isn't available from Job Ops",
+      );
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    const name =
+      res.headers
+        .get("content-disposition")
+        ?.match(/filename="([^"]+)"/)?.[1] ?? "Resume.pdf";
+    return { base64: btoa(binary), name };
+  }
+
   private async request<T>(path: string, body?: unknown): Promise<T> {
     const res = await this.fetchImpl(
       `${this.baseUrl.replace(/\/+$/, "")}${path}`,

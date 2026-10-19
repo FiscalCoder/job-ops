@@ -5,12 +5,17 @@ import { defineConfig } from "wxt";
  * Apply Copilot. Talks to your apply-assistant server and does every third-party lookup from
  * this browser (your IP), never from the server.
  */
+const NODE_ONLY = fileURLToPath(
+  new URL("./src/stubs/node-only.ts", import.meta.url),
+);
+
 export default defineConfig({
   manifest: {
     name: "Apply Copilot",
     description:
       "Greenhouse lookups and supervised applying for your Job Ops queue.",
-    permissions: ["storage", "alarms", "sidePanel"],
+    // debugger: trusted typing/clicking on the form (Greenhouse ignores synthetic input).
+    permissions: ["storage", "alarms", "sidePanel", "debugger"],
     host_permissions: [
       "https://apply.hueint.com/*",
       "https://boards-api.greenhouse.io/*",
@@ -27,15 +32,24 @@ export default defineConfig({
   },
   vite: () => ({
     resolve: {
-      alias: {
+      alias: [
+        // puppeteer-core lazily imports its Node launcher; never used when attaching to a tab.
+        { find: "@puppeteer/browsers", replacement: NODE_ONLY },
+        {
+          find: /^\.\.\/node\/(LaunchOptions|NodeWebSocketTransport)\.js$/,
+          replacement: NODE_ONLY,
+        },
         // Upstream Job Ops package, imported read-only (no copy, no edits).
-        "@career-boards/greenhouse": fileURLToPath(
-          new URL(
-            "../../career-boards/greenhouse/src/index.ts",
-            import.meta.url,
+        {
+          find: "@career-boards/greenhouse",
+          replacement: fileURLToPath(
+            new URL(
+              "../../career-boards/greenhouse/src/index.ts",
+              import.meta.url,
+            ),
           ),
-        ),
-      },
+        },
+      ],
     },
   }),
 });

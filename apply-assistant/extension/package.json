@@ -17,5 +17,8 @@
     "typescript": "5.7.2",
     "vitest": "4.0.16",
     "wxt": "0.21.4"
+  },
+  "dependencies": {
+    "puppeteer-core": "25.12.0"
   }
 }

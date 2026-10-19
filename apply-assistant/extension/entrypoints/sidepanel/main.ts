@@ -1,3 +1,4 @@
+import { RunController } from "../../src/fill/controller";
 import { ApiError, ApplyClient, type QueueItem } from "../../src/lib/api";
 import {
   loadLastRun,
@@ -5,6 +6,7 @@ import {
   saveSettings,
 } from "../../src/lib/settings";
 import type { RunSummary } from "../../src/lib/worker";
+import { renderRun as renderRunView } from "./run-view";
 
 // Side panel: sign in, run lookups, see the queue and each job's plan.
 // Everything is rendered with textContent.
@@ -28,6 +30,77 @@ const message = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
 let client: ApplyClient | null = null;
+let activeRun: RunController | null = null;
+
+const COUNTDOWN_CHOICES = ["3", "1", "0"];
+
+async function countdownSetting(): Promise<number> {
+  const { countdownSeconds } =
+    await chrome.storage.local.get("countdownSeconds");
+  return typeof countdownSeconds === "number" ? countdownSeconds : 3;
+}
+
+function countdownPicker(current: number): HTMLElement {
+  const select = el(
+    "select",
+    { "aria-label": "Countdown before automatic steps" },
+    ...COUNTDOWN_CHOICES.map((v) => {
+      const option = el(
+        "option",
+        { value: v },
+        v === "0" ? "approve every step" : `${v}s countdown`,
+      ) as HTMLOptionElement;
+      option.selected = Number(v) === current;
+      return option;
+    }),
+  ) as HTMLSelectElement;
+  select.addEventListener(
+    "change",
+    () =>
+      void chrome.storage.local.set({ countdownSeconds: Number(select.value) }),
+  );
+  return select;
+}
+
+async function startFill(item: QueueItem) {
+  if (!client || activeRun) return;
+  const box = $("run-box");
+  box.hidden = false;
+  $("main").hidden = true;
+  box.replaceChildren(
+    el("p", { class: "muted" }, "Opening the posting and finding the form…"),
+  );
+  const closeRun = () => {
+    activeRun = null;
+    box.hidden = true;
+    $("main").hidden = false;
+    void loadQueue();
+  };
+  try {
+    activeRun = await RunController.start({
+      client,
+      job: item,
+      countdownSeconds: await countdownSetting(),
+      onChange: (view) =>
+        renderRunView(
+          box,
+          view,
+          (event) => activeRun?.dispatch(event),
+          closeRun,
+        ),
+    });
+  } catch (error) {
+    activeRun = null;
+    box.replaceChildren(
+      el("p", { class: "error" }, message(error)),
+      el("button", { type: "button" }, "Back"),
+    );
+    box.querySelector("button")?.addEventListener("click", closeRun);
+  }
+}
+
+// Closing the panel ends supervision; the run stops without submitting anything.
+window.addEventListener("pagehide", () => void activeRun?.stop());
 
 const loginForm = () => $<HTMLFormElement>("login-form");
 const field = (name: string) =>
@@ -215,6 +288,16 @@ interface Entry {
 const valueText = (entry: Entry) =>
   Array.isArray(entry.value) ? entry.value.join(", ") : (entry.value ?? "");
 
+function startButton(item: QueueItem): HTMLElement {
+  const b = el(
+    "button",
+    { type: "button", class: "primary" },
+    "Start supervised fill",
+  );
+  b.addEventListener("click", () => void startFill(item));
+  return b;
+}
+
 async function showPlan(item: QueueItem) {
   if (!client) return;
   const box = $("plan");
@@ -236,6 +319,16 @@ async function showPlan(item: QueueItem) {
             )
           : null,
       ),
+      ...(item.greenhouse.status === "matched"
+        ? [
+            el(
+              "div",
+              { class: "controls" },
+              countdownPicker(await countdownSetting()),
+              startButton(item),
+            ),
+          ]
+        : []),
       ...entries.map((e) =>
         el(
           "div",

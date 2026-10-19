@@ -8,5 +8,5 @@
       "@career-boards/greenhouse": ["../../career-boards/greenhouse/src/index.ts"]
     }
   },
-  "include": ["entrypoints/**/*", "src/lib/**/*", "test/**/*", ".wxt/wxt.d.ts"]
+  "include": ["entrypoints/**/*", "src/lib/**/*", "src/fill/**/*", "test/**/*", ".wxt/wxt.d.ts"]
 }
