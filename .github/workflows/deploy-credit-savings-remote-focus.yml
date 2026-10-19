@@ -3,6 +3,8 @@ name: Deploy credit-savings-remote-focus to VPS
 on:
   push:
     branches: [feature/credit-savings-remote-focus]
+    # apply-assistant deploys itself (deploy-apply-assistant.yml); its changes never need a Job Ops rebuild.
+    paths-ignore: ["apply-assistant/**"]
   workflow_dispatch: {}
 
 concurrency:
