@@ -13,6 +13,7 @@ RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 
 COPY tsconfig.json ./
 COPY server/src ./server/src
+COPY server/public ./server/public
 
 RUN mkdir -p /data && chown -R node:node /data
 USER node

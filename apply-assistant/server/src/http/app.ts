@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import { z } from "zod";
 import type { JobOpsApi } from "../jobops/client.js";
@@ -13,6 +14,14 @@ import { createAuthMiddleware, sendJobOpsFailure } from "./auth.js";
 import { sendError, sendOk } from "./envelope.js";
 import { createLookupRoutes } from "./lookup-routes.js";
 import { createPlanRoutes } from "./plan-routes.js";
+import {
+  createApiLimiter,
+  createLoginLimiter,
+  securityHeaders,
+} from "./security.js";
+
+/** The web page (answer bank + queue), served from the same origin as the API. */
+const PUBLIC_DIR = fileURLToPath(new URL("../../public", import.meta.url));
 
 export interface AppDeps {
   readonly jobOps: JobOpsApi;
@@ -30,12 +39,17 @@ export function createApp({ jobOps, db, authCacheSeconds }: AppDeps) {
   const requireUser = createAuthMiddleware(jobOps, authCacheSeconds);
 
   app.disable("x-powered-by");
+  // One hop: nginx (CloudPanel) is the only way in, so its X-Forwarded-For is the client.
+  app.set("trust proxy", 1);
+  app.use(securityHeaders);
+  app.use(express.static(PUBLIC_DIR, { index: "index.html" }));
+  app.use(createApiLimiter());
   // Lookup results can carry several job descriptions.
   app.use(express.json({ limit: "5mb" }));
 
   app.get("/health", (_req, res) => sendOk(res, { status: "ok" }));
 
-  app.post("/auth/login", async (req, res) => {
+  app.post("/auth/login", createLoginLimiter(), async (req, res) => {
     const body = loginBody.safeParse(req.body);
     if (!body.success)
       return sendError(

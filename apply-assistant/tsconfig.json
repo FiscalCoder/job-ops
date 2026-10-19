@@ -12,5 +12,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["server/src/**/*.ts", "server/test/**/*.ts"]
+  "include": ["server/src/**/*.ts", "server/test/**/*.ts", "server/e2e/**/*.ts"]
 }

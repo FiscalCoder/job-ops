@@ -13,11 +13,13 @@
     "test": "vitest run --exclude \"server/test/contract/**\"",
     "test:coverage": "vitest run --coverage --coverage.include=\"server/src/**\" --coverage.exclude=server/src/index.ts --exclude \"server/test/contract/**\"",
     "test:contract": "vitest run server/test/contract",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
     "date-fns": "4.4.0",
     "express": "4.22.2",
+    "express-rate-limit": "8.7.0",
     "fuse.js": "7.5.0",
     "tsx": "4.22.4",
     "zod": "3.23.8"

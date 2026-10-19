@@ -191,4 +191,37 @@ describe("apply-assistant HTTP app", () => {
       error: { code: "JOBOPS_UNREACHABLE" },
     });
   });
+
+  it("serves the web page with a strict content security policy", async () => {
+    const { call } = await start();
+    const page = await call("/");
+    expect(page.status).toBe(200);
+    expect(page.headers.get("content-type")).toMatch(/text\/html/);
+    expect(await page.text()).toContain("<title>Apply Assistant</title>");
+    const csp = page.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(page.headers.get("x-content-type-options")).toBe("nosniff");
+    const script = await call("/app.js");
+    expect(script.headers.get("content-type")).toMatch(/javascript/);
+  });
+
+  it("slows down repeated failed sign-ins", async () => {
+    const { call } = await start();
+    const attempt = () =>
+      call("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ username: "me", password: "wrong" }),
+      });
+    const statuses: number[] = [];
+    for (let i = 0; i < 11; i++) statuses.push((await attempt()).status);
+    expect(statuses.slice(0, 10).every((s) => s === 401)).toBe(true);
+    const blocked = await attempt();
+    expect(blocked.status).toBe(429);
+    expect(await blocked.json()).toMatchObject({
+      ok: false,
+      error: { code: "TOO_MANY_ATTEMPTS" },
+    });
+  });
 });

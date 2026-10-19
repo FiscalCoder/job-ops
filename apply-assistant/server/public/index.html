@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Apply Assistant</title>
+    <link rel="stylesheet" href="app.css" />
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <header class="top">
+      <h1>Apply Assistant</h1>
+      <nav id="tabs" hidden>
+        <button type="button" data-tab="queue" class="tab">Queue</button>
+        <button type="button" data-tab="bank" class="tab">Answer bank</button>
+        <button type="button" id="signout" class="link">Sign out</button>
+      </nav>
+    </header>
+
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+
+    <main>
+      <section id="login" hidden>
+        <form id="login-form" class="card narrow">
+          <h2>Sign in</h2>
+          <p class="muted">Use your Job Ops login. Nothing is stored here except the session token.</p>
+          <label>Username <input name="username" autocomplete="username" required /></label>
+          <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>
+          <button type="submit" class="primary">Sign in</button>
+          <p id="login-error" class="error" hidden></p>
+        </form>
+      </section>
+
+      <section id="queue" hidden>
+        <div class="section-head">
+          <div>
+            <h2>Queue</h2>
+            <p class="muted">Ready jobs in Job Ops, with their Greenhouse match and fill plan.</p>
+          </div>
+          <button type="button" id="refresh-queue">Refresh</button>
+        </div>
+        <div id="queue-list" class="card"></div>
+        <div id="plan" class="card" hidden></div>
+      </section>
+
+      <section id="bank" hidden>
+        <div class="section-head">
+          <div>
+            <h2>Answer bank</h2>
+            <p class="muted">
+              What forms ask that isn't on your resume. <span class="badge protected">protected</span> answers are
+              only ever filled from what you save here.
+            </p>
+          </div>
+          <button type="button" id="save-bank" class="primary" disabled>Save changes</button>
+        </div>
+        <form id="bank-form"></form>
+      </section>
+    </main>
+  </body>
+</html>

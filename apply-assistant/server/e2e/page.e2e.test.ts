@@ -1,0 +1,193 @@
+import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { type Browser, chromium, type Page } from "playwright";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createApp } from "../src/http/app.js";
+import {
+  type JobOpsApi,
+  JobOpsError,
+  type JobOpsJob,
+} from "../src/jobops/client.js";
+import { openStore } from "../src/store/db.js";
+import { fakeDesignResume } from "../test/fixtures/fake-resume.js";
+import newrelic from "../test/fixtures/gh-newrelic.json" with { type: "json" };
+
+/**
+ * The web page in a real browser against a real apply-assistant (fake Job Ops):
+ * sign in → queue → plan → "Answer it" → save → plan updated.
+ */
+
+const SHOTS = process.env.E2E_SCREENSHOTS;
+
+const job: JobOpsJob = {
+  id: "job-1",
+  title: "Senior Backend Engineer",
+  employer: "Acme",
+  status: "ready",
+  jobUrl: "https://job-boards.greenhouse.io/acme/jobs/11",
+  applicationLink: null,
+  suitabilityScore: 84,
+};
+
+const jobOps: JobOpsApi = {
+  login: async (u, p) => {
+    if (u === "me" && p === "pw") return { token: "good", expiresIn: 3600 };
+    throw new JobOpsError(401, "INVALID_CREDENTIALS", "Invalid credentials");
+  },
+  me: async (t) => {
+    if (t === "good") return { id: "u1", username: "me" };
+    throw new JobOpsError(401, "UNAUTHORIZED", "nope");
+  },
+  listJobs: async () => ({ jobs: [job], total: 1, revision: "r" }),
+  getJob: async () => ({
+    ...job,
+    location: "Bengaluru, India",
+    jobDescription: "x",
+  }),
+  updateJob: async () => undefined,
+  addNote: async () => undefined,
+  getPdf: async () => new Uint8Array(),
+  getDesignResume: async () => fakeDesignResume,
+};
+
+let server: Server;
+let base: string;
+let browser: Browser;
+let page: Page;
+
+const post = (path: string, body: unknown) =>
+  fetch(`${base}${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: "Bearer good",
+    },
+    body: JSON.stringify(body),
+  });
+
+const shot = async (name: string) => {
+  if (SHOTS)
+    await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true });
+};
+
+beforeAll(async () => {
+  server = createApp({
+    jobOps,
+    db: openStore(":memory:"),
+    authCacheSeconds: 60,
+  }).listen(0);
+  await new Promise((r) => server.once("listening", r));
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  // What the extension would report: posting live, then its form.
+  await post("/lookups/results", {
+    type: "job",
+    jobId: "job-1",
+    token: "acme",
+    ghJobId: "11",
+    url: "https://job-boards.greenhouse.io/acme/jobs/11",
+    live: true,
+  });
+  await post("/lookups/results", {
+    type: "schema",
+    jobId: "job-1",
+    token: "acme",
+    ghJobId: "11",
+    payload: {
+      ...structuredClone(newrelic),
+      id: 11,
+      location: { name: "Bengaluru, India" },
+    },
+  });
+  browser = await chromium.launch();
+  page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+  page.on("pageerror", (e) => {
+    throw e;
+  });
+});
+
+afterAll(async () => {
+  await browser?.close();
+  server?.close();
+});
+
+describe("web page", () => {
+  it("rejects a wrong password, then signs in", async () => {
+    await page.goto(base);
+    await page.getByLabel("Username").fill("me");
+    await page.getByLabel("Password").fill("wrong");
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect
+      .poll(() => page.locator("#login-error").textContent())
+      .toBe("Wrong username or password.");
+    await page.getByLabel("Password").fill("pw");
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("heading", { name: "Queue" }).waitFor();
+  });
+
+  it("shows the job with its Greenhouse match and plan counts", async () => {
+    const row = page.locator("#queue-list tr", {
+      hasText: "Senior Backend Engineer",
+    });
+    await row.waitFor();
+    expect(await row.textContent()).toContain("On Greenhouse");
+    expect(await row.textContent()).toMatch(/\d+ need you/);
+    await shot("1-queue");
+  });
+
+  it("opens the plan and links a missing answer to the answer bank", async () => {
+    await page
+      .locator("#queue-list tr", { hasText: "Senior Backend Engineer" })
+      .click();
+    const firstName = page.locator("#plan tr", { hasText: /^First Name/ });
+    await firstName.waitFor();
+    expect(await firstName.textContent()).toContain("needs you");
+    expect(await page.locator("#plan").textContent()).toContain("job in India");
+    await shot("2-plan");
+    await firstName.getByRole("link", { name: "Answer it →" }).click();
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.id))
+      .toBe("bank-identity.first_name");
+    await shot("3-bank");
+  });
+
+  it("saves answers, rebuilds plans, and the plan then fills them", async () => {
+    await page.locator('[id="bank-identity.first_name"]').fill("Test");
+    await page.locator('[id="bank-work.authorized_countries"]').fill("India");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect
+      .poll(() => page.locator("#toast").textContent())
+      .toBe("Saved 2 answers · 1 plan updated");
+    expect(
+      await page.locator('[id="bank-identity.first_name"]').inputValue(),
+    ).toBe("Test");
+
+    await page.getByRole("button", { name: "Queue" }).click();
+    await page
+      .locator("#queue-list tr", { hasText: "Senior Backend Engineer" })
+      .click();
+    const firstName = page.locator("#plan tr", { hasText: /^First Name/ });
+    await expect.poll(() => firstName.textContent()).toContain("fills");
+    const sponsorship = page.locator("#plan tr", {
+      hasText: "require sponsorship",
+    });
+    expect(await sponsorship.textContent()).toContain("No");
+    await shot("4-plan-after");
+  });
+
+  it("keeps working at phone width", async () => {
+    await page.setViewportSize({ width: 380, height: 800 });
+    const wide = await page.evaluate(() =>
+      [...document.querySelectorAll("body *")]
+        .filter(
+          (n) => n.getBoundingClientRect().right > window.innerWidth + 0.5,
+        )
+        .map(
+          (n) =>
+            `${n.tagName.toLowerCase()}${n.id ? `#${n.id}` : ""}.${n.className} ${Math.round(n.getBoundingClientRect().right)}`,
+        )
+        .slice(0, 8),
+    );
+    expect(wide).toEqual([]);
+    await shot("5-phone");
+  });
+});
