@@ -383,13 +383,26 @@ The same module serves Workday in Phase 1b, where it also corrects Workday's res
 |---|---|---|---|---|
 | **M0** | Spike (dry run, never submits) | WXT skeleton. On 5 live Greenhouse forms (1 embedded iframe, 1 with education): fill text, react-select, location typeahead, education repeater, `DataTransfer` resume upload; read everything back. Decide whether the nanobrowser input layer is needed | All field types fill and read back on all 5 | 2–3 d |
 | **M1** | Server store + resolver | apply-assistant container (compose override), store + API, Job Ops client (login, jobs, profile, PDF, PATCH, notes), **contract tests**. Resolver ladder §4.2 split: lookups in the extension background, cache/matching/write-back on the server. Liveness | ≥ 90% of known Greenhouse jobs resolve correctly; the 5 found today resolve automatically | 4–5 d |
-| **M2** | Prep + planner + answer bank | `?questions=true` fetch, field classifier, experience/education module, answer bank UI (protected keys), question map, Haiku mapping, Sonnet drafts, queue page | Every resolved job shows a plan with "needs you" counts | 3–4 d |
+| **M2** (core done 2026-10-20) | Prep + planner + answer bank | `?questions=true` fetch, field classifier, experience/education module, answer bank UI (protected keys), question map, Haiku mapping, Sonnet drafts, queue page | Every resolved job shows a plan with "needs you" counts | 3–4 d |
 | **M3** | Extension: supervised fill | Side panel (queue, plan, next action, timeline, controls), content script for page + iframe, fillers, policy engine, gate and classes, detectors, "I'll do it" capture, submit detection, mark-applied, passive LinkedIn capture | One real application end to end, every action logged | 6–8 d |
 | **M4** | Dogfood | 20 real supervised applications; fix what breaks; tune thresholds | §1 targets met | ~1 wk (in parallel with use) |
 
 **Total: about 3 weeks of build plus a week of real use.**
 
 ---
+
+## 12B. M2 status (2026-10-20)
+
+Done and deployed at `https://apply.hueint.com`:
+- **Form schema:** `fetch-schema` lookup task for matched postings (re-fetched after 3 days); the server parses `?questions=true`, stores it (`form_schemas`, migration 2) and builds the plan.
+- **Planner:** classifier (Greenhouse names + question-text rules), resume facts from the design resume, experience/education (dates, degree level), option matching (exact > prefix > word > contains, fuse.js for near misses), work authorisation from `work.authorized_countries` + the job's country, EEO decline, consent. Missing answers become "needs you" with the reason; nothing is guessed.
+- **Answer bank:** 23 catalogue keys with groups, hints, protected flags; saving rebuilds every plan.
+- **Web page** (`/`): sign in with Job Ops, answer bank editor, queue with Greenhouse status and plan counts, plan per job with "Answer it" links.
+- **Lookups** also cover Discovered jobs scoring 70+ (only 1 of 87 such jobs was Ready).
+
+Verified on real data (read-only run, `spike/e2e-real.ts`): 24 lookups → 3 matched (title 1.00, descriptions 0.97–1.00) → 3 plans; each needs only answer-bank items (name, country, city).
+
+Left for M2: question map, Haiku mapping for unrecognised questions, Sonnet drafts for open-ended ones (needs an Anthropic API key on the server).
 
 ## 12A. M0 spike results (2026-10-19, dry run, fake data, nothing submitted)
 
@@ -417,7 +430,7 @@ The spike scripts are in `apply-assistant/spike/`. Every non-GET request was blo
    - So the extension drives every field through `chrome.debugger`. The content script only locates fields, outlines them and reads them back.
    - The vendored nanobrowser input layer moves from "maybe" to **required**.
    - Chrome shows a "started debugging this browser" bar while it's attached; that's acceptable under supervision.
-2. **The API doesn't list the Education section.** New Relic's form has School/Degree/Discipline (`school--0`, `degree--0`, `discipline--0`) that `?questions=true` doesn't report. The plan must merge **API schema + DOM scan**.
+2. **Education is flagged, not listed (corrected 2026-10-20).** `?questions=true` doesn't list School/Degree/Discipline (`school--0`, `degree--0`, `discipline--0`), but its top-level `education` field says whether the section exists (`education_required` / `education_optional`, absent = none). The planner adds the three fields from that flag; no DOM scan needed.
 3. **Attaching the resume uploads it immediately** to Greenhouse's storage (an S3 POST), **before Submit**. So the resume is attached as the **last step, after your "ready to apply" approval**, never during exploration or an abandoned run.
 4. **Field order matters:** country before phone (the phone widget follows the country), country before state.
 5. **Embedded forms can be hidden:** they can sit in a closed tab, behind "Apply now", or under cookie banners and pop-ups. A "reveal form" step is proposed first (Confirm class). The extension never clicks cookie-consent buttons; you do.
