@@ -30,7 +30,9 @@ jobs:
 
       - name: Build and start
         run: |
+          # The container runs as the unprivileged "node" user (uid 1000), so it must own its data folder.
           mkdir -p data/apply-assistant
+          chown 1000:1000 data/apply-assistant
           docker compose -p apply-assistant -f apply-assistant/docker-compose.yml up -d --build
 
       - name: Wait for health check
