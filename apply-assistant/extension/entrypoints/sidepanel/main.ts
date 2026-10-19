@@ -1,0 +1,266 @@
+import { ApiError, ApplyClient, type QueueItem } from "../../src/lib/api";
+import {
+  loadLastRun,
+  loadSettings,
+  saveSettings,
+} from "../../src/lib/settings";
+import type { RunSummary } from "../../src/lib/worker";
+
+// Side panel: sign in, run lookups, see the queue and each job's plan.
+// Everything is rendered with textContent.
+
+const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
+  document.getElementById(id) as T;
+
+function el(
+  tag: string,
+  attrs: Record<string, string | undefined> = {},
+  ...children: (Node | string | null)[]
+): HTMLElement {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs))
+    if (value !== undefined) node.setAttribute(key, value);
+  for (const child of children) if (child !== null) node.append(child);
+  return node;
+}
+
+const message = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
+let client: ApplyClient | null = null;
+
+const loginForm = () => $<HTMLFormElement>("login-form");
+const field = (name: string) =>
+  loginForm().elements.namedItem(name) as HTMLInputElement;
+
+async function start() {
+  const settings = await loadSettings();
+  field("server").value = settings.serverUrl;
+  if (settings.username) field("username").value = settings.username;
+  if (!settings.token) return showLogin();
+  client = new ApplyClient(settings.serverUrl, settings.token);
+  await showMain();
+}
+
+function showLogin(note?: string) {
+  $("login").hidden = false;
+  $("main").hidden = true;
+  $("signout").hidden = true;
+  const error = $("login-error");
+  error.hidden = !note;
+  error.textContent = note ?? "";
+}
+
+async function showMain() {
+  $("login").hidden = true;
+  $("main").hidden = false;
+  $("signout").hidden = false;
+  renderRun(await loadLastRun());
+  $("sites").hidden = await chrome.permissions.contains({
+    origins: ["https://*/*"],
+  });
+  await loadQueue();
+}
+
+function handle(error: unknown) {
+  if (error instanceof ApiError && error.status === 401) {
+    void saveSettings({ token: null });
+    showLogin("Your session expired. Sign in again.");
+    return;
+  }
+  $("last-run").textContent = message(error);
+}
+
+loginForm().addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const serverUrl = field("server").value.trim().replace(/\/+$/, "");
+  const username = field("username").value.trim();
+  try {
+    const token = await new ApplyClient(serverUrl, null).login(
+      username,
+      field("password").value,
+    );
+    await saveSettings({ serverUrl, token, username });
+    field("password").value = "";
+    client = new ApplyClient(serverUrl, token);
+    await showMain();
+  } catch (error) {
+    showLogin(
+      error instanceof ApiError && error.status === 401
+        ? "Wrong username or password."
+        : message(error),
+    );
+  }
+});
+
+$("signout").addEventListener("click", async () => {
+  await saveSettings({ token: null });
+  client = null;
+  showLogin();
+});
+
+function renderRun(summary: RunSummary | null) {
+  const line = $("last-run");
+  const details = $("run-details");
+  if (!summary) {
+    line.textContent =
+      "Not run yet. Runs every 30 minutes while Chrome is open.";
+    details.hidden = true;
+    return;
+  }
+  const when = new Date(summary.finishedAt).toLocaleString();
+  const count = summary.lines.length;
+  line.textContent = summary.error
+    ? `Last run ${when} stopped: ${summary.error}`
+    : `Last run ${when}: ${count} lookup${count === 1 ? "" : "s"}${
+        summary.skipped ? `, ${summary.skipped} waiting to retry` : ""
+      }.`;
+  $("run-lines").replaceChildren(
+    ...summary.lines.map((l) => el("li", {}, `${l.employer}: ${l.outcome}`)),
+  );
+  details.hidden = count === 0;
+}
+
+$("run").addEventListener("click", async () => {
+  const button = $<HTMLButtonElement>("run");
+  button.disabled = true;
+  button.textContent = "Running…";
+  try {
+    const summary = (await chrome.runtime.sendMessage({
+      type: "run-lookups",
+    })) as RunSummary | null;
+    renderRun(summary);
+    await loadQueue();
+  } catch (error) {
+    handle(error);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Run now";
+  }
+});
+
+$("allow-sites").addEventListener("click", async () => {
+  const granted = await chrome.permissions.request({
+    origins: ["https://*/*"],
+  });
+  $("sites").hidden = granted;
+});
+
+const GH: Record<string, [string, string]> = {
+  matched: ["ok", "On Greenhouse"],
+  possible: ["warn", "Possible match"],
+  none: ["", "Not on Greenhouse"],
+  closed: ["bad", "Closed"],
+  pending: ["", "Not checked yet"],
+};
+
+async function loadQueue() {
+  if (!client) return;
+  let items: QueueItem[];
+  try {
+    items = await client.queue();
+  } catch (error) {
+    handle(error);
+    return;
+  }
+  const list = $("queue");
+  if (items.length === 0) {
+    list.replaceChildren(
+      el("li", { class: "muted" }, "No Ready jobs in Job Ops."),
+    );
+    return;
+  }
+  list.replaceChildren(
+    ...items.map((item) => {
+      const [tone, label] = GH[item.greenhouse.status] ?? [
+        "",
+        item.greenhouse.status,
+      ];
+      const needs = item.plan?.summary.needsYou ?? 0;
+      const li = el(
+        "li",
+        { class: item.plan ? "clickable" : undefined },
+        el("div", {}, item.title),
+        el("div", { class: "muted" }, item.employer),
+        el(
+          "div",
+          {},
+          el("span", { class: `badge ${tone}` }, label),
+          " ",
+          item.plan
+            ? el(
+                "span",
+                { class: `badge ${needs ? "warn" : "ok"}` },
+                needs ? `${needs} need you` : "plan ready",
+              )
+            : null,
+        ),
+      );
+      if (item.plan) li.addEventListener("click", () => void showPlan(item));
+      return li;
+    }),
+  );
+}
+
+$("refresh").addEventListener("click", () => void loadQueue());
+
+interface Entry {
+  readonly label: string;
+  readonly status: string;
+  readonly value: string | string[] | null;
+  readonly reason?: string;
+  readonly actionClass: string;
+}
+
+const valueText = (entry: Entry) =>
+  Array.isArray(entry.value) ? entry.value.join(", ") : (entry.value ?? "");
+
+async function showPlan(item: QueueItem) {
+  if (!client) return;
+  const box = $("plan");
+  box.hidden = false;
+  box.replaceChildren(el("p", { class: "muted" }, "Loading plan…"));
+  try {
+    const plan = (await client.plan(item.jobId)) as { entries: Entry[] };
+    const entries = plan.entries.filter((e) => e.status !== "skip");
+    box.replaceChildren(
+      el(
+        "div",
+        { class: "row" },
+        el("strong", {}, item.title),
+        item.greenhouse.ghUrl
+          ? el(
+              "a",
+              { href: item.greenhouse.ghUrl, target: "_blank" },
+              "Open posting ↗",
+            )
+          : null,
+      ),
+      ...entries.map((e) =>
+        el(
+          "div",
+          { class: "entry" },
+          el(
+            "div",
+            {},
+            `${e.label} `,
+            el(
+              "span",
+              { class: `badge ${e.status === "fill" ? "ok" : "warn"}` },
+              e.status === "fill" ? e.actionClass : "needs you",
+            ),
+          ),
+          el(
+            "div",
+            { class: "value muted" },
+            e.status === "fill" ? valueText(e) : (e.reason ?? ""),
+          ),
+        ),
+      ),
+    );
+  } catch (error) {
+    box.replaceChildren(el("p", { class: "error" }, message(error)));
+  }
+}
+
+void start();

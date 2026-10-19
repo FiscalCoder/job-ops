@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Apply Copilot</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Apply Copilot</h1>
+      <button type="button" id="signout" class="link" hidden>Sign out</button>
+    </header>
+
+    <section id="login" hidden>
+      <form id="login-form" class="card">
+        <p class="muted">Sign in with your Job Ops login.</p>
+        <label>Server <input name="server" required /></label>
+        <label>Username <input name="username" autocomplete="username" required /></label>
+        <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit" class="primary">Sign in</button>
+        <p id="login-error" class="error" hidden></p>
+      </form>
+    </section>
+
+    <section id="main" hidden>
+      <div class="card">
+        <div class="row">
+          <strong>Greenhouse lookups</strong>
+          <button type="button" id="run" class="primary">Run now</button>
+        </div>
+        <p id="last-run" class="muted"></p>
+        <details id="run-details" hidden>
+          <summary>What happened</summary>
+          <ul id="run-lines"></ul>
+        </details>
+        <p id="sites" class="muted" hidden>
+          Some companies host Greenhouse on their own careers page.
+          <button type="button" id="allow-sites" class="link">Allow reading company career sites</button>
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <strong>Queue</strong>
+          <button type="button" id="refresh">Refresh</button>
+        </div>
+        <ul id="queue" class="list"></ul>
+      </div>
+
+      <div id="plan" class="card" hidden></div>
+    </section>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

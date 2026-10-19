@@ -1,0 +1,12 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "types": ["chrome"],
+    "paths": {
+      "@career-boards/greenhouse": ["../../career-boards/greenhouse/src/index.ts"]
+    }
+  },
+  "include": ["entrypoints/**/*", "src/lib/**/*", "test/**/*", ".wxt/wxt.d.ts"]
+}
