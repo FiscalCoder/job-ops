@@ -174,6 +174,36 @@ describe("web page", () => {
     await shot("4-plan-after");
   });
 
+  it("shows an example for every answer and explains a value it can't use", async () => {
+    await page.getByRole("button", { name: "Answer bank" }).click();
+    const salary = page.locator('[data-field="comp.current"]');
+    await salary.waitFor();
+    expect(await salary.locator(".hint").textContent()).toContain(
+      "Example: INR 3000000",
+    );
+    await salary.locator("input").fill("lots");
+    await page.locator('[data-field="identity.last_name"] input').fill("C");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect
+      .poll(() => page.locator("#toast").textContent())
+      .toBe("Saved 1 · 1 need fixing (see the red notes)");
+    expect(await salary.locator(".field-error").textContent()).toContain(
+      "e.g. INR 3000000",
+    );
+    expect(await salary.locator("input").inputValue()).toBe("lots");
+    expect(
+      await page
+        .locator('[data-field="identity.last_name"] input')
+        .inputValue(),
+    ).toBe("C");
+    await salary.locator("input").fill("30 LPA");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect
+      .poll(() => salary.locator("input").inputValue())
+      .toBe("INR 3000000");
+    await shot("6-bank-formats");
+  });
+
   it("keeps working at phone width", async () => {
     await page.setViewportSize({ width: 380, height: 800 });
     const wide = await page.evaluate(() =>

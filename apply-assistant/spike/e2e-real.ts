@@ -4,10 +4,13 @@
  *   Job Ops (real, READ-ONLY here) → local apply-assistant (in-memory DB) → lookups done from
  *   this PC (find board → match → fetch form) → fill plan per matched job.
  *
- * Nothing is written to Job Ops: the link/note write-backs are replaced by a log line.
+ * Default: nothing is written to Job Ops; the link/note write-backs are replaced by a log line.
+ * --live: talks to the deployed apply-assistant instead (APPLY_URL, default
+ *   https://apply.hueint.com), so results are stored on the server and Greenhouse links + notes
+ *   ARE written back to your Job Ops jobs. Lookups still run from this PC, never the server.
  * Credentials come from the repo's .env (username / password).
  *
- *   npx tsx apply-assistant/spike/e2e-real.ts            (from the repo root, after loading .env)
+ *   npx tsx apply-assistant/spike/e2e-real.ts [--live]   (from the repo root, after loading .env)
  */
 import type { AddressInfo } from "node:net";
 import { createApp } from "../server/src/http/app.js";
@@ -62,14 +65,33 @@ const slugGuesses = (employer: string) => {
   );
 };
 
-const app = createApp({
-  jobOps: readOnly,
-  db: openStore(":memory:"),
-  authCacheSeconds: 300,
-});
-const server = app.listen(0);
-await new Promise((r) => server.once("listening", r));
-const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+const LIVE = process.argv.includes("--live");
+
+async function startLocal() {
+  const server = createApp({
+    jobOps: readOnly,
+    db: openStore(":memory:"),
+    authCacheSeconds: 300,
+  }).listen(0);
+  await new Promise((r) => server.once("listening", r));
+  return {
+    base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    close: () => server.close(),
+  };
+}
+
+const target = LIVE
+  ? {
+      base: process.env.APPLY_URL ?? "https://apply.hueint.com",
+      close: () => {},
+    }
+  : await startLocal();
+const base = target.base;
+console.log(
+  LIVE
+    ? `LIVE run against ${base}: results are saved and written back to Job Ops`
+    : "Read-only run (local, in-memory)",
+);
 
 const login = (await (
   await fetch(`${base}/auth/login`, {
@@ -202,6 +224,10 @@ console.log(
     plan: q.plan?.summary ?? null,
   })),
 );
-console.log(`\nJob Ops write-backs skipped (read-only run): ${writes.length}`);
-for (const w of writes) console.log(`  ${w}`);
-server.close();
+if (!LIVE) {
+  console.log(
+    `\nJob Ops write-backs skipped (read-only run): ${writes.length}`,
+  );
+  for (const w of writes) console.log(`  ${w}`);
+}
+target.close();

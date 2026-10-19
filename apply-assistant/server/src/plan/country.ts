@@ -86,3 +86,50 @@ export function countryOf(location: string): string | null {
   );
   return found.size === 1 ? ([...found][0] ?? null) : null;
 }
+
+const EURO = [
+  "Germany",
+  "Netherlands",
+  "Ireland",
+  "France",
+  "Spain",
+  "Italy",
+  "Austria",
+  "Belgium",
+  "Finland",
+  "Portugal",
+  "Luxembourg",
+  "Estonia",
+  "Latvia",
+  "Lithuania",
+  "Greece",
+  "Slovakia",
+  "Slovenia",
+  "Croatia",
+  "Malta",
+  "Cyprus",
+];
+
+const CURRENCY: Record<string, string> = {
+  India: "INR",
+  "United Kingdom": "GBP",
+  "United States": "USD",
+  Singapore: "SGD",
+  Japan: "JPY",
+  Sweden: "SEK",
+  Denmark: "DKK",
+  Norway: "NOK",
+  Switzerland: "CHF",
+  "United Arab Emirates": "AED",
+  Poland: "PLN",
+  Canada: "CAD",
+  Australia: "AUD",
+  ...Object.fromEntries(EURO.map((c) => [c, "EUR"])),
+};
+
+/** The currency a country pays in, or null when unknown. */
+export function currencyOf(country: string | null | undefined): string | null {
+  if (!country) return null;
+  const named = countryOf(country) ?? country;
+  return CURRENCY[named] ?? null;
+}

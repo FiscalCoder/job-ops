@@ -193,6 +193,10 @@ button.link {
   align-items: center;
   font-weight: 500;
 }
+.field-error {
+  color: var(--danger);
+  font-size: 13px;
+}
 .hint {
   color: var(--muted);
   font-size: 13px;

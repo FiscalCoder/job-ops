@@ -418,6 +418,8 @@ function inputFor(def, current) {
     id: `bank-${def.key}`,
     name: def.key,
     "data-key": def.key,
+    placeholder: def.example ? `e.g. ${def.example}` : undefined,
+    "aria-describedby": `help-${def.key}`,
     oninput: (e) => onBankInput(def.key, e.currentTarget.value, current),
   };
   if (def.kind === "yesno")
@@ -430,6 +432,27 @@ function inputFor(def, current) {
     );
   if (def.kind === "list")
     return el("textarea", { ...common, rows: "2" }, current);
+  if (def.kind === "date")
+    return el("input", { ...common, type: "date", value: current });
+  if (def.kind === "days")
+    return el("input", {
+      ...common,
+      type: "number",
+      min: "0",
+      max: "365",
+      step: "1",
+      inputmode: "numeric",
+      value: current,
+    });
+  if (def.kind === "number")
+    return el("input", {
+      ...common,
+      type: "number",
+      min: "0",
+      step: "0.5",
+      inputmode: "decimal",
+      value: current,
+    });
   return el("input", { ...common, value: current });
 }
 
@@ -470,7 +493,14 @@ async function loadBank() {
               def.value ? null : el("span", { class: "badge" }, "empty"),
             ),
             inputFor(def, def.value ?? ""),
-            def.hint ? el("div", { class: "hint" }, def.hint) : null,
+            el(
+              "div",
+              { class: "hint", id: `help-${def.key}` },
+              def.example ? `Example: ${def.example}` : "",
+              def.example && def.hint ? " · " : "",
+              def.hint ?? "",
+            ),
+            el("div", { class: "field-error", role: "alert", hidden: true }),
           ),
         ),
       ),
@@ -509,21 +539,49 @@ function focusBankKey(key) {
   field.querySelector("input, textarea, select")?.focus();
 }
 
+function showFieldError(key, message) {
+  const box = document.querySelector(
+    `[data-field="${CSS.escape(key)}"] .field-error`,
+  );
+  if (!box) return;
+  box.textContent = message ?? "";
+  box.hidden = !message;
+}
+
 $("save-bank").addEventListener("click", async () => {
   const button = $("save-bank");
   button.disabled = true;
   const entries = [...bankDraft.entries()];
+  const failed = [];
   try {
-    for (const [key, value] of entries)
-      await api(`/answer-bank/${encodeURIComponent(key)}`, {
-        method: "PUT",
-        body: { value: value.trim() },
-      });
-    const rebuilt = await api("/plans/rebuild", { method: "POST", body: {} });
-    toast(
-      `Saved ${entries.length} answer${entries.length === 1 ? "" : "s"} · ${rebuilt.rebuilt} plan${rebuilt.rebuilt === 1 ? "" : "s"} updated`,
-    );
+    for (const [key, value] of entries) {
+      try {
+        await api(`/answer-bank/${encodeURIComponent(key)}`, {
+          method: "PUT",
+          body: { value: value.trim() },
+        });
+      } catch (error) {
+        if (error.status === 401) throw error;
+        failed.push({ key, value, message: error.message });
+      }
+    }
+    const saved = entries.length - failed.length;
+    const rebuilt = saved
+      ? await api("/plans/rebuild", { method: "POST", body: {} })
+      : { rebuilt: 0 };
     await loadBank();
+    // Keep what didn't save in the form, with the reason under the field.
+    for (const { key, value, message } of failed) {
+      const input = document.querySelector(`[data-key="${CSS.escape(key)}"]`);
+      if (input) input.value = value;
+      onBankInput(key, value, null);
+      showFieldError(key, message.replace(/^[^:]+: /, ""));
+    }
+    toast(
+      failed.length
+        ? `Saved ${saved} · ${failed.length} need fixing (see the red notes)`
+        : `Saved ${saved} answer${saved === 1 ? "" : "s"} · ${rebuilt.rebuilt} plan${rebuilt.rebuilt === 1 ? "" : "s"} updated`,
+    );
   } catch (error) {
     if (error.status !== 401) toast(`Not saved: ${error.message}`);
     button.disabled = bankDraft.size === 0;

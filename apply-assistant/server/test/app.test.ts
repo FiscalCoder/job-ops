@@ -127,7 +127,7 @@ describe("apply-assistant HTTP app", () => {
     const put = await call("/answer-bank/work.notice_period", {
       method: "PUT",
       token: "good",
-      body: JSON.stringify({ value: "30 days, negotiable" }),
+      body: JSON.stringify({ value: "30 days" }),
     });
     expect(put.status).toBe(200);
     await call("/answer-bank/custom.thing", {
@@ -142,10 +142,10 @@ describe("apply-assistant HTTP app", () => {
       (k: { key: string }) => k.key === "work.notice_period",
     );
     expect(notice).toMatchObject({
-      label: "Notice period",
+      label: "Notice period (days)",
       group: "Work authorisation",
       protected: true,
-      value: "30 days, negotiable",
+      value: "30",
     });
     const city = data.keys.find(
       (k: { key: string }) => k.key === "location.current_city",
@@ -223,5 +223,46 @@ describe("apply-assistant HTTP app", () => {
       ok: false,
       error: { code: "TOO_MANY_ATTEMPTS" },
     });
+  });
+
+  it("normalises answers to their field's format when saving", async () => {
+    const { call } = await start();
+    const save = (key: string, value: string) =>
+      call(`/answer-bank/${key}`, {
+        method: "PUT",
+        token: "good",
+        body: JSON.stringify({ value }),
+      });
+    await save("location.current_country", "India");
+    expect(
+      (await (await save("comp.current", "3000000")).json()).data.value,
+    ).toBe("INR 3000000");
+    expect(
+      (await (await save("work.notice_period", "1 month")).json()).data.value,
+    ).toBe("30");
+    expect(
+      (await (await save("work.earliest_start_date", "20/11/2026")).json()).data
+        .value,
+    ).toBe("2026-11-20");
+    const bad = await save("work.earliest_start_date", "soon");
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({
+      ok: false,
+      error: {
+        code: "INVALID_ANSWER",
+        message: expect.stringContaining("YYYY-MM-DD"),
+      },
+    });
+  });
+
+  it("returns each field's format with the catalogue", async () => {
+    const { call } = await start();
+    const { data } = await (
+      await call("/answer-bank", { token: "good" })
+    ).json();
+    const notice = data.keys.find(
+      (k: { key: string }) => k.key === "work.notice_period",
+    );
+    expect(notice).toMatchObject({ kind: "days", example: "30" });
   });
 });

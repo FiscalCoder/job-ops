@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countryOf } from "../src/plan/country.js";
+import { countryOf, currencyOf } from "../src/plan/country.js";
 import {
   findDeclineOption,
   pickOption,
@@ -91,5 +91,19 @@ describe("countryOf", () => {
     expect(countryOf("Remote")).toBeNull();
     expect(countryOf("")).toBeNull();
     expect(countryOf("Berlin or London")).toBeNull();
+  });
+});
+
+describe("currencyOf", () => {
+  it.each([
+    ["India", "INR"],
+    ["Germany", "EUR"],
+    ["Dublin, Ireland", "EUR"],
+    ["United Kingdom", "GBP"],
+    ["Singapore", "SGD"],
+    ["Atlantis", null],
+    [null, null],
+  ])("%s → %s", (country, currency) => {
+    expect(currencyOf(country)).toBe(currency);
   });
 });

@@ -1,4 +1,5 @@
-import { splitList } from "../bank/catalogue.js";
+import { bankKeyDef, splitList } from "../bank/catalogue.js";
+import { formatBankValue } from "./bank-format.js";
 import { type ActionClass, classifyField, type FieldRule } from "./classify.js";
 import { countryOf } from "./country.js";
 import type { FieldType, FormField, FormSchema } from "./gh-schema.js";
@@ -60,6 +61,8 @@ interface Resolved {
   readonly source: string;
   readonly reason?: string;
   readonly bankKey?: string;
+  /** Equivalent phrasings to try against a select's choices ("1 month" for 30 days). */
+  readonly alternatives?: readonly string[];
   /** For selects: an option already chosen by the rule (decline / consent). */
   readonly option?: { label: string; value: string };
 }
@@ -86,21 +89,42 @@ const missing = (
   ...(bankKey ? { bankKey } : {}),
 });
 
+function fromBank(
+  key: string,
+  stored: string,
+  field: FormField,
+  jobCountry: string | null,
+  bankKey: string,
+): Resolved {
+  const formatted = formatBankValue(
+    bankKeyDef(key)?.kind ?? "text",
+    stored,
+    field,
+    jobCountry,
+  );
+  if ("needsYou" in formatted)
+    return missing(`bank:${key}`, formatted.needsYou, bankKey);
+  return {
+    value: formatted.value,
+    alternatives: formatted.alternatives,
+    source: `bank:${key}`,
+    bankKey,
+  };
+}
+
 function resolveBank(
   rule: { key: string; fallbackKey?: string },
   bank: PlanInput["bank"],
+  field: FormField,
+  jobCountry: string | null,
 ): Resolved {
   const own = bank.get(rule.key)?.trim();
-  if (own) return { value: own, source: `bank:${rule.key}`, bankKey: rule.key };
+  if (own) return fromBank(rule.key, own, field, jobCountry, rule.key);
   const fallback = rule.fallbackKey
     ? bank.get(rule.fallbackKey)?.trim()
     : undefined;
   if (fallback && rule.fallbackKey)
-    return {
-      value: fallback,
-      source: `bank:${rule.fallbackKey}`,
-      bankKey: rule.key,
-    };
+    return fromBank(rule.fallbackKey, fallback, field, jobCountry, rule.key);
   return missing(
     `bank:${rule.key}`,
     "No saved answer in your answer bank",
@@ -183,7 +207,7 @@ function resolveRule(
     case "hidden":
       return "skip";
     case "bank":
-      return resolveBank(rule, input.bank);
+      return resolveBank(rule, input.bank, field, jobCountry);
     case "profile":
       return resolveProfile(rule.fact, input.resume);
     case "work-auth":
@@ -265,7 +289,9 @@ function fitToField(field: FormField, resolved: Resolved): Typed {
     const text = Array.isArray(value) ? (value[0] ?? "") : (value as string);
     if (field.options.length === 0)
       return { status: "fill", value: text, optionValues: null };
-    const option = pickOption(field.options, text);
+    const option = [text, ...(resolved.alternatives ?? [])]
+      .map((candidate) => pickOption(field.options, candidate))
+      .find((found) => found !== null);
     return option
       ? { status: "fill", value: option.label, optionValues: [option.value] }
       : {

@@ -1,6 +1,8 @@
 import { type Response, Router } from "express";
 import { z } from "zod";
 import { BANK_KEYS, bankKeyDef } from "../bank/catalogue.js";
+import { normalizeAnswer } from "../bank/normalize.js";
+import { currencyOf } from "../plan/country.js";
 import type { AnswerBankRepo } from "../store/answer-bank-repo.js";
 import type { AuthedRequest } from "./auth.js";
 import { sendError, sendOk } from "./envelope.js";
@@ -46,12 +48,30 @@ export function createAnswerBankRoutes(answers: AnswerBankRepo) {
       });
       return;
     }
+    const definition = bankKeyDef(key.data);
+    const normalized = normalizeAnswer(
+      definition?.kind ?? "text",
+      body.data.value,
+      {
+        defaultCurrency: currencyOf(
+          answers.get("location.current_country")?.value,
+        ),
+      },
+    );
+    if (!normalized.ok) {
+      sendError(
+        res,
+        400,
+        "INVALID_ANSWER",
+        `${definition?.label ?? key.data}: ${normalized.error}`,
+      );
+      return;
+    }
     const saved = answers.upsert({
       key: key.data,
-      value: body.data.value,
+      value: normalized.value,
       isProtected:
-        bankKeyDef(key.data)?.protected === true ||
-        (body.data.isProtected ?? false),
+        definition?.protected === true || (body.data.isProtected ?? false),
       notes: body.data.notes ?? null,
       updatedBy: req.user?.username ?? "unknown",
     });
