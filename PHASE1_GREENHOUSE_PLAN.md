@@ -99,6 +99,25 @@ Success after 20 real applications:
 - **Upstream code reused read-only:** `career-boards/greenhouse` (bundled into the extension's lookup code), covered by contract tests after every `git merge origin/main`.
 - **Data on the shared volume:** `/app/data/apply.db` sits beside `jobs.db`, so Job Ops' backups can include it.
 
+### 3.1 Deployment on your server (checked 2026-10-19)
+
+**Current setup:**
+- Job Ops runs at `https://job-ops.hueint.com`: nginx (managed by **CloudPanel**) → `127.0.0.1:3005` → `job-ops` container (`./data:/app/data`).
+- Deploys come from the fork's own workflow, `deploy-credit-savings-remote-focus.yml`: a self-hosted runner does `docker compose build && docker compose up -d --remove-orphans`, with `checkout clean: false`, so `./data` persists.
+
+**How apply-assistant fits:**
+
+| Piece | Choice | Why |
+|---|---|---|
+| Container | Separate compose **project** `apply-assistant` (`apply-assistant/docker-compose.yml`, started with `docker compose -p apply-assistant …`) | The Job Ops deploy runs `--remove-orphans`. A container in the *same* project but not in upstream's compose file would be deleted on every Job Ops deploy. A separate project is never touched |
+| Port | `127.0.0.1:3006` (free) | Localhost only; reached through nginx |
+| Data | `./data/apply-assistant/apply.db` (host), mounted into the container | Lives beside `jobs.db` in the persisted `./data` folder; survives deploys (`clean: false`) and any folder-level backup |
+| Talks to Job Ops | Joins the `job-ops` compose network as an external network; calls `http://job-ops:3001/api/...` | Internal only, never via the public domain |
+| Public URL | `https://job-ops.hueint.com/apply/` | Same domain, same TLS certificate; the extension only needs one host permission |
+| nginx change | Add a `location ^~ /apply/ { proxy_pass http://127.0.0.1:3006/; … }` block, **through CloudPanel's Vhost editor** (or `clpctl`), not by hand-editing the file | CloudPanel regenerates vhost files, so hand edits can be lost. **Needs your OK at deploy time** (production change) |
+| Deploy | New fork-owned workflow `deploy-apply-assistant.yml` (paths `apply-assistant/**`), same self-hosted runner | Independent of the Job Ops deploy; upstream files untouched |
+| Auth | apply-assistant validates your **Job Ops login** (login is proxied to Job Ops `/api/auth/login`; the token is checked against Job Ops on each session) | One account; no new passwords |
+
 ## 4. Finding the Greenhouse version of a job (resolver)
 
 Your 70+ jobs: only **2** link to Greenhouse directly, but the lookup found **5 more** on their companies' Greenhouse boards, all with the same job open. The resolver does this automatically for every Ready job.
