@@ -1,0 +1,383 @@
+import { splitList } from "../bank/catalogue.js";
+import { type ActionClass, classifyField, type FieldRule } from "./classify.js";
+import { countryOf } from "./country.js";
+import type { FieldType, FormField, FormSchema } from "./gh-schema.js";
+import { findDeclineOption, pickOption, pickOptions } from "./options.js";
+import type { DegreeLevel, ResumeFacts } from "./resume-facts.js";
+
+/**
+ * Builds a fill plan: for every field, the proposed value, where it came from, its action class
+ * (how it is gated during the supervised run) and whether it needs you. Plain code only; it
+ * never guesses — a missing answer becomes "needs you" with the reason.
+ */
+
+export type EntryStatus = "fill" | "needs-you" | "skip";
+
+export interface PlanEntry {
+  readonly ref: string;
+  readonly label: string;
+  readonly section: FormField["section"];
+  readonly type: FieldType;
+  readonly required: boolean;
+  readonly actionClass: ActionClass;
+  readonly status: EntryStatus;
+  /** What to type, or the chosen option labels for selects. */
+  readonly value: string | readonly string[] | null;
+  /** Greenhouse option values for selects (what the form submits). */
+  readonly optionValues: readonly string[] | null;
+  readonly source: string;
+  readonly reason?: string;
+  readonly bankKey?: string;
+}
+
+export interface PlanSummary {
+  readonly fill: number;
+  readonly auto: number;
+  readonly confirm: number;
+  readonly protected: number;
+  readonly needsYou: number;
+  readonly skipped: number;
+  readonly estMinutes: number;
+}
+
+export interface FillPlan {
+  readonly schemaHash: string;
+  readonly jobCountry: string | null;
+  readonly entries: readonly PlanEntry[];
+  readonly summary: PlanSummary;
+}
+
+export interface PlanInput {
+  readonly schema: FormSchema;
+  readonly resume: ResumeFacts;
+  readonly bank: ReadonlyMap<string, string>;
+  /** Job Ops' location text, used when the Greenhouse posting's location names no country. */
+  readonly jobLocation?: string | null;
+}
+
+interface Resolved {
+  readonly value: string | readonly string[] | null;
+  readonly source: string;
+  readonly reason?: string;
+  readonly bankKey?: string;
+  /** For selects: an option already chosen by the rule (decline / consent). */
+  readonly option?: { label: string; value: string };
+}
+
+const DEGREE_LABEL: Record<DegreeLevel, string> = {
+  high_school: "High School",
+  associate: "Associate's Degree",
+  bachelor: "Bachelor's Degree",
+  master: "Master's Degree",
+  doctorate: "Doctorate",
+};
+
+const AFFIRMATIVE =
+  /^(yes|i agree|agree|i confirm|confirm|i acknowledge|acknowledge|i accept|accept|i understand|i certify|i have read)/i;
+
+const missing = (
+  source: string,
+  reason: string,
+  bankKey?: string,
+): Resolved => ({
+  value: null,
+  source,
+  reason,
+  ...(bankKey ? { bankKey } : {}),
+});
+
+function resolveBank(
+  rule: { key: string; fallbackKey?: string },
+  bank: PlanInput["bank"],
+): Resolved {
+  const own = bank.get(rule.key)?.trim();
+  if (own) return { value: own, source: `bank:${rule.key}`, bankKey: rule.key };
+  const fallback = rule.fallbackKey
+    ? bank.get(rule.fallbackKey)?.trim()
+    : undefined;
+  if (fallback && rule.fallbackKey)
+    return {
+      value: fallback,
+      source: `bank:${rule.fallbackKey}`,
+      bankKey: rule.key,
+    };
+  return missing(
+    `bank:${rule.key}`,
+    "No saved answer in your answer bank",
+    rule.key,
+  );
+}
+
+function resolveProfile(fact: string, resume: ResumeFacts): Resolved {
+  const recent = resume.experience[0];
+  const values: Record<string, string | null | undefined> = {
+    email: resume.email,
+    phone: resume.phone,
+    linkedin: resume.links.linkedin,
+    github: resume.links.github,
+    website: resume.links.website ?? resume.links.linkedin,
+    recent_employer: recent?.company,
+    recent_title: recent?.title,
+  };
+  const value = values[fact];
+  return value
+    ? { value, source: `resume:${fact}` }
+    : missing(`resume:${fact}`, "Not on your Job Ops resume");
+}
+
+function resolveWorkAuth(
+  ask: "authorized" | "sponsorship",
+  input: PlanInput,
+  jobCountry: string | null,
+): Resolved {
+  const key = "work.authorized_countries";
+  const countries = splitList(input.bank.get(key) ?? "");
+  if (countries.length === 0)
+    return missing(
+      `bank:${key}`,
+      "Add the countries you can work in without sponsorship",
+      key,
+    );
+  if (!jobCountry)
+    return missing(`bank:${key}`, "Couldn't tell which country this job is in");
+  const authorized = countries.some(
+    (c) =>
+      countryOf(c) === jobCountry ||
+      c.toLowerCase() === jobCountry.toLowerCase(),
+  );
+  const yes = ask === "authorized" ? authorized : !authorized;
+  return {
+    value: yes ? "Yes" : "No",
+    source: `bank:${key} (job in ${jobCountry})`,
+    bankKey: key,
+  };
+}
+
+function resolveEducation(
+  part: "school" | "degree" | "discipline",
+  resume: ResumeFacts,
+): Resolved {
+  const top = resume.education[0];
+  if (!top)
+    return missing("resume:education", "No education on your Job Ops resume");
+  const value =
+    part === "school"
+      ? top.school
+      : part === "degree"
+        ? top.level
+          ? DEGREE_LABEL[top.level]
+          : top.degree
+        : top.area;
+  return value
+    ? { value, source: `resume:education.${part}` }
+    : missing("resume:education", `No ${part} on your resume`);
+}
+
+function resolveRule(
+  rule: FieldRule,
+  field: FormField,
+  input: PlanInput,
+  jobCountry: string | null,
+): Resolved | "skip" {
+  switch (rule.kind) {
+    case "hidden":
+      return "skip";
+    case "bank":
+      return resolveBank(rule, input.bank);
+    case "profile":
+      return resolveProfile(rule.fact, input.resume);
+    case "work-auth":
+      return resolveWorkAuth(rule.ask, input, jobCountry);
+    case "resume-file":
+      return {
+        value: "Tailored resume (PDF from Job Ops)",
+        source: "jobops:tailored-pdf",
+      };
+    case "cover-letter":
+      return field.required
+        ? missing("draft", "A cover letter is required")
+        : "skip";
+    case "education":
+      return resolveEducation(rule.part, input.resume);
+    case "consent": {
+      const option =
+        field.options.length === 1
+          ? field.options[0]
+          : field.options.find((o) => AFFIRMATIVE.test(o.label.trim()));
+      return option
+        ? { value: option.label, source: "rule:consent", option }
+        : missing("rule:consent", "No 'agree' choice found");
+    }
+    case "eeo": {
+      const saved = input.bank.get(rule.key)?.trim();
+      if (saved)
+        return { value: saved, source: `bank:${rule.key}`, bankKey: rule.key };
+      const decline = findDeclineOption(field.options);
+      return decline
+        ? {
+            value: decline.label,
+            source: "rule:decline-to-answer",
+            option: decline,
+          }
+        : missing(
+            `bank:${rule.key}`,
+            "No 'decline to answer' choice; pick an answer",
+            rule.key,
+          );
+    }
+    case "question":
+      return missing("question", "No saved answer for this question yet");
+  }
+}
+
+interface Typed {
+  readonly status: EntryStatus;
+  readonly value: PlanEntry["value"];
+  readonly optionValues: PlanEntry["optionValues"];
+  readonly reason?: string;
+}
+
+/** Fits a resolved value to the field type (option matching for selects). */
+function fitToField(field: FormField, resolved: Resolved): Typed {
+  const { value } = resolved;
+  if (value === null)
+    return {
+      status: "needs-you",
+      value: null,
+      optionValues: null,
+      reason: resolved.reason ?? "No answer",
+    };
+  if (field.type === "unknown")
+    return {
+      status: "needs-you",
+      value,
+      optionValues: null,
+      reason: "This field type isn't supported yet",
+    };
+
+  if (field.type === "select") {
+    if (resolved.option)
+      return {
+        status: "fill",
+        value: resolved.option.label,
+        optionValues: [resolved.option.value],
+      };
+    const text = Array.isArray(value) ? (value[0] ?? "") : (value as string);
+    if (field.options.length === 0)
+      return { status: "fill", value: text, optionValues: null };
+    const option = pickOption(field.options, text);
+    return option
+      ? { status: "fill", value: option.label, optionValues: [option.value] }
+      : {
+          status: "needs-you",
+          value: text,
+          optionValues: null,
+          reason: `Your answer "${text}" matches none of the form's choices`,
+        };
+  }
+
+  if (field.type === "multiselect") {
+    const wanted = Array.isArray(value) ? value : splitList(value as string);
+    const { picked, missing: unplaced } = pickOptions(field.options, wanted);
+    if (picked.length === 0)
+      return {
+        status: "needs-you",
+        value: wanted,
+        optionValues: null,
+        reason: "None of your answers match the form's choices",
+      };
+    return {
+      status: "fill",
+      value: picked.map((o) => o.label),
+      optionValues: picked.map((o) => o.value),
+      ...(unplaced.length
+        ? { reason: `Not offered by the form: ${unplaced.join(", ")}` }
+        : {}),
+    };
+  }
+
+  return {
+    status: "fill",
+    value: Array.isArray(value) ? value.join(", ") : value,
+    optionValues: null,
+  };
+}
+
+function planField(
+  field: FormField,
+  input: PlanInput,
+  jobCountry: string | null,
+): PlanEntry {
+  const { rule, actionClass } = classifyField(field);
+  const base = {
+    ref: field.ref,
+    label: field.label,
+    section: field.section,
+    type: field.type,
+    required: field.required,
+    actionClass,
+  };
+  const resolved = resolveRule(rule, field, input, jobCountry);
+  if (resolved === "skip")
+    return {
+      ...base,
+      status: "skip",
+      value: null,
+      optionValues: null,
+      source: rule.kind,
+      reason: rule.kind === "hidden" ? "Filled by the page" : "Optional",
+    };
+
+  const typed = fitToField(field, resolved);
+  // An optional field we can't answer is left empty rather than asking you.
+  const status =
+    typed.status === "needs-you" && !field.required ? "skip" : typed.status;
+  return {
+    ...base,
+    status,
+    value: typed.value,
+    optionValues: typed.optionValues,
+    source: resolved.source,
+    ...(typed.reason ? { reason: typed.reason } : {}),
+    ...(resolved.bankKey ? { bankKey: resolved.bankKey } : {}),
+  };
+}
+
+const MINUTES = { base: 1, needsYou: 0.75, confirm: 0.15, auto: 0.05 };
+
+function summarise(entries: readonly PlanEntry[]): PlanSummary {
+  const filled = entries.filter((e) => e.status === "fill");
+  const count = (cls: ActionClass) =>
+    filled.filter((e) => e.actionClass === cls).length;
+  const needsYou = entries.filter((e) => e.status === "needs-you").length;
+  const confirm = count("confirm");
+  const auto = count("auto");
+  const estMinutes =
+    MINUTES.base +
+    needsYou * MINUTES.needsYou +
+    (confirm + count("protected")) * MINUTES.confirm +
+    auto * MINUTES.auto;
+  return {
+    fill: filled.length,
+    auto,
+    confirm,
+    protected: count("protected"),
+    needsYou,
+    skipped: entries.filter((e) => e.status === "skip").length,
+    estMinutes: Math.round(estMinutes * 10) / 10,
+  };
+}
+
+export function buildPlan(input: PlanInput): FillPlan {
+  const jobCountry =
+    countryOf(input.schema.location) ?? countryOf(input.jobLocation ?? "");
+  const entries = input.schema.fields.map((field) =>
+    planField(field, input, jobCountry),
+  );
+  return {
+    schemaHash: input.schema.hash,
+    jobCountry,
+    entries,
+    summary: summarise(entries),
+  };
+}

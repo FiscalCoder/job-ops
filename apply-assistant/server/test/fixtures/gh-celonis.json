@@ -1,0 +1,552 @@
+{
+  "absolute_url": "https://job-boards.greenhouse.io/celonis/jobs/7887061003?gh_jid=7887061003",
+  "data_compliance": [
+    {
+      "type": "gdpr",
+      "requires_consent": false,
+      "requires_processing_consent": false,
+      "requires_retention_consent": false,
+      "retention_period": null,
+      "demographic_data_consent_applies": true
+    }
+  ],
+  "internal_job_id": 5834028003,
+  "location": {
+    "name": "Remote, US, Georgia"
+  },
+  "metadata": [
+    {
+      "id": 4008575003,
+      "name": "Employment Type",
+      "value": "Regular - Unlimited",
+      "value_type": "single_select"
+    },
+    {
+      "id": 13879587003,
+      "name": "Type",
+      "value": "Professional Hire",
+      "value_type": "single_select"
+    },
+    {
+      "id": 5699689003,
+      "name": "Company",
+      "value": "Celonis",
+      "value_type": "single_select"
+    },
+    {
+      "id": 4072205003,
+      "name": "Language",
+      "value": "English",
+      "value_type": "single_select"
+    },
+    {
+      "id": 4080290003,
+      "name": "Recruiter",
+      "value": {
+        "name": "Nick Beaulac",
+        "email": "n.beaulac@celonis.com",
+        "user_id": 5490880003,
+        "employee_id": "08596"
+      },
+      "value_type": "user"
+    },
+    {
+      "id": 4080387003,
+      "name": "Referral Reward",
+      "value": {
+        "unit": "USD",
+        "amount": "1500.0"
+      },
+      "value_type": "currency"
+    },
+    {
+      "id": 7427826003,
+      "name": "agency engaged deleted",
+      "value": null,
+      "value_type": "yes_no"
+    },
+    {
+      "id": 7465144003,
+      "name": "Agency Engaged",
+      "value": null,
+      "value_type": "yes_no"
+    },
+    {
+      "id": 7427840003,
+      "name": "Agency Name",
+      "value": null,
+      "value_type": "short_text"
+    },
+    {
+      "id": 7427842003,
+      "name": "Agency PO-Number",
+      "value": null,
+      "value_type": "short_text"
+    },
+    {
+      "id": 9155214003,
+      "name": "Job Function",
+      "value": null,
+      "value_type": "single_select"
+    },
+    {
+      "id": 38472466003,
+      "name": "Workday - Integration Date",
+      "value": "2026-08-17",
+      "value_type": "date"
+    },
+    {
+      "id": 11620923003,
+      "name": "Recruitment Campaign",
+      "value": null,
+      "value_type": "single_select"
+    }
+  ],
+  "id": 7887061003,
+  "updated_at": "2026-10-06T14:49:46-04:00",
+  "requisition_id": "R15138",
+  "title": "Account Executive - CPG",
+  "company_name": "Celonis",
+  "first_published": "2026-09-03T12:50:00-04:00",
+  "language": "en",
+  "application_deadline": null,
+  "content": "<p>(trimmed)</p>",
+  "departments": [
+    {
+      "id": 4002186003,
+      "name": "Sales",
+      "child_ids": [],
+      "parent_id": null
+    }
+  ],
+  "offices": [
+    {
+      "id": 4030111003,
+      "name": "Remote, US, Georgia",
+      "location": null,
+      "child_ids": [],
+      "parent_id": null
+    }
+  ],
+  "ai_disclaimer": null,
+  "include_ai_disclaimer": null,
+  "ai_opt_out_request_url": null,
+  "compliance": [
+    {
+      "type": "eeoc",
+      "questions": [
+        {
+          "required": true,
+          "label": "VeteranStatus",
+          "fields": [
+            {
+              "name": "veteran_status",
+              "type": "multi_value_single_select",
+              "values": [
+                {
+                  "label": "I don't wish to answer",
+                  "value": "3"
+                },
+                {
+                  "label": "I identify as one or more of the classifications of a protected veteran",
+                  "value": "2"
+                },
+                {
+                  "label": "I am not a protected veteran",
+                  "value": "1"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "description": "(trimmed)"
+    },
+    {
+      "type": "eeoc",
+      "questions": [
+        {
+          "required": true,
+          "label": "Race",
+          "fields": [
+            {
+              "name": "race",
+              "type": "multi_value_single_select",
+              "values": [
+                {
+                  "label": "Decline To Self Identify",
+                  "value": "8"
+                },
+                {
+                  "label": "Two or More Races",
+                  "value": "7"
+                },
+                {
+                  "label": "Native Hawaiian or Other Pacific Islander",
+                  "value": "6"
+                },
+                {
+                  "label": "White",
+                  "value": "5"
+                },
+                {
+                  "label": "Hispanic or Latino",
+                  "value": "4"
+                },
+                {
+                  "label": "Black or African American",
+                  "value": "3"
+                },
+                {
+                  "label": "Asian",
+                  "value": "2"
+                },
+                {
+                  "label": "American Indian or Alaskan Native",
+                  "value": "1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "required": true,
+          "label": "Gender",
+          "fields": [
+            {
+              "name": "gender",
+              "type": "multi_value_single_select",
+              "values": [
+                {
+                  "label": "Decline To Self Identify",
+                  "value": "3"
+                },
+                {
+                  "label": "Female",
+                  "value": "2"
+                },
+                {
+                  "label": "Male",
+                  "value": "1"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "description": "(trimmed)"
+    }
+  ],
+  "demographic_questions": {
+    "header": "U.S. | The Best Team Wins",
+    "description": "(trimmed)",
+    "questions": [
+      {
+        "id": 4023664003,
+        "label": "What does \"The Best Team Wins\" mean to you?",
+        "required": false,
+        "type": "multi_value_single_select",
+        "answer_options": [
+          {
+            "id": 4142846003,
+            "label": "\"The Best Team Wins\" means to me...",
+            "free_form": true,
+            "decline_to_answer": false
+          },
+          {
+            "id": 4142847003,
+            "label": "I prefer not to answer",
+            "free_form": false,
+            "decline_to_answer": false
+          }
+        ]
+      }
+    ]
+  },
+  "questions": [
+    {
+      "description": null,
+      "label": "First Name",
+      "required": true,
+      "fields": [
+        {
+          "name": "first_name",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Last Name",
+      "required": true,
+      "fields": [
+        {
+          "name": "last_name",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Email",
+      "required": true,
+      "fields": [
+        {
+          "name": "email",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Phone",
+      "required": true,
+      "fields": [
+        {
+          "name": "phone",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Resume/CV",
+      "required": true,
+      "fields": [
+        {
+          "name": "resume",
+          "type": "input_file",
+          "values": []
+        },
+        {
+          "name": "resume_text",
+          "type": "textarea",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Cover Letter",
+      "required": false,
+      "fields": [
+        {
+          "name": "cover_letter",
+          "type": "input_file",
+          "values": []
+        },
+        {
+          "name": "cover_letter_text",
+          "type": "textarea",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": "<blockquote><em>Please add here the name of your most recent employer, where available.&nbsp;</em><em>If you are currently studying or this is your first job, please add \"n/a\".</em></blockquote>",
+      "label": "Most Recent Employer",
+      "required": true,
+      "fields": [
+        {
+          "name": "question_31995632003",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": "<blockquote><em>Please add here the name of your current or most recent job title, where available. </em><em>If you are currently studying please add \"Student\". </em><em>If this is your first job, please add \"n/a\".</em></blockquote>",
+      "label": "Most Recent Job Title",
+      "required": true,
+      "fields": [
+        {
+          "name": "question_31995633003",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "LinkedIn Profile",
+      "required": false,
+      "fields": [
+        {
+          "name": "question_31995634003",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Are you legally authorized to work in the country you are applying to?",
+      "required": true,
+      "fields": [
+        {
+          "name": "question_31995635003",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "label": "Yes",
+              "value": 1
+            },
+            {
+              "label": "No",
+              "value": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Will you now or in the future require immigration sponsorship for employment visa status?",
+      "required": true,
+      "fields": [
+        {
+          "name": "question_31995636003",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "label": "Yes",
+              "value": 1
+            },
+            {
+              "label": "No",
+              "value": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Salary Expectation",
+      "required": true,
+      "fields": [
+        {
+          "name": "question_31995637003",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Preferred Start Date",
+      "required": false,
+      "fields": [
+        {
+          "name": "question_31995638003",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "How did you hear about this job?",
+      "required": false,
+      "fields": [
+        {
+          "name": "question_31995639003",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "label": "Careers Site",
+              "value": 167970980003
+            },
+            {
+              "label": "Social Media",
+              "value": 167970981003
+            },
+            {
+              "label": "AI Search",
+              "value": 167970982003
+            },
+            {
+              "label": "Google",
+              "value": 167970983003
+            },
+            {
+              "label": "Built In",
+              "value": 167970984003
+            },
+            {
+              "label": "Reddit",
+              "value": 167970985003
+            },
+            {
+              "label": "Glassdoor",
+              "value": 167970986003
+            },
+            {
+              "label": "Comparably",
+              "value": 167970987003
+            },
+            {
+              "label": "Kununu",
+              "value": 167970988003
+            },
+            {
+              "label": "RepVue",
+              "value": 167970989003
+            },
+            {
+              "label": "Event/ Conference",
+              "value": 167970990003
+            },
+            {
+              "label": "Word of Mouth",
+              "value": 167970991003
+            },
+            {
+              "label": "Referral",
+              "value": 167970992003
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": "<p><a href=\"https://www.celonis.com/careers/privacy-notice\">Celonis Privacy Notice</a></p>",
+      "label": "I confirm, that I have read the Celonis Privacy Notice for the handling of my personal data in the application process.",
+      "required": true,
+      "fields": [
+        {
+          "name": "question_31995640003",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "label": "I confirm",
+              "value": 167970993003
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "I confirm the information provided in this application, including but not limited to my resume and the above information, is true and correct. I understand that false statements or material omissions of any kind during the hiring process may result in the rescinding of any offer of employment or dismissal once employed.",
+      "required": true,
+      "fields": [
+        {
+          "name": "question_31995641003",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "label": "I confirm",
+              "value": 167970994003
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "location_questions": []
+}

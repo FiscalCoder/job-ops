@@ -1,0 +1,893 @@
+{
+  "absolute_url": "https://careers.datadoghq.com/detail/8257324/?gh_jid=8257324",
+  "data_compliance": [
+    {
+      "type": "gdpr",
+      "requires_consent": false,
+      "requires_processing_consent": false,
+      "requires_retention_consent": false,
+      "retention_period": null,
+      "demographic_data_consent_applies": false
+    }
+  ],
+  "internal_job_id": 3573058,
+  "location": {
+    "name": "New York, New York, USA"
+  },
+  "metadata": [
+    {
+      "id": 33310,
+      "name": "Time Type",
+      "value": "Full time",
+      "value_type": "single_select"
+    },
+    {
+      "id": 166208,
+      "name": "Area - Engineering",
+      "value": null,
+      "value_type": "single_select"
+    },
+    {
+      "id": 498252,
+      "name": "Cost Center",
+      "value": "General and Administrative - Finance",
+      "value_type": "single_select"
+    },
+    {
+      "id": 516515,
+      "name": "Geography",
+      "value": "North America",
+      "value_type": "single_select"
+    },
+    {
+      "id": 9593635,
+      "name": "Early Career Time Type",
+      "value": null,
+      "value_type": "single_select"
+    },
+    {
+      "id": 29446322,
+      "name": "Pay Transparency Range",
+      "value": {
+        "unit": "USD",
+        "max_value": "79000.0",
+        "min_value": "59000.0"
+      },
+      "value_type": "currency_range"
+    },
+    {
+      "id": 31273219,
+      "name": "Does this role require access to ITAR-controlled data?",
+      "value": null,
+      "value_type": "single_select"
+    },
+    {
+      "id": 58619948,
+      "name": "IC or MG",
+      "value": "IC",
+      "value_type": "single_select"
+    }
+  ],
+  "id": 8257324,
+  "updated_at": "2026-10-06T10:42:08-04:00",
+  "requisition_id": "R21943",
+  "title": "Accounts Payable Analyst",
+  "company_name": "Datadog",
+  "first_published": "2026-10-06T10:42:08-04:00",
+  "language": "en",
+  "application_deadline": null,
+  "content": "<p>(trimmed)</p>",
+  "departments": [
+    {
+      "id": 72261,
+      "name": "Finance",
+      "child_ids": [],
+      "parent_id": 9025
+    }
+  ],
+  "offices": [
+    {
+      "id": 5664,
+      "name": "New York",
+      "location": "New York, NY, United States",
+      "child_ids": [81327, 76746],
+      "parent_id": 73429
+    }
+  ],
+  "ai_disclaimer": null,
+  "include_ai_disclaimer": null,
+  "ai_opt_out_request_url": null,
+  "compliance": [
+    {
+      "type": "eeoc",
+      "questions": [
+        {
+          "required": false,
+          "label": "VeteranStatus",
+          "fields": [
+            {
+              "name": "veteran_status",
+              "type": "multi_value_single_select",
+              "values": [
+                {
+                  "label": "I don't wish to answer",
+                  "value": "3"
+                },
+                {
+                  "label": "I identify as one or more of the classifications of a protected veteran",
+                  "value": "2"
+                },
+                {
+                  "label": "I am not a protected veteran",
+                  "value": "1"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "description": "(trimmed)"
+    },
+    {
+      "type": "eeoc",
+      "questions": [
+        {
+          "required": false,
+          "label": "Race",
+          "fields": [
+            {
+              "name": "race",
+              "type": "multi_value_single_select",
+              "values": [
+                {
+                  "label": "Decline To Self Identify",
+                  "value": "8"
+                },
+                {
+                  "label": "Two or More Races",
+                  "value": "7"
+                },
+                {
+                  "label": "Native Hawaiian or Other Pacific Islander",
+                  "value": "6"
+                },
+                {
+                  "label": "White",
+                  "value": "5"
+                },
+                {
+                  "label": "Hispanic or Latino",
+                  "value": "4"
+                },
+                {
+                  "label": "Black or African American",
+                  "value": "3"
+                },
+                {
+                  "label": "Asian",
+                  "value": "2"
+                },
+                {
+                  "label": "American Indian or Alaskan Native",
+                  "value": "1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "required": false,
+          "label": "Gender",
+          "fields": [
+            {
+              "name": "gender",
+              "type": "multi_value_single_select",
+              "values": [
+                {
+                  "label": "Decline To Self Identify",
+                  "value": "3"
+                },
+                {
+                  "label": "Female",
+                  "value": "2"
+                },
+                {
+                  "label": "Male",
+                  "value": "1"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "description": "(trimmed)"
+    }
+  ],
+  "demographic_questions": null,
+  "questions": [
+    {
+      "description": null,
+      "label": "First Name",
+      "required": true,
+      "fields": [
+        {
+          "name": "first_name",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Last Name",
+      "required": true,
+      "fields": [
+        {
+          "name": "last_name",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Preferred First Name",
+      "required": true,
+      "fields": [
+        {
+          "name": "preferred_name",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Email",
+      "required": true,
+      "fields": [
+        {
+          "name": "email",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Phone",
+      "required": true,
+      "fields": [
+        {
+          "name": "phone",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Resume/CV",
+      "required": true,
+      "fields": [
+        {
+          "name": "resume",
+          "type": "input_file",
+          "values": []
+        },
+        {
+          "name": "resume_text",
+          "type": "textarea",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "LinkedIn Profile",
+      "required": false,
+      "fields": [
+        {
+          "name": "question_69650952",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Website",
+      "required": false,
+      "fields": [
+        {
+          "name": "question_69650953",
+          "type": "input_text",
+          "values": []
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "I certify that the information provided in this application is true and correct to the best of my knowledge. I understand that any false statements or omissions may result in disqualification from employment consideration or, if employed, in termination.",
+      "required": true,
+      "fields": [
+        {
+          "name": "question_69650954",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "label": "Yes",
+              "value": 1
+            },
+            {
+              "label": "No",
+              "value": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": "<p><span class=\"&ldquo;s1&quot;\">Read our&nbsp;<a href=\"https://www.datadoghq.com/legal/applicant-candidate-privacy/\" target=\"_blank\" rel=\"noopener\">Applicant and Candidate Privacy Policy</a></span>.</p>",
+      "label": "I understand my application will be processed in accordance with Datadog’s Candidate Privacy Policy.",
+      "required": true,
+      "fields": [
+        {
+          "name": "question_69650955",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "label": "Yes",
+              "value": 1
+            },
+            {
+              "label": "No",
+              "value": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "Are you legally authorised to work full-time in the country where this job is based?",
+      "required": true,
+      "fields": [
+        {
+          "name": "question_69650956",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "label": "Yes, no restriction.",
+              "value": 754693426
+            },
+            {
+              "label": "Yes, but I will need sponsorship in the future.",
+              "value": 754693427
+            },
+            {
+              "label": "No, I need sponsorship now.",
+              "value": 754693428
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": "<p><em>This job requires you to be in the office 3 days a week. All open locations for this role are listed at the top of this page. For accommodations, you can submit a request <a href=\"https://docs.google.com/forms/d/e/1FAIpQLSeoJeduEZ2NdZF_65uZmWUrCM-zee7yADXX1s6Xr9zAGq8iKA/viewform\" target=\"_blank\" rel=\"noopener\">here</a>.</em></p>",
+      "label": "In what cities are you available to work?",
+      "required": true,
+      "fields": [
+        {
+          "name": "question_69650957[]",
+          "type": "multi_value_multi_select",
+          "values": [
+            {
+              "label": "Amsterdam",
+              "value": 754693429
+            },
+            {
+              "label": "Atlanta",
+              "value": 754693430
+            },
+            {
+              "label": "Bangalore",
+              "value": 754693431
+            },
+            {
+              "label": "Barcelona",
+              "value": 754693432
+            },
+            {
+              "label": "Barueri São Paulo",
+              "value": 754693433
+            },
+            {
+              "label": "Bordeaux",
+              "value": 754693434
+            },
+            {
+              "label": "Boston",
+              "value": 754693435
+            },
+            {
+              "label": "Chicago",
+              "value": 754693436
+            },
+            {
+              "label": "Copenhagen",
+              "value": 754693437
+            },
+            {
+              "label": "Denver",
+              "value": 754693438
+            },
+            {
+              "label": "Dubai",
+              "value": 754693439
+            },
+            {
+              "label": "Dublin",
+              "value": 754693440
+            },
+            {
+              "label": "Grenoble",
+              "value": 754693441
+            },
+            {
+              "label": "Hamburg",
+              "value": 754693442
+            },
+            {
+              "label": "Jakarta",
+              "value": 754693443
+            },
+            {
+              "label": "Lisbon",
+              "value": 754693444
+            },
+            {
+              "label": "London",
+              "value": 754693445
+            },
+            {
+              "label": "Lyon",
+              "value": 754693446
+            },
+            {
+              "label": "Madrid",
+              "value": 754693447
+            },
+            {
+              "label": "Melbourne",
+              "value": 754693448
+            },
+            {
+              "label": "Mexico City",
+              "value": 754693449
+            },
+            {
+              "label": "Montpellier",
+              "value": 754693450
+            },
+            {
+              "label": "Mumbai",
+              "value": 754693451
+            },
+            {
+              "label": "Nantes",
+              "value": 754693452
+            },
+            {
+              "label": "New York City",
+              "value": 754693453
+            },
+            {
+              "label": "Nice",
+              "value": 754693454
+            },
+            {
+              "label": "Osaka",
+              "value": 754693455
+            },
+            {
+              "label": "Paris",
+              "value": 754693456
+            },
+            {
+              "label": "Pittsburgh",
+              "value": 754693457
+            },
+            {
+              "label": "Remote",
+              "value": 754693458
+            },
+            {
+              "label": "Riyadh",
+              "value": 754693459
+            },
+            {
+              "label": "Salt Lake City",
+              "value": 754693460
+            },
+            {
+              "label": "San Francisco",
+              "value": 754693461
+            },
+            {
+              "label": "San Jose (Campbell)",
+              "value": 754693462
+            },
+            {
+              "label": "San Sebastian",
+              "value": 754693463
+            },
+            {
+              "label": "São Paulo",
+              "value": 754693464
+            },
+            {
+              "label": "Seattle",
+              "value": 754693465
+            },
+            {
+              "label": "Seoul",
+              "value": 754693466
+            },
+            {
+              "label": "Singapore",
+              "value": 754693467
+            },
+            {
+              "label": "Sophia Antipolis",
+              "value": 754693468
+            },
+            {
+              "label": "Stockholm",
+              "value": 754693469
+            },
+            {
+              "label": "Sydney",
+              "value": 754693470
+            },
+            {
+              "label": "Tel Aviv",
+              "value": 754693471
+            },
+            {
+              "label": "Tokyo",
+              "value": 754693472
+            },
+            {
+              "label": "Toronto",
+              "value": 754693473
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": "<p><em>Select all the languages in which you have business-level fluency, both in verbal and written communication.</em></p>",
+      "label": "Please select all the languages you speak fluently.",
+      "required": true,
+      "fields": [
+        {
+          "name": "question_69650958[]",
+          "type": "multi_value_multi_select",
+          "values": [
+            {
+              "label": "Arabic",
+              "value": 754693474
+            },
+            {
+              "label": "Bahasa Indonesia",
+              "value": 754693475
+            },
+            {
+              "label": "Bulgarian",
+              "value": 754693476
+            },
+            {
+              "label": "Cantonese",
+              "value": 754693477
+            },
+            {
+              "label": "Croatian",
+              "value": 754693478
+            },
+            {
+              "label": "Czech",
+              "value": 754693479
+            },
+            {
+              "label": "Danish",
+              "value": 754693480
+            },
+            {
+              "label": "Dutch",
+              "value": 754693481
+            },
+            {
+              "label": "English",
+              "value": 754693482
+            },
+            {
+              "label": "Estonian",
+              "value": 754693483
+            },
+            {
+              "label": "Finnish",
+              "value": 754693484
+            },
+            {
+              "label": "French",
+              "value": 754693485
+            },
+            {
+              "label": "German",
+              "value": 754693486
+            },
+            {
+              "label": "Greek",
+              "value": 754693487
+            },
+            {
+              "label": "Hebrew",
+              "value": 754693488
+            },
+            {
+              "label": "Hindi",
+              "value": 754693489
+            },
+            {
+              "label": "Hungarian",
+              "value": 754693490
+            },
+            {
+              "label": "Italian",
+              "value": 754693491
+            },
+            {
+              "label": "Japanese",
+              "value": 754693492
+            },
+            {
+              "label": "Korean",
+              "value": 754693493
+            },
+            {
+              "label": "Latvian",
+              "value": 754693494
+            },
+            {
+              "label": "Lithuanian",
+              "value": 754693495
+            },
+            {
+              "label": "Malay",
+              "value": 754693496
+            },
+            {
+              "label": "Mandarin",
+              "value": 754693497
+            },
+            {
+              "label": "Norwegian",
+              "value": 754693498
+            },
+            {
+              "label": "Polish",
+              "value": 754693499
+            },
+            {
+              "label": "Portuguese",
+              "value": 754693500
+            },
+            {
+              "label": "Portuguese (Brazilian)",
+              "value": 754693501
+            },
+            {
+              "label": "Romanian",
+              "value": 754693502
+            },
+            {
+              "label": "Russian",
+              "value": 754693503
+            },
+            {
+              "label": "Slovak",
+              "value": 754693504
+            },
+            {
+              "label": "Slovenian",
+              "value": 754693505
+            },
+            {
+              "label": "Spanish",
+              "value": 754693506
+            },
+            {
+              "label": "Swedish",
+              "value": 754693507
+            },
+            {
+              "label": "Tagalog",
+              "value": 754693508
+            },
+            {
+              "label": "Thai",
+              "value": 754693509
+            },
+            {
+              "label": "Turkish",
+              "value": 754693510
+            },
+            {
+              "label": "Ukrainian",
+              "value": 754693511
+            },
+            {
+              "label": "Vietnamese",
+              "value": 754693512
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": null,
+      "label": "How did you hear about this opportunity?",
+      "required": true,
+      "fields": [
+        {
+          "name": "question_69650959",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "label": "Advisor or Faculty referral",
+              "value": 754693513
+            },
+            {
+              "label": "AfroTech",
+              "value": 754693514
+            },
+            {
+              "label": "Angelist",
+              "value": 754693515
+            },
+            {
+              "label": "Attended a talk or conference",
+              "value": 754693516
+            },
+            {
+              "label": "Blind App",
+              "value": 754693517
+            },
+            {
+              "label": "Break Through Tech",
+              "value": 754693518
+            },
+            {
+              "label": "BuiltIn Boston",
+              "value": 754693519
+            },
+            {
+              "label": "BuiltIn NYC",
+              "value": 754693520
+            },
+            {
+              "label": "ColorStack",
+              "value": 754693521
+            },
+            {
+              "label": "Campus Event",
+              "value": 754693522
+            },
+            {
+              "label": "Carnegie Mellon University department or mailing list",
+              "value": 754693523
+            },
+            {
+              "label": "Datadog Employee",
+              "value": 754693524
+            },
+            {
+              "label": "Datadog's Careers Page",
+              "value": 754693525
+            },
+            {
+              "label": "Event",
+              "value": 754693526
+            },
+            {
+              "label": "Flexjobs",
+              "value": 754693527
+            },
+            {
+              "label": "Girls Who Code",
+              "value": 754693528
+            },
+            {
+              "label": "Github",
+              "value": 754693529
+            },
+            {
+              "label": "Glassdoor",
+              "value": 754693530
+            },
+            {
+              "label": "Hacker News",
+              "value": 754693531
+            },
+            {
+              "label": "Hired",
+              "value": 754693532
+            },
+            {
+              "label": "Hiretual",
+              "value": 754693533
+            },
+            {
+              "label": "I love Datadog's product!",
+              "value": 754693534
+            },
+            {
+              "label": "Instagram",
+              "value": 754693535
+            },
+            {
+              "label": "JobTeaser",
+              "value": 754693536
+            },
+            {
+              "label": "LinkedIn (Datadog Page)",
+              "value": 754693537
+            },
+            {
+              "label": "LinkedIn (Job Posting)",
+              "value": 754693538
+            },
+            {
+              "label": "MLT (Management Leadership for Tomorrow)",
+              "value": 754693539
+            },
+            {
+              "label": "Rewriting the Code",
+              "value": 754693540
+            },
+            {
+              "label": "School job board",
+              "value": 754693541
+            },
+            {
+              "label": "SHPE (Society of Hispanic Professional Engineers)",
+              "value": 754693542
+            },
+            {
+              "label": "The Muse",
+              "value": 754693543
+            },
+            {
+              "label": "Thrive",
+              "value": 754693544
+            },
+            {
+              "label": "Underdog",
+              "value": 754693545
+            },
+            {
+              "label": "Welcome to the Jungle",
+              "value": 754693546
+            },
+            {
+              "label": "Other",
+              "value": 754693547
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "location_questions": []
+}
