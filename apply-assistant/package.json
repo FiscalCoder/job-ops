@@ -1,0 +1,12 @@
+{
+  "name": "apply-assistant",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Job Ops apply assistant: server-side store + browser extension (separate from upstream workspaces).",
+  "scripts": {
+    "spike:inspect": "node spike/inspect-form.mjs",
+    "spike:fake": "node spike/fill-trusted.mjs",
+    "spike:db": "tsx spike/db-dry-run.ts"
+  }
+}
