@@ -384,7 +384,7 @@ The same module serves Workday in Phase 1b, where it also corrects Workday's res
 | **M0** | Spike (dry run, never submits) | WXT skeleton. On 5 live Greenhouse forms (1 embedded iframe, 1 with education): fill text, react-select, location typeahead, education repeater, `DataTransfer` resume upload; read everything back. Decide whether the nanobrowser input layer is needed | All field types fill and read back on all 5 | 2–3 d |
 | **M1** | Server store + resolver | apply-assistant container (compose override), store + API, Job Ops client (login, jobs, profile, PDF, PATCH, notes), **contract tests**. Resolver ladder §4.2 split: lookups in the extension background, cache/matching/write-back on the server. Liveness | ≥ 90% of known Greenhouse jobs resolve correctly; the 5 found today resolve automatically | 4–5 d |
 | **M2** (core done 2026-10-20) | Prep + planner + answer bank | `?questions=true` fetch, field classifier, experience/education module, answer bank UI (protected keys), question map, Haiku mapping, Sonnet drafts, queue page | Every resolved job shows a plan with "needs you" counts | 3–4 d |
-| **M3** | Extension: supervised fill | Side panel (queue, plan, next action, timeline, controls), content script for page + iframe, fillers, policy engine, gate and classes, detectors, "I'll do it" capture, submit detection, mark-applied, passive LinkedIn capture | One real application end to end, every action logged | 6–8 d |
+| **M3** (M3a+M3b done 2026-10-20) | Extension: supervised fill | Side panel (queue, plan, next action, timeline, controls), content script for page + iframe, fillers, policy engine, gate and classes, detectors, "I'll do it" capture, submit detection, mark-applied, passive LinkedIn capture | One real application end to end, every action logged | 6–8 d |
 | **M4** | Dogfood | 20 real supervised applications; fix what breaks; tune thresholds | §1 targets met | ~1 wk (in parallel with use) |
 
 **Total: about 3 weeks of build plus a week of real use.**
@@ -403,6 +403,8 @@ Done and deployed at `https://apply.hueint.com`:
 Verified on real data (read-only run, `spike/e2e-real.ts`): 24 lookups → 3 matched (title 1.00, descriptions 0.97–1.00) → 3 plans; each needs only answer-bank items (name, country, city).
 
 Left for M2: question map, Haiku mapping for unrecognised questions, Sonnet drafts for open-ended ones (needs an Anthropic API key on the server).
+
+**M3a/M3b (2026-10-20):** extension in `apply-assistant/extension` (WXT, puppeteer-core `ExtensionTransport` for trusted input). Lookups run from the browser every 30 min. Supervised fill runs in the side panel and logs each step on the server; Submit is always yours. A dry run on a real Greenhouse form passes 9/9 steps. Findings: Location is `input_text` in the API but an async react-select on the page; search text must be inserted in one event; the phone Country select shows only the dial code.
 
 ## 12A. M0 spike results (2026-10-19, dry run, fake data, nothing submitted)
 
