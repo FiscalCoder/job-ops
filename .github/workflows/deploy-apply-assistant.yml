@@ -1,8 +1,11 @@
 name: Deploy apply-assistant to VPS
 
-# Fork-owned workflow (upstream has no apply-assistant). Manual by default; deploys the
+# Fork-owned workflow (upstream has no apply-assistant). Runs when apply-assistant/ changes; deploys the
 # separate apply-assistant compose project next to Job Ops without touching it.
 on:
+  push:
+    branches: [feature/credit-savings-remote-focus]
+    paths: ["apply-assistant/**", ".github/workflows/deploy-apply-assistant.yml"]
   workflow_dispatch: {}
 
 concurrency:
