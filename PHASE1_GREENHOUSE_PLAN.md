@@ -210,9 +210,10 @@ flowchart LR
 
 | Class | Examples | Source |
 |---|---|---|
-| Identity | first/last/preferred name, email, phone | profile |
+| Identity | first/last/preferred name | **answer bank** (`identity.first_name`, `identity.last_name`, `identity.preferred_name`); profile only if the bank entry is empty |
+| Contact | email, phone, LinkedIn | profile |
 | Links | LinkedIn, GitHub, website, portfolio | profile `basics.profiles` |
-| Location | city / "where do you reside" / location questions | profile + bank |
+| Location | city / "where do you reside" / state / country | **answer bank only** (`location.current_city`, `location.state`, `location.current_country`). Never inferred from the resume or past jobs |
 | Files | resume (required), cover letter (optional) | **tailored PDF**; cover letter only when required (Sonnet draft, Confirm class) |
 | Education | school, degree, discipline, start/end | experience/education module §8 |
 | Employment | company, title, dates (when present) | §8 |
@@ -294,13 +295,14 @@ flowchart LR
 
 Order for each field (stop at the first confident source):
 
-1. **Profile / resume** (`GET /api/profile` + design-resume JSON): deterministic.
-2. **Experience/education module** (§8): deterministic.
-3. **Answer bank** by exact key.
-4. **Question map:** normalised question text → bank key, learned from earlier forms or your confirmations.
-5. **Haiku 5.5 mapping:** structured output `{key, confidence}` chosen from bank keys and the field's own options. Protected keys take the bank value, never the model's.
-6. **Sonnet 5.5 draft:** only for open-ended text, using the JD plus the job's `tailoredSummary` / `tailoredHeadline` / `tailoredSkills`. Always Confirm class.
-7. **Needs you:** never guess.
+1. **Answer bank, identity and location keys** for names and where you live. The resume deliberately carries no city, and the name has an initial instead of a surname. These keys take priority over the profile.
+2. **Profile / resume** (`GET /api/profile` + design-resume JSON) for email, phone, links, experience, education: deterministic.
+3. **Experience/education module** (§8): deterministic.
+4. **Answer bank** by exact key.
+5. **Question map:** normalised question text → bank key, learned from earlier forms or your confirmations.
+6. **Haiku 5.5 mapping:** structured output `{key, confidence}` chosen from bank keys and the field's own options. Protected keys take the bank value, never the model's.
+7. **Sonnet 5.5 draft:** only for open-ended text, using the JD plus the job's `tailoredSummary` / `tailoredHeadline` / `tailoredSkills`. Always Confirm class.
+8. **Needs you:** never guess. There's no fallback from other data either (e.g. a past job's location is never used as your city).
 
 Select and multi-select fields are matched against the form's own options with **fuse.js** before any model call.
 
@@ -426,7 +428,7 @@ The spike scripts are in `apply-assistant/spike/`. Every non-GET request was blo
 - **Inputs:** the 7 highest-scoring open jobs that link to Greenhouse or whose company has a Greenhouse board, your Job Ops profile, and a real tailored PDF.
 - **Resolver:** found all 7 postings. 4 by title match on the company board (0.75–1.00), 1 via a `grnh.se` redirect, 2 direct. 1 posting (New Relic) is closed.
 - **Fill:** **49/49 planned fields filled** (country, name, email, phone, location, LinkedIn; resume attach triggered and its upload blocked). **50 required questions had no source**, so they're answer-bank work for M2: sponsorship, right to work, salary acknowledgements, "how did you hear", years of experience, address…
-- **Profile gaps found:** no separate last name, and no city (the location fell back to the latest job's location). These need the answer bank or a profile fix.
+- **Profile gaps found:** no separate last name, and no city. **Decision:** both live in the answer bank (`identity.last_name` = your initial, `location.current_city`). The resume stays unchanged, and the experience-location fallback used by the spike is removed from the planner.
 - **Not exercised:** none of these 7 forms had an Education section, so education with real resume data is still untested. Education itself works (New Relic, fake data).
 
 Still to prove in M3, with you applying for real:
