@@ -31,6 +31,11 @@ export interface JobOpsJob {
   readonly suitabilityScore: number | null;
 }
 
+export interface JobOpsJobDetail extends JobOpsJob {
+  readonly location: string | null;
+  readonly jobDescription: string | null;
+}
+
 export interface JobUpdate {
   readonly applicationLink?: string | null;
   readonly status?: "applied" | "expired";
@@ -52,6 +57,7 @@ export interface JobOpsApi {
     token: string,
     statuses: readonly string[],
   ): Promise<{ jobs: JobOpsJob[]; total: number; revision: string }>;
+  getJob(token: string, jobId: string): Promise<JobOpsJobDetail>;
   updateJob(token: string, jobId: string, update: JobUpdate): Promise<void>;
   addNote(token: string, jobId: string, note: JobNote): Promise<void>;
   getPdf(token: string, jobId: string): Promise<Uint8Array>;
@@ -66,22 +72,35 @@ const loginData = z.object({ token: z.string().min(1), expiresIn: z.number() });
 const meData = z.object({
   user: z.object({ id: z.string(), username: z.string() }),
 });
+const jobShape = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    employer: z.string(),
+    status: z.string(),
+    jobUrl: z.string(),
+    applicationLink: z.string().nullable().optional(),
+    suitabilityScore: z.number().nullable().optional(),
+  })
+  .passthrough();
 const jobsData = z.object({
-  jobs: z.array(
-    z
-      .object({
-        id: z.string(),
-        title: z.string(),
-        employer: z.string(),
-        status: z.string(),
-        jobUrl: z.string(),
-        applicationLink: z.string().nullable().optional(),
-        suitabilityScore: z.number().nullable().optional(),
-      })
-      .passthrough(),
-  ),
+  jobs: z.array(jobShape),
   total: z.number(),
   revision: z.string(),
+});
+const jobDetailData = jobShape.extend({
+  location: z.string().nullable().optional(),
+  jobDescription: z.string().nullable().optional(),
+});
+
+const toJob = (job: z.infer<typeof jobShape>): JobOpsJob => ({
+  id: job.id,
+  title: job.title,
+  employer: job.employer,
+  status: job.status,
+  jobUrl: job.jobUrl,
+  applicationLink: job.applicationLink ?? null,
+  suitabilityScore: job.suitabilityScore ?? null,
 });
 
 export class JobOpsClient implements JobOpsApi {
@@ -111,15 +130,20 @@ export class JobOpsClient implements JobOpsApi {
     return {
       total: data.total,
       revision: data.revision,
-      jobs: data.jobs.map((job) => ({
-        id: job.id,
-        title: job.title,
-        employer: job.employer,
-        status: job.status,
-        jobUrl: job.jobUrl,
-        applicationLink: job.applicationLink ?? null,
-        suitabilityScore: job.suitabilityScore ?? null,
-      })),
+      jobs: data.jobs.map(toJob),
+    };
+  }
+
+  async getJob(token: string, jobId: string): Promise<JobOpsJobDetail> {
+    const job = await this.request(
+      `/api/jobs/${encodeURIComponent(jobId)}`,
+      jobDetailData,
+      { token },
+    );
+    return {
+      ...toJob(job),
+      location: job.location ?? null,
+      jobDescription: job.jobDescription ?? null,
     };
   }
 

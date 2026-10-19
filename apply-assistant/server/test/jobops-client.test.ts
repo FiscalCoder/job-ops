@@ -92,6 +92,33 @@ describe("JobOpsClient", () => {
     });
   });
 
+  it("gets one job with its location and description", async () => {
+    const { fetchImpl, calls } = fakeFetch(() =>
+      json({
+        ok: true,
+        data: {
+          id: "j1",
+          title: "SE",
+          employer: "Acme",
+          status: "ready",
+          jobUrl: "https://x",
+          applicationLink: null,
+          location: "Bengaluru",
+          jobDescription: "Build things",
+        },
+      }),
+    );
+    const client = new JobOpsClient(BASE, fetchImpl);
+    const job = await client.getJob("tok", "j1");
+    expect(calls[0]?.url).toBe(`${BASE}/api/jobs/j1`);
+    expect(job).toMatchObject({
+      id: "j1",
+      location: "Bengaluru",
+      jobDescription: "Build things",
+      suitabilityScore: null,
+    });
+  });
+
   it("patches the application link and status", async () => {
     const { fetchImpl, calls } = fakeFetch(() =>
       json({ ok: true, data: { id: "j1" } }),

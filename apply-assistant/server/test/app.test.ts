@@ -17,6 +17,9 @@ function fakeJobOps(overrides: Partial<JobOpsApi> = {}): JobOpsApi {
       throw new JobOpsError(401, "UNAUTHORIZED", "Authentication required");
     },
     listJobs: async () => ({ jobs: [], total: 0, revision: "r0" }),
+    getJob: async () => {
+      throw new JobOpsError(404, "NOT_FOUND", "Job not found");
+    },
     updateJob: async () => undefined,
     addNote: async () => undefined,
     getPdf: async () => new Uint8Array(),

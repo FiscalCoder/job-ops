@@ -3,12 +3,15 @@ import express, { type Response } from "express";
 import { z } from "zod";
 import type { JobOpsApi } from "../jobops/client.js";
 import { createAnswerBankRepo } from "../store/answer-bank-repo.js";
+import { createApplyTargetsRepo } from "../store/apply-targets-repo.js";
+import { createGhBoardsRepo } from "../store/gh-boards-repo.js";
 import {
   type AuthedRequest,
   createAuthMiddleware,
   sendJobOpsFailure,
 } from "./auth.js";
 import { sendError, sendOk } from "./envelope.js";
+import { createLookupRoutes } from "./lookup-routes.js";
 
 export interface AppDeps {
   readonly jobOps: JobOpsApi;
@@ -38,7 +41,8 @@ export function createApp({ jobOps, db, authCacheSeconds }: AppDeps) {
   const requireUser = createAuthMiddleware(jobOps, authCacheSeconds);
 
   app.disable("x-powered-by");
-  app.use(express.json({ limit: "1mb" }));
+  // Lookup results can carry several job descriptions.
+  app.use(express.json({ limit: "5mb" }));
 
   app.get("/health", (_req, res) => sendOk(res, { status: "ok" }));
 
@@ -86,6 +90,15 @@ export function createApp({ jobOps, db, authCacheSeconds }: AppDeps) {
       });
       return sendOk(res, saved);
     },
+  );
+
+  app.use(
+    requireUser,
+    createLookupRoutes({
+      jobOps,
+      targets: createApplyTargetsRepo(db),
+      boards: createGhBoardsRepo(db),
+    }),
   );
 
   app.use((_req, res) => sendError(res, 404, "NOT_FOUND", "Not found"));
