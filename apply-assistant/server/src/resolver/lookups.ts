@@ -17,6 +17,17 @@ import { employerKey } from "./text.js";
 
 export const QUEUE_STATUSES = ["ready"] as const;
 
+/**
+ * Lookups run before tailoring too, so you know which high scorers are on Greenhouse before
+ * spending effort on a resume. Ready jobs are always looked up; Discovered ones only at 70+.
+ */
+const LOOKUP_STATUSES = ["ready", "discovered"] as const;
+const LOOKUP_MIN_DISCOVERED_SCORE = 70;
+
+const worthLookingUp = (job: JobOpsJob) =>
+  job.status === "ready" ||
+  (job.suitabilityScore ?? 0) >= LOOKUP_MIN_DISCOVERED_SCORE;
+
 export type LookupTask =
   | { type: "verify-job"; token: string; ghJobId: string; region: "us" | "eu" }
   | { type: "resolve-embedded"; ghJobId: string; pageUrl: string }
@@ -103,8 +114,9 @@ export function createLookups(deps: {
   };
 
   async function pending(token: string): Promise<PendingLookup[]> {
-    const { jobs } = await jobOps.listJobs(token, QUEUE_STATUSES);
+    const { jobs } = await jobOps.listJobs(token, LOOKUP_STATUSES);
     return jobs
+      .filter(worthLookingUp)
       .filter((job) => !isSettled(targets.get(job.id)))
       .map((job) => ({ job, task: taskFor(job) }))
       .filter(

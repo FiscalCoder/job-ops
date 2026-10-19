@@ -37,6 +37,42 @@ const jobs: JobOpsJob[] = [
     applicationLink: null,
     suitabilityScore: 79,
   },
+  {
+    id: "discovered-high",
+    title: "Backend Engineer",
+    employer: "Delta",
+    status: "discovered",
+    jobUrl: "https://www.linkedin.com/jobs/view/2",
+    applicationLink: null,
+    suitabilityScore: 70,
+  },
+  {
+    id: "discovered-low",
+    title: "Backend Engineer",
+    employer: "Epsilon",
+    status: "discovered",
+    jobUrl: "https://www.linkedin.com/jobs/view/3",
+    applicationLink: null,
+    suitabilityScore: 69,
+  },
+  {
+    id: "discovered-unscored",
+    title: "Backend Engineer",
+    employer: "Zeta",
+    status: "discovered",
+    jobUrl: "https://www.linkedin.com/jobs/view/4",
+    applicationLink: null,
+    suitabilityScore: null,
+  },
+  {
+    id: "skipped",
+    title: "Backend Engineer",
+    employer: "Eta",
+    status: "skipped",
+    jobUrl: "https://job-boards.greenhouse.io/eta/jobs/9",
+    applicationLink: null,
+    suitabilityScore: 95,
+  },
 ];
 
 function fakeJobOps(log: {
@@ -49,7 +85,10 @@ function fakeJobOps(log: {
       if (token === "good") return { id: "u1", username: "me" };
       throw new JobOpsError(401, "UNAUTHORIZED", "nope");
     },
-    listJobs: async () => ({ jobs, total: jobs.length, revision: "r1" }),
+    listJobs: async (_t, statuses) => {
+      const found = jobs.filter((j) => statuses.includes(j.status));
+      return { jobs: found, total: found.length, revision: "r1" };
+    },
     getJob: async (_t, id) => {
       const job = jobs.find((j) => j.id === id);
       if (!job) throw new JobOpsError(404, "NOT_FOUND", "Job not found");
@@ -100,7 +139,7 @@ async function start() {
 }
 
 describe("lookups", () => {
-  it("lists one lookup task per unresolved Ready job, by kind", async () => {
+  it("lists one lookup task per unresolved Ready job, and per Discovered job scoring 70+", async () => {
     const { call } = await start();
     const { status, json } = await call("/lookups/pending");
     expect(status).toBe(200);
@@ -127,6 +166,12 @@ describe("lookups", () => {
         employer: "Gamma Labs Inc.",
         title: "Senior Backend Engineer",
         task: { type: "find-board", employer: "Gamma Labs Inc." },
+      },
+      {
+        jobId: "discovered-high",
+        employer: "Delta",
+        title: "Backend Engineer",
+        task: { type: "find-board", employer: "Delta" },
       },
     ]);
   });
