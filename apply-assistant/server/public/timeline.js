@@ -2,14 +2,9 @@
 // page snapshots. Snapshots open in a sandboxed frame: nothing in them can run.
 // Every value is rendered with textContent, never as HTML.
 
-const FAILURES = new Set([
-  "step-failed",
-  "stall",
-  "error",
-  "console-error",
-  "request-failed",
-  "http-error",
-]);
+const FAILURES = new Set(["step-failed", "stall", "error", "trace-problem"]);
+// The page's own errors: often harmless (analytics, sign-in checks), sometimes the cause.
+const PAGE_ISSUES = new Set(["console-error", "request-failed", "http-error"]);
 
 const SOURCE_LABEL = { server: "server", extension: "extension", page: "page" };
 
@@ -152,6 +147,7 @@ export function createTimeline({ api, raw, el, go }) {
 
   function eventRow(event, snapshots) {
     const failure = FAILURES.has(event.kind);
+    const pageIssue = PAGE_ISSUES.has(event.kind);
     const snapshot = event.snapshotId ? snapshots.get(event.snapshotId) : null;
     const holder = el("div", { class: "snapshot-holder" });
     const details =
@@ -165,7 +161,13 @@ export function createTimeline({ api, raw, el, go }) {
           );
     return el(
       "li",
-      { class: failure ? "event failure" : "event" },
+      {
+        class: failure
+          ? "event failure"
+          : pageIssue
+            ? "event page-issue"
+            : "event",
+      },
       el(
         "div",
         { class: "event-head" },
@@ -175,7 +177,11 @@ export function createTimeline({ api, raw, el, go }) {
           { class: "badge" },
           SOURCE_LABEL[event.source] ?? event.source,
         ),
-        el("span", { class: failure ? "badge bad" : "badge" }, event.kind),
+        el(
+          "span",
+          { class: failure ? "badge bad" : pageIssue ? "badge warn" : "badge" },
+          event.kind,
+        ),
         event.stepSeq
           ? el("span", { class: "muted" }, `step ${event.stepSeq}`)
           : null,
@@ -227,6 +233,7 @@ export function createTimeline({ api, raw, el, go }) {
         (e) =>
           !onlyProblems.checked ||
           FAILURES.has(e.kind) ||
+          PAGE_ISSUES.has(e.kind) ||
           e.kind === "snapshot",
       );
       const items = [];

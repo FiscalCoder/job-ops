@@ -87,13 +87,15 @@ interface SnapshotRow {
   created_at: string;
 }
 
-/** Event kinds that mean something went wrong (counted as failures in the job list). */
+/**
+ * Event kinds that mean something went wrong (counted as problems in the job list). Page
+ * console errors and failed requests aren't: forms make plenty that don't matter.
+ */
 export const FAILURE_KINDS: ReadonlySet<string> = new Set([
   "step-failed",
   "stall",
   "error",
-  "console-error",
-  "request-failed",
+  "trace-problem",
 ]);
 
 const toEvent = (row: EventRow): TraceEvent => ({

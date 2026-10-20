@@ -121,7 +121,32 @@ Tracking ends when the tab closes, after 30 minutes idle, or at a confirmation p
 
 | Part | State |
 |---|---|
-| T1 run trace | in progress |
-| T2 apply kit | in progress |
+| T1 run trace | **deployed 2026-10-20** |
+| T2 apply kit | **deployed 2026-10-20** |
 | T3 tracked tabs | planned |
-| T4 learning | planned |
+| T4 learning | planned (kit fills already record the field data it needs) |
+
+**Verified (2026-10-20):**
+- **Server:** 286 unit tests. 7 page tests in Chromium, including the Timeline with a sandboxed snapshot (a `onerror` script in it doesn't run), a screenshot, the "only problems" filter, the export and phone width.
+- **Extension:** 53 unit tests. `e2e/kit.e2e.mjs` runs in a real Chrome with the built extension against a local apply-assistant, and checks:
+  - fill by click (through input events, kept by a controlled field);
+  - fill inside an iframe;
+  - copy when no field is selected;
+  - resume attached to the resume field, not the cover-letter one;
+  - resume saved with its path copied;
+  - Ask Claude without a key;
+  - trace events carrying the field description.
+- **Live:**
+  - `/kit` works for all 7 Ready jobs.
+  - A dry-run supervised fill on the real Platform Science Greenhouse form (submits blocked, stopped at review) filled 9/9 steps.
+  - Its full trail reached the server: steps with values, decisions, navigations, page errors, review, run end, and six snapshots (DOM 5–13 KB, screenshots 32–74 KB).
+
+**Fixed after the first live run:**
+- One invalid event (an empty console message) made the server refuse its whole batch, and the run's last events were lost.
+- The server now checks events one by one and notes rejects in the trail. The extension never sends empty messages and doesn't retry a refused batch.
+- The trail is sent before a run is marked finished.
+- Page console errors and failed requests are shown in amber but no longer counted as problems: Greenhouse's own sign-in check returns 401 on every form.
+
+**Known limits:**
+- If the side panel is closed mid-run, events from its last ~2 s may not be sent.
+- Under test automation Chrome renames downloads, so the `Downloads/JobOps/<Employer> - <Title>/` path is covered by unit tests only.

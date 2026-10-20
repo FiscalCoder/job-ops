@@ -79,7 +79,7 @@ describe("trace store", () => {
       expect.objectContaining({
         jobId: "j1",
         events: 3,
-        failures: 1,
+        failures: 0, // page console errors aren't problems
         lastMessage: "Plan built",
       }),
       expect.objectContaining({ jobId: "j2", failures: 0 }),
@@ -265,7 +265,7 @@ describe("trace routes", () => {
       jobId: job.id,
       title: "Senior Backend Engineer",
       employer: "Acme",
-      failures: 1,
+      failures: 2, // the failed step and the rejected-events note
     });
   });
 

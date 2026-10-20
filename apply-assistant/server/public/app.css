@@ -394,3 +394,7 @@ label.inline {
 label.inline input {
   width: auto;
 }
+
+.event.page-issue {
+  border-left-color: var(--warn);
+}
