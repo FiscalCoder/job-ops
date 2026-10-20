@@ -11,9 +11,13 @@ import { leverFormUrl } from "../src/fill/lever-driver";
 
 describe("driver helpers", () => {
   it("maps plan refs to Greenhouse DOM ids", () => {
-    expect(selectorFor("first_name")).toBe('[id="first_name"]');
+    expect(selectorFor("first_name")).toBe(
+      '[id="first_name"], fieldset[id="first_name[]"]',
+    );
     expect(selectorFor("location")).toBe("#candidate-location");
-    expect(selectorFor('bad"ref')).toBe('[id="badref"]');
+    expect(selectorFor('bad"ref')).toBe(
+      '[id="badref"], fieldset[id="badref[]"]',
+    );
   });
 
   it("ranks options like the M0 spike: exact > starts-with > word > contains", () => {

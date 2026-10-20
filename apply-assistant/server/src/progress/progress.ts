@@ -64,6 +64,8 @@ const toMs = (sqliteTime: string) =>
 interface StepView {
   readonly edited: boolean;
   readonly changed: boolean;
+  /** Edited before planned values were recorded: whether it changed anything is unknown. */
+  readonly unknown: boolean;
 }
 
 /** Per step: was it edited, and did the edit change the planned value? */
@@ -79,10 +81,12 @@ function editsOf(events: readonly TraceEvent[]): Map<number, StepView> {
     if (data.type !== "edit") continue;
     const prior = views.get(event.stepSeq);
     // Runs from before planned values were recorded: count any edit as a change.
-    const changed = !("planned" in data) || !same(data.value, data.planned);
+    const unknown = !("planned" in data);
+    const changed = unknown || !same(data.value, data.planned);
     views.set(event.stepSeq, {
       edited: true,
       changed: (prior?.changed ?? false) || changed,
+      unknown: (prior?.unknown ?? false) || unknown,
     });
   }
   return views;
@@ -111,7 +115,15 @@ function application(run: Run, input: ProgressInput): Application {
       action.decision === "you-did-it" ||
       (action.decision === "edited" && (edit?.changed ?? true));
     if (!yours) filledAsPlanned += 1;
-    if (action.actionClass === "protected" && yours) protectedChanged += 1;
+    // A wrong protected answer needs evidence: a known change, or you filling it yourself.
+    const knownChange =
+      action.decision === "you-did-it" ||
+      (action.decision === "edited" &&
+        edit !== undefined &&
+        edit.changed &&
+        !edit.unknown);
+    if (action.actionClass === "protected" && knownChange)
+      protectedChanged += 1;
   }
   const logged = new Set(actions.map((a) => a.seq));
   const traced = new Set(
@@ -154,9 +166,15 @@ const median = (values: readonly number[]): number | null => {
 };
 
 export function computeProgress(input: ProgressInput): Progress {
-  const applications = input.runs
-    .filter((r) => r.outcome === "submitted")
-    .map((r) => application(r, input));
+  // One application per job: before runs on applied jobs were refused, reopening a posting
+  // could log its confirmation page as another "submitted" run.
+  const firstSubmitted = new Map<string, Run>();
+  for (const run of input.runs)
+    if (run.outcome === "submitted" && !firstSubmitted.has(run.jobId))
+      firstSubmitted.set(run.jobId, run);
+  const applications = [...firstSubmitted.values()].map((r) =>
+    application(r, input),
+  );
   const none = applications.length === 0;
   const steps = applications.reduce((n, a) => n + a.steps, 0);
   const asPlanned = applications.reduce((n, a) => n + a.filledAsPlanned, 0);

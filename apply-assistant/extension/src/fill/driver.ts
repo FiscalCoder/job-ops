@@ -32,8 +32,18 @@ export {
 /** DOM id for a plan field; Greenhouse renders most fields with id = field name. */
 export function selectorFor(ref: string): string {
   if (ref === "location") return "#candidate-location";
-  return `[id="${ref.replace(/["\\]/g, "")}"]`;
+  const id = ref.replace(/["\\]/g, "");
+  // Multi-choice questions can render as a checkbox group: <fieldset id="question_1[]">.
+  return `[id="${id}"], fieldset[id="${id}[]"]`;
 }
+
+/** A Greenhouse checkbox group (multi-choice question) rather than a single input. */
+const isCheckboxGroup = (element: ElementHandle) =>
+  element.evaluate(
+    (el) =>
+      el.tagName === "FIELDSET" &&
+      el.querySelector("input[type=checkbox]") !== null,
+  );
 
 /** Greenhouse's page-only "Are you Hispanic/Latino?" question (not in its API). */
 const ETHNICITY = "hispanic_ethnicity";
@@ -129,6 +139,11 @@ export class GreenhouseDriver extends TrustedDriver {
           ok: false,
           reason: "Field not found on the page; fill it yourself",
         };
+      if (await isCheckboxGroup(element))
+        return await this.checkboxes(
+          element,
+          Array.isArray(value) ? value : [value as string],
+        );
       if (entry.type === "multiselect")
         return await this.multiSelect(
           element,
@@ -271,6 +286,69 @@ export class GreenhouseDriver extends TrustedDriver {
     };
   }
 
+  /** The boxes of a checkbox group: id, the text of its label, and whether it's ticked. */
+  private groupOptions(group: ElementHandle) {
+    return group.$$eval("input[type=checkbox]", (inputs) =>
+      inputs.map((input) => ({
+        id: input.id,
+        label: (
+          input.ownerDocument.querySelector(
+            `label[for="${input.id.replace(/["\\]/g, "")}"]`,
+          )?.textContent ?? (input as HTMLInputElement).value
+        ).trim(),
+        checked: (input as HTMLInputElement).checked,
+      })),
+    );
+  }
+
+  /** Ticks the boxes matching each wanted answer (clicking their labels), then reads back. */
+  private async checkboxes(
+    group: ElementHandle,
+    wanted: readonly string[],
+  ): Promise<FillOutcome> {
+    const options = await this.groupOptions(group);
+    const labels = options.map((o) => o.label);
+    const picked: string[] = [];
+    const missing: string[] = [];
+    for (const item of wanted) {
+      const index = bestOption(labels, item);
+      const option = index === null ? undefined : options[index];
+      if (!option) {
+        missing.push(item);
+        continue;
+      }
+      if (!option.checked) {
+        const id = option.id.replace(/["\\]/g, "");
+        const target =
+          (await this.frame.$(`label[for="${id}"]`)) ??
+          (await this.frame.$(`[id="${id}"]`));
+        await target?.click();
+      }
+      picked.push(option.label);
+    }
+    await sleep(150);
+    const now = await this.groupOptions(group);
+    const unticked = picked.filter(
+      (label) => !now.some((o) => o.label === label && o.checked),
+    );
+    if (picked.length === 0)
+      return {
+        ok: false,
+        reason: `None of the choices matched "${wanted.join(", ")}"`,
+      };
+    if (unticked.length)
+      return {
+        ok: false,
+        reason: `"${unticked.join(", ")}" didn't stay ticked`,
+      };
+    return {
+      ok: true,
+      result: `ticked ${picked.map((p) => `"${p}"`).join(", ")}${
+        missing.length ? ` (no box for ${missing.join(", ")})` : ""
+      }`,
+    };
+  }
+
   private async multiSelect(
     element: ElementHandle,
     wanted: readonly string[],
@@ -296,6 +374,21 @@ export class GreenhouseDriver extends TrustedDriver {
         : entry.ref;
     return this.frame
       .$eval(selectorFor(ref), (el) => {
+        if (el.tagName === "FIELDSET")
+          return [
+            ...el.querySelectorAll<HTMLInputElement>(
+              "input[type=checkbox]:checked",
+            ),
+          ]
+            .map(
+              (input) =>
+                el.ownerDocument
+                  .querySelector(
+                    `label[for="${input.id.replace(/["\\]/g, "")}"]`,
+                  )
+                  ?.textContent?.trim() ?? input.value,
+            )
+            .join(", ");
         const control = el.closest(".select__control");
         if (control)
           return [

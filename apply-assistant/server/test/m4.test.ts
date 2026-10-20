@@ -312,16 +312,40 @@ describe("computeProgress", () => {
     expect(progress.manualApplications).toBe(3);
   });
 
-  it("counts edits from before planned values were recorded as changes, and shows no data when empty", () => {
+  it("counts edits from before planned values were recorded against the fill rate, but not as wrong protected answers", () => {
     const progress = computeProgress({
-      runs: [run({})],
-      actionsOf: () => [action(1, { decision: "edited", decidedBy: "you" })],
+      runs: [
+        run({}),
+        // The same job "submitted" again (its confirmation page reopened): one application.
+        run({
+          id: "r9",
+          startedAt: "2026-10-21 11:00:00",
+          endedAt: "2026-10-21 11:01:00",
+        }),
+      ],
+      actionsOf: (runId) =>
+        runId === "r1"
+          ? [
+              action(1, { decision: "edited", decidedBy: "you" }),
+              action(2, {
+                decision: "edited",
+                decidedBy: "you",
+                actionClass: "protected",
+              }),
+            ]
+          : [],
       eventsOf: () => [
         event({ stepSeq: 1, data: { type: "edit", value: "x" } }),
+        event({ stepSeq: 2, data: { type: "edit", value: "No" } }),
       ],
       manualApplications: 0,
     });
-    expect(progress.applications[0]?.byYou).toBe(1);
+    expect(progress.applications).toHaveLength(1);
+    expect(progress.applications[0]).toMatchObject({
+      runId: "r1",
+      byYou: 2,
+      protectedChanged: 0,
+    });
     const empty = computeProgress({
       runs: [],
       actionsOf: () => [],

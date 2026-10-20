@@ -124,7 +124,7 @@ export function createProgress({ api, el, toast }) {
       el(
         "p",
         { class: "muted" },
-        `"By you" counts steps you changed, typed yourself or skipped; editing a step back to the same value counts as approving it. Applications made by hand with the kit (${data.manualApplications}) aren't counted toward these targets.`,
+        `"By you" counts steps you changed, typed yourself or skipped; editing a step back to the same value counts as approving it. Applications made by hand with the kit (${data.manualApplications}) aren't counted toward these targets. Runs before 21 Oct 2026 count every edit as a change (what was planned wasn't recorded then), and Claude cost is tracked from that day: earlier answers were already paid for and are reused free.`,
       ),
       el("h3", {}, "Supervised applications"),
       apps,
