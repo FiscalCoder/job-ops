@@ -291,6 +291,35 @@ describe("web page", () => {
     await page.getByRole("button", { name: "All jobs" }).click();
   });
 
+  it("shows the M4 targets on Progress, and remembered answers you can forget", async () => {
+    await page.getByRole("button", { name: "Progress" }).click();
+    await page
+      .getByRole("heading", { name: "Supervised applications" })
+      .waitFor();
+    expect(await page.locator("#progress-box tbody tr").count()).toBe(6);
+    expect(await page.locator("#progress-box").textContent()).toContain(
+      "No supervised application submitted yet",
+    );
+    await shot("8-progress");
+
+    await post("/learned", {
+      jobId: "job-1",
+      label: "Why do you want to work at Acme?",
+      type: "textarea",
+      value: "Because of the platform team.",
+      how: "edited",
+    });
+    await page.getByRole("button", { name: "Answer bank" }).click();
+    const row = page.locator("#learned tr", {
+      hasText: "Why do you want to work at Acme?",
+    });
+    await row.waitFor();
+    expect(await row.textContent()).toContain("Because of the platform team.");
+    await shot("9-remembered");
+    await row.getByRole("button", { name: "Forget" }).click();
+    await page.getByText("Nothing remembered yet.").waitFor();
+  });
+
   it("keeps working at phone width", async () => {
     await page.setViewportSize({ width: 380, height: 800 });
     const wide = await page.evaluate(() =>

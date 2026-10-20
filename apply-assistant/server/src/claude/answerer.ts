@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { ClaudeAnswersRepo } from "../store/claude-answers-repo.js";
+import { type ClaudeUsage, usageOf } from "./pricing.js";
 import {
   type ClaudeAnswer,
   cacheKey,
@@ -21,10 +22,14 @@ import {
  * reply is checked (questions.ts) and cached; nothing here decides what gets submitted.
  */
 
+/** Told about every call Claude actually made (cached answers make none). */
+export type UsageListener = (usage: ClaudeUsage) => void;
+
 export interface QuestionAnswerer {
   answer(
     questions: readonly Question[],
     context: QuestionContext,
+    onUsage?: UsageListener,
   ): Promise<ReadonlyMap<string, ClaudeAnswer>>;
 }
 
@@ -73,14 +78,27 @@ export function createClaudeAnswerer(
   const { messages, cache, mapModel, draftModel } = options;
   const log = options.log ?? (() => {});
 
-  const usage = (what: string, message: Anthropic.Message) =>
+  const usage = (
+    what: string,
+    message: Anthropic.Message,
+    onUsage: UsageListener,
+  ) => {
     log(
       `[claude] ${what} ${message.model}: ${message.usage.input_tokens} in / ${message.usage.output_tokens} out`,
     );
+    onUsage(
+      usageOf(
+        message.model,
+        message.usage.input_tokens,
+        message.usage.output_tokens,
+      ),
+    );
+  };
 
   async function map(
     questions: readonly Question[],
     context: QuestionContext,
+    onUsage: UsageListener,
   ): Promise<Map<string, Cached>> {
     const message = await messages.create({
       model: mapModel,
@@ -92,7 +110,7 @@ export function createClaudeAnswerer(
         format: { type: "json_schema", schema: MAP_SCHEMA },
       },
     });
-    usage(`mapped ${questions.length} question(s)`, message);
+    usage(`mapped ${questions.length} question(s)`, message, onUsage);
     const declined = message.stop_reason === "refusal";
     const items = declined ? [] : parseMapReply(replyText(message));
     return new Map(
@@ -118,6 +136,7 @@ export function createClaudeAnswerer(
   async function draft(
     question: Question,
     context: QuestionContext,
+    onUsage: UsageListener,
   ): Promise<ClaudeAnswer> {
     const key = cacheKey("draft", draftModel, question, context);
     const cached = cache.get(key) as ClaudeAnswer | null;
@@ -129,7 +148,7 @@ export function createClaudeAnswerer(
       messages: [{ role: "user", content: draftPrompt(question, context) }],
       output_config: { effort: "low" },
     });
-    usage("drafted 1 answer", message);
+    usage("drafted 1 answer", message, onUsage);
     if (message.stop_reason === "refusal")
       return {
         kind: "unknown",
@@ -146,7 +165,7 @@ export function createClaudeAnswerer(
   }
 
   return {
-    async answer(questions, context) {
+    async answer(questions, context, onUsage = () => {}) {
       if (questions.length === 0) return new Map();
       const known = new Map<string, Cached>();
       for (const q of questions) {
@@ -156,7 +175,7 @@ export function createClaudeAnswerer(
       const fresh = questions.filter((q) => !known.has(q.ref));
       const mapped =
         fresh.length > 0
-          ? await map(fresh, context)
+          ? await map(fresh, context, onUsage)
           : new Map<string, Cached>();
 
       const results = new Map<string, ClaudeAnswer>();
@@ -165,7 +184,7 @@ export function createClaudeAnswerer(
         if (!step) continue;
         results.set(
           q.ref,
-          step.kind === "write" ? await draft(q, context) : step,
+          step.kind === "write" ? await draft(q, context, onUsage) : step,
         );
       }
       return results;

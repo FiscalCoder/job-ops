@@ -271,7 +271,32 @@ export class RunController {
             { stepSeq: step.seq },
           );
         });
+      if (learnable(step)) await this.remember(step);
     }
+  }
+
+  /** Your answer to a form question, kept for the next form that asks it. */
+  private async remember(step: Step) {
+    const typed = step.decision === "you-did-it";
+    const value = typed
+      ? (await this.driver.readBack(step.entry).catch(() => "")).trim()
+      : step.value;
+    if (!value || (Array.isArray(value) && value.length === 0)) return;
+    await this.client
+      .learn({
+        jobId: this.job.jobId,
+        label: step.entry.label,
+        type: step.entry.type,
+        value,
+        how: typed ? "typed" : "edited",
+      })
+      .catch((error: unknown) =>
+        this.trace.event(
+          "error",
+          `Couldn't remember your answer to step ${step.seq}: ${errorText(error)}`,
+          { stepSeq: step.seq },
+        ),
+      );
   }
 
   private emit() {
@@ -509,6 +534,25 @@ export class RunController {
   async stop(): Promise<void> {
     if (!this.closed) this.dispatch({ type: "abort" });
   }
+}
+
+/** Answers from the bank, your resume or Job Ops are fixed at their source, not learned. */
+const FIXED_SOURCE = /^(bank:|resume:|jobops:|rule:)/;
+
+/** Your edit or own answer to a form question, worth reusing on the next form. */
+export function learnable(step: Step): boolean {
+  const { entry } = step;
+  const yours =
+    (step.decision === "edited" && step.state === "done") ||
+    step.decision === "you-did-it";
+  return (
+    yours &&
+    entry.type !== "file" &&
+    entry.actionClass !== "protected" &&
+    entry.section !== "demographic" &&
+    entry.section !== "compliance" &&
+    !FIXED_SOURCE.test(entry.source)
+  );
 }
 
 function toLogEntry(step: Step) {

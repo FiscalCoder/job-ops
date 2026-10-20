@@ -2,15 +2,24 @@ import { ATS_NAMES } from "../ats.js";
 import type { QuestionAnswerer } from "../claude/answerer.js";
 import type { ClaudeAnswer } from "../claude/questions.js";
 import { isAnswerable, toQuestion } from "../claude/questions.js";
+import { traceUsage } from "../claude/usage-trace.js";
 import type { JobOpsApi } from "../jobops/client.js";
 import type { AnswerBankRepo } from "../store/answer-bank-repo.js";
 import type { ApplyTargetsRepo } from "../store/apply-targets-repo.js";
 import type { FillPlansRepo } from "../store/fill-plans-repo.js";
 import type { FormSchemasRepo } from "../store/form-schemas-repo.js";
+import type { LearnedAnswersRepo } from "../store/learned-answers-repo.js";
 import type { TraceRecord } from "../store/trace-store.js";
 import { classifyField } from "./classify.js";
 import type { FormSchema } from "./form-schema.js";
-import { buildPlan, type FillPlan } from "./planner.js";
+import {
+  buildPlan,
+  type FillPlan,
+  hasRememberedAnswer,
+  locationSettles,
+  type PlanInput,
+} from "./planner.js";
+import { normalizeQuestion } from "./question-norm.js";
 import { type ResumeFacts, resumeFacts } from "./resume-facts.js";
 import { parseFormSchema } from "./schemas.js";
 
@@ -40,6 +49,8 @@ export interface PlansDeps {
   readonly answerer?: QuestionAnswerer | null;
   readonly log?: (line: string) => void;
   readonly trace?: TraceRecord;
+  /** Your answers to earlier forms' questions, reused before asking Claude. */
+  readonly learned?: LearnedAnswersRepo;
 }
 
 export interface RebuildResult {
@@ -55,18 +66,26 @@ export function createPlans(deps: PlansDeps) {
 
   /** Claude's answers for the questions the rules leave open (never throws). */
   async function askClaude(
+    jobId: string,
     schema: FormSchema,
     context: Parameters<QuestionAnswerer["answer"]>[1],
+    learned: PlanInput["learned"],
   ): Promise<{
     claude?: ReadonlyMap<string, ClaudeAnswer>;
     claudeProblem?: string;
   }> {
+    // Only what nothing else answers: not your remembered answers, and not "located in"
+    // questions your saved location settles.
     const questions = schema.fields
-      .filter(
-        (f) =>
-          isAnswerable(f) &&
-          ["question", "located-in"].includes(classifyField(f).rule.kind),
-      )
+      .filter((f) => {
+        if (!isAnswerable(f) || hasRememberedAnswer(f, learned)) return false;
+        const { rule } = classifyField(f);
+        return (
+          rule.kind === "question" ||
+          (rule.kind === "located-in" &&
+            !locationSettles(rule.place, context.bank))
+        );
+      })
       .map(toQuestion);
     if (questions.length === 0) return {};
     if (!answerer)
@@ -75,7 +94,13 @@ export function createPlans(deps: PlansDeps) {
           "No saved answer for this question yet (Claude isn't set up on the server)",
       };
     try {
-      return { claude: await answerer.answer(questions, context) };
+      return {
+        claude: await answerer.answer(
+          questions,
+          context,
+          traceUsage(trace, jobId),
+        ),
+      };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       log(
@@ -119,20 +144,28 @@ export function createPlans(deps: PlansDeps) {
       );
     const job = await jobOps.getJob(token, jobId);
     const schema = parseFormSchema(target.ats, stored.payload);
-    const fromClaude = await askClaude(schema, {
-      job: {
-        title: job.title,
-        employer: job.employer,
-        description: job.jobDescription,
+    const learned: PlanInput["learned"] = (label) =>
+      deps.learned?.get(normalizeQuestion(label, job.employer)) ?? null;
+    const fromClaude = await askClaude(
+      jobId,
+      schema,
+      {
+        job: {
+          title: job.title,
+          employer: job.employer,
+          description: job.jobDescription,
+        },
+        resume,
+        bank,
       },
-      resume,
-      bank,
-    });
+      learned,
+    );
     const plan = buildPlan({
       schema,
       resume,
       bank,
       jobLocation: job.location,
+      learned,
       ...fromClaude,
     });
     const previous = plans.get(jobId)?.plan;

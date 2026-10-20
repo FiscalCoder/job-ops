@@ -14,6 +14,7 @@
         <button type="button" data-tab="queue" class="tab">Queue</button>
         <button type="button" data-tab="bank" class="tab">Answer bank</button>
         <button type="button" data-tab="timeline" class="tab">Timeline</button>
+        <button type="button" data-tab="progress" class="tab">Progress</button>
         <button type="button" id="signout" class="link">Sign out</button>
       </nav>
     </header>
@@ -44,6 +45,16 @@
         <div id="plan" class="card" hidden></div>
       </section>
 
+      <section id="progress" hidden>
+        <div class="section-head">
+          <div>
+            <h2>Progress</h2>
+            <p class="muted">Phase 1 is done when 20 supervised applications meet these targets.</p>
+          </div>
+        </div>
+        <div id="progress-box" class="card"></div>
+      </section>
+
       <section id="timeline" hidden>
         <div class="section-head">
           <div>
@@ -66,6 +77,7 @@
           <button type="button" id="save-bank" class="primary" disabled>Save changes</button>
         </div>
         <form id="bank-form"></form>
+        <div id="learned" class="card"></div>
       </section>
     </main>
   </body>

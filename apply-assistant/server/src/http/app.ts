@@ -14,6 +14,7 @@ import { createCapturedLinksRepo } from "../store/captured-links-repo.js";
 import { createClaudeAnswersRepo } from "../store/claude-answers-repo.js";
 import { createFillPlansRepo } from "../store/fill-plans-repo.js";
 import { createFormSchemasRepo } from "../store/form-schemas-repo.js";
+import { createLearnedAnswersRepo } from "../store/learned-answers-repo.js";
 import { createRunsRepo } from "../store/runs-repo.js";
 import { createTraceStore, type TraceStore } from "../store/trace-store.js";
 import { createAnswerBankRoutes } from "./answer-bank-routes.js";
@@ -21,8 +22,10 @@ import { createAuthMiddleware, sendJobOpsFailure } from "./auth.js";
 import { createCaptureRoutes } from "./capture-routes.js";
 import { sendError, sendOk } from "./envelope.js";
 import { createKitRoutes } from "./kit-routes.js";
+import { createLearnedRoutes } from "./learned-routes.js";
 import { createLookupRoutes } from "./lookup-routes.js";
 import { createPlanRoutes } from "./plan-routes.js";
+import { createProgressRoutes } from "./progress-routes.js";
 import { createRunRoutes } from "./run-routes.js";
 import {
   createApiLimiter,
@@ -109,6 +112,7 @@ export function createApp({
         ...(log ? { log } : {}),
       })
     : null;
+  const learned = createLearnedAnswersRepo(db);
   const plans = createPlans({
     jobOps,
     targets,
@@ -118,6 +122,7 @@ export function createApp({
     answerer,
     ...(log ? { log } : {}),
     trace: record,
+    learned,
   });
 
   app.use(requireUser, createAnswerBankRoutes(answers));
@@ -128,6 +133,17 @@ export function createApp({
     createRunRoutes({ jobOps, runs, answers, trace: record }),
   );
   app.use(requireUser, createTraceRoutes({ jobOps, runs, trace }));
+  app.use(requireUser, createProgressRoutes({ jobOps, runs, trace }));
+  app.use(
+    requireUser,
+    createLearnedRoutes({
+      jobOps,
+      learned,
+      plans,
+      trace: record,
+      ...(log ? { log } : {}),
+    }),
+  );
   app.use(
     requireUser,
     createKitRoutes({

@@ -421,6 +421,20 @@ Verified on real data (read-only run, `spike/e2e-real.ts`): 24 lookups → 3 mat
 
 Live result: ElevenLabs (a Ready job) is matched on Ashby and planned. Its 2 needs-you are "How did you hear" (empty in the answer bank) and GitHub (not on the resume).
 
+## 12E. M4: dogfooding (started 2026-10-21)
+
+M4 is about 20 real supervised applications measured against the §1 targets. Built for it:
+- **Progress tab** (`GET /progress`): computes all §1 targets from submitted supervised runs, their run log and their trails.
+  - "Filled without you changing them" counts an edit that keeps the planned value as an approval; the side panel now records the planned value with every decision.
+  - Kit (manual) applications are counted separately.
+- **Claude cost per job:** every Claude call is traced as `claude-usage` with tokens and dollars (`claude/pricing.ts`: Haiku 5.5 $0.10/$0.50, Sonnet 5.5 $2/$10 per MTok).
+- **Remembered answers** (the `question_map` idea, migration 7 `learned_answers`):
+  - **Saved:** an answer you edit in the side panel, or type on the page with "I'll do it", keyed by the question with the company name removed.
+  - **Reused:** before asking Claude, on any form asking the same question, as long as it fits that form's choices. Shown with the date you gave it, and still needs your click.
+  - **Not learned:** answer-bank, resume, protected and voluntary answers; those are corrected at their source.
+  - **Managing them:** they're listed under Answer bank, and "Forget" removes one.
+- **Fewer Claude calls:** "Are you located in X?" goes to Claude only when your saved location can't settle it.
+
 ## 12D. Run trace and apply kit
 
 Planned in its own file: [APPLY_TRACE_AND_KIT_PLAN.md](APPLY_TRACE_AND_KIT_PLAN.md). It covers:

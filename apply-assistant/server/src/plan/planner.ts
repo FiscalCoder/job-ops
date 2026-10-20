@@ -1,5 +1,6 @@
 import { bankKeyDef, isProtectedKey, splitList } from "../bank/catalogue.js";
 import type { ClaudeAnswer } from "../claude/questions.js";
+import type { LearnedAnswer } from "../store/learned-answers-repo.js";
 import { formatBankValue } from "./bank-format.js";
 import { type ActionClass, classifyField, type FieldRule } from "./classify.js";
 import { countryOf } from "./country.js";
@@ -60,6 +61,8 @@ export interface PlanInput {
   readonly claude?: ReadonlyMap<string, ClaudeAnswer>;
   /** Why there are no Claude answers (no key, or the call failed), shown on those questions. */
   readonly claudeProblem?: string;
+  /** Your earlier answer to the same question on another form, if any (before Claude). */
+  readonly learned?: (label: string) => LearnedAnswer | null;
 }
 
 interface Resolved {
@@ -213,16 +216,12 @@ function asCountry(place: string): string | null {
  * "Are you located in <place>?": Yes when it's your saved country, city or state; No only when
  * it's clearly another country. Anything else (a region, another city) goes to Claude.
  */
-function resolveLocatedIn(
-  place: string,
-  field: FormField,
-  input: PlanInput,
-  jobCountry: string | null,
-): Resolved {
+/** The answer your saved location gives, or null when it can't settle the question. */
+function locatedIn(place: string, bank: PlanInput["bank"]): Resolved | null {
   const key = "location.current_country";
-  const country = input.bank.get(key)?.trim() ?? "";
-  const city = input.bank.get("location.current_city")?.trim() ?? "";
-  const state = input.bank.get("location.state")?.trim() ?? "";
+  const country = bank.get(key)?.trim() ?? "";
+  const city = bank.get("location.current_city")?.trim() ?? "";
+  const state = bank.get("location.state")?.trim() ?? "";
   if (!country && !city)
     return missing(`bank:${key}`, "Add your current country and city", key);
   const source = `bank:location (asked about ${place})`;
@@ -232,7 +231,24 @@ function resolveLocatedIn(
     return { value: asked === mine ? "Yes" : "No", source, bankKey: key };
   if ([city, state].some((v) => v && placeName(v) === placeName(place)))
     return { value: "Yes", source, bankKey: "location.current_city" };
-  return resolveClaude(field, input, jobCountry);
+  return null;
+}
+
+/** True when your saved location settles "Are you located in <place>?" (no Claude needed). */
+export const locationSettles = (
+  place: string,
+  bank: PlanInput["bank"],
+): boolean => locatedIn(place, bank) !== null;
+
+function resolveLocatedIn(
+  place: string,
+  field: FormField,
+  input: PlanInput,
+  jobCountry: string | null,
+): Resolved {
+  return (
+    locatedIn(place, input.bank) ?? resolveClaude(field, input, jobCountry)
+  );
 }
 
 function resolveEducation(
@@ -335,11 +351,43 @@ const percent = (confidence: number) => `${Math.round(confidence * 100)}%`;
 const shortModel = (model: string) =>
   model.replace(/^claude-/, "").replace(/-\d.*$/, "");
 
+/** Your remembered answer, when it still fits this form's choices. */
+function fromLearned(
+  field: FormField,
+  lookup: PlanInput["learned"],
+): Resolved | null {
+  const learned = lookup?.(field.label);
+  if (!learned) return null;
+  const values = Array.isArray(learned.value)
+    ? (learned.value as readonly string[])
+    : [learned.value as string];
+  if (field.type === "select" && !pickOption(field.options, values[0] ?? ""))
+    return null;
+  if (
+    field.type === "multiselect" &&
+    pickOptions(field.options, values).missing.length > 0
+  )
+    return null;
+  const when = learned.updatedAt.slice(0, 10);
+  return {
+    value: field.type === "multiselect" ? values : values.join(", "),
+    source: `learned: you ${learned.how === "typed" ? "typed" : "gave"} this answer on ${when}`,
+  };
+}
+
+/** True when the plan will use your remembered answer (so Claude needn't be asked). */
+export const hasRememberedAnswer = (
+  field: FormField,
+  lookup: PlanInput["learned"],
+): boolean => fromLearned(field, lookup) !== null;
+
 function resolveClaude(
   field: FormField,
   input: PlanInput,
   jobCountry: string | null,
 ): Resolved {
+  const remembered = fromLearned(field, input.learned);
+  if (remembered) return remembered;
   const answer = input.claude?.get(field.ref);
   if (!answer)
     return missing(

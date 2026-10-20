@@ -2,6 +2,7 @@
 // Talks only to this server's API with your Job Ops session token. Every value is rendered with
 // textContent, never as HTML.
 
+import { createProgress } from "./progress.js";
 import { createTimeline } from "./timeline.js";
 
 const TOKEN_KEY = "apply-assistant.token";
@@ -106,8 +107,9 @@ async function raw(path) {
 
 // ---- views & routing -------------------------------------------------------------------
 
-const VIEWS = ["login", "queue", "bank", "timeline"];
+const VIEWS = ["login", "queue", "bank", "timeline", "progress"];
 const timeline = createTimeline({ api, raw, el, go });
+const progress = createProgress({ api, el, toast });
 
 function show(view) {
   for (const name of VIEWS) $(name).hidden = name !== view;
@@ -127,13 +129,16 @@ async function route() {
     .split("/")
     .map(decodeURIComponent);
   try {
-    if (view === "timeline") {
+    if (view === "progress") {
+      show("progress");
+      await progress.loadProgress($("progress-box"));
+    } else if (view === "timeline") {
       show("timeline");
       if (arg) await timeline.loadJob($("timeline-box"), arg);
       else await timeline.loadList($("timeline-box"));
     } else if (view === "bank") {
       show("bank");
-      await loadBank();
+      await Promise.all([loadBank(), progress.loadLearned($("learned"))]);
       if (arg) focusBankKey(arg);
     } else if (view === "plan" && arg) {
       show("queue");

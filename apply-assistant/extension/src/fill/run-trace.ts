@@ -131,7 +131,15 @@ export function decisionEvent(
   const where = step ? `step ${step.seq} (${step.entry.label})` : "review";
   return {
     message: `You ${verb} ${where}`,
-    data: event,
+    // What the plan proposed, so the Progress page can tell a real change from a re-confirm.
+    data: step
+      ? {
+          ...event,
+          planned: step.value,
+          actionClass: step.entry.actionClass,
+          source: step.entry.source,
+        }
+      : event,
     ...(step ? { stepSeq: step.seq } : {}),
   };
 }

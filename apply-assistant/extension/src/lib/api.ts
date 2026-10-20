@@ -138,6 +138,17 @@ export class ApplyClient implements TraceApi {
     return this.request(`/kit/${encodeURIComponent(jobId)}`);
   }
 
+  /** Remembers your answer to a form question for the next form that asks it. */
+  learn(answer: {
+    jobId: string;
+    label: string;
+    type: string;
+    value: string | readonly string[];
+    how: "edited" | "typed";
+  }): Promise<unknown> {
+    return this.request("/learned", answer);
+  }
+
   /** You applied by hand, or skipped the job: Job Ops' own apply/skip actions. */
   kitOutcome(
     jobId: string,

@@ -62,8 +62,12 @@ body {
 }
 nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+  /* Five tabs don't fit a phone in one row: let them wrap within the header. */
+  min-width: 0;
+  max-width: 100%;
 }
 
 main {

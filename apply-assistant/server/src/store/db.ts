@@ -149,6 +149,18 @@ export const MIGRATIONS: readonly string[] = [
      created_at text not null
    );
    create index trace_snapshots_job on trace_snapshots (job_id, created_at);`,
+  // Answers you gave to form questions (edited or typed), reused when the question comes again.
+  `create table learned_answers (
+     id integer primary key autoincrement,
+     question_norm text not null unique,
+     label text not null,
+     field_type text not null,
+     answer_json text not null,
+     how text not null,
+     last_job_id text,
+     created_at text not null default (datetime('now')),
+     updated_at text not null default (datetime('now'))
+   );`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

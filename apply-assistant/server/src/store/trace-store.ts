@@ -155,6 +155,9 @@ export function createTraceStore(options: TraceStoreOptions) {
     "select * from trace_snapshots where job_id = ? order by created_at, id",
   );
   const snapshotById = db.prepare("select * from trace_snapshots where id = ?");
+  const ofKind = db.prepare(
+    "select * from trace_events where kind = ? order by id",
+  );
   const recent = db.prepare(
     `select job_id, max(ts) as last_ts, count(*) as events,
             sum(case when kind in (${[...FAILURE_KINDS].map(() => "?").join(",")}) then 1 else 0 end) as failures,
@@ -275,6 +278,11 @@ export function createTraceStore(options: TraceStoreOptions) {
         ? eventsOfRun.all(jobId, query.runId, limit)
         : eventsOfJob.all(jobId, limit)) as unknown as EventRow[];
       return rows.map(toEvent).reverse();
+    },
+
+    /** Every event of one kind, across jobs (oldest first). */
+    eventsOfKind(kind: string): TraceEvent[] {
+      return (ofKind.all(kind) as unknown as EventRow[]).map(toEvent);
     },
 
     snapshots(jobId: string): SnapshotMeta[] {

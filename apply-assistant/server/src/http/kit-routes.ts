@@ -2,6 +2,7 @@ import { type Response, Router } from "express";
 import { z } from "zod";
 import type { QuestionAnswerer } from "../claude/answerer.js";
 import type { ClaudeAnswer } from "../claude/questions.js";
+import { traceUsage } from "../claude/usage-trace.js";
 import { type JobOpsApi, JobOpsError } from "../jobops/client.js";
 import { buildKit } from "../kit/kit.js";
 import { resumeFacts } from "../plan/resume-facts.js";
@@ -218,6 +219,7 @@ export function createKitRoutes(deps: KitRoutesDeps) {
             resume: resumeFacts(design),
             bank,
           },
+          traceUsage(trace, jobId),
         );
         const reply = replies.get("kit");
         const found = replyValue(reply, bank);
