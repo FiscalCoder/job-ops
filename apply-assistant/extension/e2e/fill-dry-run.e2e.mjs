@@ -77,6 +77,8 @@ const posting = await postingPromise;
 
 const clicks = [];
 const skipped = [];
+const typed = [];
+const answers = Object.entries(JSON.parse(process.env.ANSWERS ?? "{}"));
 // Optional trace of one field while the run works (WATCH=candidate-location).
 const watchId = process.env.WATCH;
 let lastSeen = "";
@@ -118,6 +120,16 @@ while (Date.now() < deadline) {
     break;
   }
   const approve = panel.getByRole("button", { name: "Approve", exact: true });
+  const readLabel = async () =>
+    (await panel
+      .locator(".step-card strong")
+      .first()
+      .textContent()
+      .catch(() => "")) ?? "";
+  const firstRead = await readLabel();
+  await panel.waitForTimeout(300);
+  const currentLabel = await readLabel();
+  if (currentLabel !== firstRead) continue;
   const skip = panel.getByRole("button", { name: "Skip", exact: true });
   const label = async () =>
     (await panel
@@ -131,6 +143,30 @@ while (Date.now() < deadline) {
   ) {
     clicks.push(await label());
     await approve.click().catch(() => {});
+  } else if (
+    // ANSWERS='{"How did you hear":"LinkedIn"}' types an answer into a needs-you step, as you would.
+    answers.length &&
+    (await panel.locator(".step-card .value").count()) === 0 &&
+    answers.some(([q]) => currentLabel.includes(q))
+  ) {
+    const answer = answers.find(([q]) => currentLabel.includes(q))?.[1] ?? "";
+    await panel.locator(".step-card form input").fill(answer);
+    await panel.getByRole("button", { name: "Use this" }).click();
+    answers.splice(
+      answers.findIndex(([q]) => currentLabel.includes(q)),
+      1,
+    );
+    // Wait for the step to finish, then note what the panel says about it.
+    await panel.waitForTimeout(6000);
+    const after =
+      (await panel
+        .locator(".step-card")
+        .first()
+        .textContent()
+        .catch(() => "")) ?? "";
+    typed.push(
+      `${currentLabel} ← ${answer} → ${after.includes(currentLabel) ? `still here: ${after.slice(0, 160)}` : "done"}`,
+    );
   } else if (
     // Steps with no answer to approve (the card shows no value) need you; so does a step whose
     // Approve is greyed out after two failed tries. Both are skipped and reported.
@@ -246,6 +282,7 @@ console.log(
       reachedReview: runText.includes("click Submit yourself"),
       approvalsClicked: clicks.length,
       skippedNeedsYou: skipped,
+      typedAnswers: typed,
       timeline,
       readBack: Object.fromEntries(
         Object.entries(readBack).map(([k, v]) => [

@@ -75,12 +75,13 @@ function editor(step: Step, send: Send): HTMLElement {
     "aria-label": `Value for ${step.entry.label}`,
   }) as HTMLInputElement;
   input.value = valueText(step.value);
-  const form = el(
-    "form",
-    { class: "row" },
-    input,
-    button("Use this", () => {}, true),
-  );
+  // A submit button, so both clicking "Use this" and pressing Enter send the value.
+  const use = el(
+    "button",
+    { type: "submit", class: "primary" },
+    "Use this",
+  ) as HTMLButtonElement;
+  const form = el("form", { class: "row" }, input, use);
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const text = input.value.trim();
