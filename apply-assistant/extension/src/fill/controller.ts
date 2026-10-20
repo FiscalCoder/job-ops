@@ -82,6 +82,18 @@ async function openForm(url: string, tabId?: number): Promise<chrome.tabs.Tab> {
   return moved ?? current;
 }
 
+/**
+ * Lets go of the form's tab. Puppeteer detaches Chrome's debugger without handling errors, so
+ * on a tab you already closed it logged "No tab with given id"; Chrome detaches by itself then.
+ */
+async function release(browser: Browser, tabId: number): Promise<void> {
+  const open = await chrome.tabs.get(tabId).then(
+    () => true,
+    () => false,
+  );
+  if (open) await browser.disconnect().catch(() => {});
+}
+
 /** Only the job's own site and Greenhouse; anything else pauses the run. */
 export function allowedHost(host: string, startHost: string): boolean {
   return (
@@ -110,6 +122,7 @@ export class RunController {
     private readonly browser: Browser,
     private readonly driver: FormDriver,
     private readonly startHost: string,
+    private readonly tabId: number,
     entries: readonly PlanEntry[],
     runOptions: { countdownSeconds: number; resumeFirst: boolean },
     private readonly onChange: (view: RunView) => void,
@@ -118,6 +131,7 @@ export class RunController {
   ) {
     this.state = startRun(entries, runOptions);
     this.stopWatching = watchPage(page, trace);
+    chrome.tabs.onRemoved.addListener(this.onTabRemoved);
   }
 
   private snapshot(reason: string): Promise<void> {
@@ -175,7 +189,7 @@ export class RunController {
         "No application form on the posting (it may have closed)",
         page,
       );
-      await browser.disconnect();
+      await release(browser, tab.id);
       throw error;
     }
     let run: { id: string };
@@ -186,7 +200,7 @@ export class RunController {
         `The server refused the run: ${errorText(error)}`,
         page,
       );
-      await browser.disconnect();
+      await release(browser, tab.id);
       throw refused;
     }
     trace.setRun(run.id);
@@ -208,6 +222,7 @@ export class RunController {
       browser,
       driver,
       new URL(page.url()).host,
+      tab.id,
       entries,
       {
         countdownSeconds: options.countdownSeconds,
@@ -412,7 +427,21 @@ export class RunController {
     void this.snapshot(`step ${step.seq} failed: ${step.entry.label}`);
   }
 
+  private tabClosed = false;
+
+  /** The form's tab closed mid-run: nothing more can be filled; you say how it ended. */
+  private readonly onTabRemoved = (tabId: number) => {
+    if (tabId !== this.tabId || this.closed) return;
+    this.tabClosed = true;
+    this.clearTimer();
+    this.trace.event("error", "The form's tab was closed during the run");
+    this.notice = `The form's tab was closed. If you submitted, click "I submitted it"; otherwise Abort.`;
+    if (this.state.phase === "filling") this.apply({ type: "pause" });
+    this.emit();
+  };
+
   private async fill(step: Step) {
+    if (this.tabClosed) return;
     let stall: ReturnType<typeof setTimeout> | null = null;
     this.busy = true;
     this.emit();
@@ -483,7 +512,7 @@ export class RunController {
   }
 
   private async checkSubmitted() {
-    if (nextAction(this.state).kind !== "review") return;
+    if (this.tabClosed || nextAction(this.state).kind !== "review") return;
     if (await this.driver.submitted()) {
       this.apply({ type: "submitted" });
       void this.loop();
@@ -519,6 +548,7 @@ export class RunController {
       this.trace.event("error", this.notice);
     }
     this.stopWatching();
+    chrome.tabs.onRemoved.removeListener(this.onTabRemoved);
     await this.trace.close();
     await this.driver
       .highlight(
@@ -528,7 +558,7 @@ export class RunController {
           : "Apply Copilot: stopped",
       )
       .catch(() => {});
-    await this.browser.disconnect().catch(() => {});
+    await release(this.browser, this.tabId);
     this.onChange(this.view());
   }
 

@@ -394,6 +394,15 @@ const readBack = await form.evaluate(() => {
     questions,
   };
 });
+// CLOSE_TAB=1: you close the form's tab at review; the panel says so (no uncaught error).
+let tabClosedNote = null;
+if (process.env.CLOSE_TAB) {
+  await posting.close();
+  tabClosedNote = await panel
+    .getByText(/The form's tab was closed/)
+    .textContent({ timeout: 10_000 })
+    .catch(() => "(no note shown)");
+}
 await panel
   .getByRole("button", { name: "Abort" })
   .click()
@@ -430,6 +439,7 @@ console.log(
       blockedRequests: [...new Set(blocked)],
       allowedAshbyQueries: [...new Set(allowedPosts)],
       errors,
+      ...(tabClosedNote === null ? {} : { tabClosedNote }),
     },
     null,
     1,
