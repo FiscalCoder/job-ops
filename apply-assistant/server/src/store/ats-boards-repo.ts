@@ -1,7 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { Ats } from "../ats.js";
+import { ATS_LIST, type Ats } from "../ats.js";
 
-/** employer → its job board (application system + board token), or "no board", looked up once. */
+/**
+ * employer → its job board (application system + board token), or "no board", looked up once.
+ * A "no board" answer only holds for the systems that were searched: when a system is added,
+ * those employers are looked up again.
+ */
 
 export interface BoardCacheEntry {
   readonly employerKey: string;
@@ -18,7 +22,13 @@ interface BoardRow {
   token: string | null;
   method: string;
   checked_at: string;
+  searched: string | null;
 }
+
+const coversAllSystems = (searched: string | null) => {
+  const done = new Set((searched ?? "").split(","));
+  return ATS_LIST.every((ats) => done.has(ats));
+};
 
 export const BOARD_CACHE_DAYS = 7;
 
@@ -27,9 +37,9 @@ export function createAtsBoardsRepo(db: DatabaseSync) {
     `select * from ats_boards where employer_norm = ? and checked_at >= datetime('now', ?)`,
   );
   const upsertStmt = db.prepare(
-    `insert into ats_boards (employer_norm, ats, token, method, checked_at) values (?, ?, ?, ?, datetime('now'))
+    `insert into ats_boards (employer_norm, ats, token, method, searched, checked_at) values (?, ?, ?, ?, ?, datetime('now'))
      on conflict(employer_norm) do update set ats = excluded.ats, token = excluded.token,
-       method = excluded.method, checked_at = excluded.checked_at`,
+       method = excluded.method, searched = excluded.searched, checked_at = excluded.checked_at`,
   );
 
   return {
@@ -38,6 +48,7 @@ export function createAtsBoardsRepo(db: DatabaseSync) {
       const row = getStmt.get(employerKey, `-${BOARD_CACHE_DAYS} days`) as
         | BoardRow
         | undefined;
+      if (row && !row.token && !coversAllSystems(row.searched)) return null;
       return row
         ? {
             employerKey: row.employer_norm,
@@ -58,6 +69,7 @@ export function createAtsBoardsRepo(db: DatabaseSync) {
         board?.ats ?? null,
         board?.token ?? null,
         method,
+        ATS_LIST.join(","),
       );
     },
   };

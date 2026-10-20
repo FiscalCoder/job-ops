@@ -56,6 +56,9 @@ describe("openStore", () => {
       ats: "greenhouse",
       token: "acme",
     });
+    // "No board" was only ever checked on Greenhouse: look again on the other systems.
+    expect(boards.getFresh("none co")).toBeNull();
+    boards.save("none co", null, "name-slug");
     expect(boards.getFresh("none co")).toMatchObject({
       ats: null,
       token: null,

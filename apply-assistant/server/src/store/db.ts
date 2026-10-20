@@ -120,6 +120,8 @@ export const MIGRATIONS: readonly string[] = [
      select 'greenhouse', gh_token, gh_job_id, payload_json, schema_hash, fetched_at from form_schemas;
    drop table form_schemas;
    alter table form_schemas_v2 rename to form_schemas;`,
+  // Which systems a "no board" answer covered: adding a system makes those answers stale.
+  "alter table ats_boards add column searched text;",
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {
