@@ -27,8 +27,9 @@ const eventBody = z.object({
   message: z.string().min(1).max(2_000),
   data: z.unknown().optional(),
 });
+/** Events are checked one by one, so one bad event can't cost the rest of its batch. */
 const eventsBody = z.object({
-  events: z.array(eventBody).min(1).max(MAX_EVENTS),
+  events: z.array(z.unknown()).min(1).max(MAX_EVENTS),
 });
 const snapshotBody = z.object({
   jobId: id,
@@ -78,10 +79,40 @@ export function createTraceRoutes({ jobOps, runs, trace }: TraceRoutesDeps) {
       );
       return;
     }
-    const saved = trace.addEvents(
-      body.data.events.map((e) => ({ ...e, data: boundedData(e.data) })),
+    const checked = body.data.events.map((e) => eventBody.safeParse(e));
+    const rejected = checked.flatMap((result, index) =>
+      result.success
+        ? []
+        : [
+            {
+              index,
+              problems: result.error.issues.map(
+                (i) => `${i.path.join(".") || "event"}: ${i.message}`,
+              ),
+            },
+          ],
     );
-    sendOk(res, { saved });
+    const saved = trace.addEvents(
+      checked.flatMap((result) =>
+        result.success
+          ? [{ ...result.data, data: boundedData(result.data.data) }]
+          : [],
+      ),
+    );
+    // Rejected events leave a note in the job's trail, so the gap is visible there.
+    const jobId = body.data.events
+      .map((e) => (e as { jobId?: unknown } | null)?.jobId)
+      .find(
+        (j): j is string => typeof j === "string" && id.safeParse(j).success,
+      );
+    if (rejected.length && jobId)
+      trace.record({
+        jobId,
+        kind: "trace-problem",
+        message: `${rejected.length} trace event(s) rejected: ${rejected[0]?.problems.join("; ")}`,
+        data: { rejected },
+      });
+    sendOk(res, { saved, rejected });
   });
 
   router.post("/trace/snapshots", (req, res) => {

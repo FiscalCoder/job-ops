@@ -454,6 +454,8 @@ export class RunController {
       { data: { outcome } },
     );
     await this.snapshot(outcome === "submitted" ? "submitted" : "stopped");
+    // The whole trail reaches the server before the run is marked finished there.
+    await this.trace.flush();
     try {
       await this.logFinishedSteps();
       await this.client.completeRun(this.runId, outcome);

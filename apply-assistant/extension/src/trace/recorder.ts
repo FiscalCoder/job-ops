@@ -95,7 +95,8 @@ export class TraceRecorder {
       source: extra.source ?? "extension",
       kind,
       stepSeq: extra.stepSeq ?? null,
-      message: message.slice(0, 2_000),
+      // The server needs some text; pages do log empty console errors.
+      message: message.trim().slice(0, 2_000) || "(no message)",
       ...(extra.data === undefined ? {} : { data: extra.data }),
     });
     if (this.buffer.length > this.maxBuffered) {
@@ -164,7 +165,7 @@ export class TraceRecorder {
         source: "extension",
         kind: "trace-problem",
         stepSeq: null,
-        message: `${lost} trace event(s) were dropped while the server was unreachable`,
+        message: `${lost} trace event(s) were dropped (server unreachable or the batch was refused)`,
       });
     }
     const outgoing = this.buffer.slice(0, MAX_PER_REQUEST);
@@ -172,7 +173,12 @@ export class TraceRecorder {
     this.sending = this.api
       .traceEvents(outgoing)
       .then(() => {})
-      .catch(() => {
+      .catch((error: unknown) => {
+        // A refused batch would be refused again: count it as dropped instead of retrying.
+        if ((error as { status?: number }).status === 400) {
+          this.dropped += outgoing.length;
+          return;
+        }
         this.buffer = [...outgoing, ...this.buffer].slice(-this.maxBuffered);
       })
       .finally(() => {
@@ -186,6 +192,8 @@ export class TraceRecorder {
   async close(): Promise<void> {
     await this.snapshots;
     await this.flush();
+    // Report a refused last batch (counted as dropped) before stopping.
+    if (this.dropped > 0) await this.flush();
     this.closed = true;
     this.clearTimer();
   }

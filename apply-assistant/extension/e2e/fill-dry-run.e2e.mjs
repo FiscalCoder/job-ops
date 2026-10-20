@@ -348,7 +348,11 @@ await panel
   .getByRole("button", { name: "Abort" })
   .click()
   .catch(() => {});
-await panel.waitForTimeout(1500);
+// The run is over once the server has it (its trace is sent first).
+await panel
+  .getByText(/Nothing was submitted|Couldn't record the end/)
+  .waitFor({ timeout: 60_000 })
+  .catch(() => {});
 const endText = (await panel.locator("#run-box").textContent()) ?? "";
 
 console.log(

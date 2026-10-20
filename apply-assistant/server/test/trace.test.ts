@@ -226,18 +226,40 @@ describe("trace routes", () => {
         },
       ],
     });
-    expect(saved.body.data).toEqual({ saved: 1 });
-    const bad = await json("/trace/events", {
+    expect(saved.body.data).toEqual({ saved: 1, rejected: [] });
+    // One bad event doesn't cost the rest of its batch; the gap is noted in the trail.
+    const mixed = await json("/trace/events", {
       events: [
         { jobId: job.id, source: "server", kind: "x", message: "forged" },
+        { jobId: job.id, source: "page", kind: "console-error", message: "" },
+        {
+          jobId: job.id,
+          source: "extension",
+          kind: "review",
+          message: "At review",
+        },
       ],
     });
-    expect(bad.status).toBe(400);
+    expect(mixed.body.data.saved).toBe(1);
+    expect(
+      mixed.body.data.rejected.map((r: { index: number }) => r.index),
+    ).toEqual([0, 1]);
+    expect((await json("/trace/events", { events: [] })).status).toBe(400);
 
     const timeline = await json(`/trace/jobs/${job.id}`);
     expect(timeline.body.data.events[0].data).toMatchObject({
       truncated: true,
     });
+    expect(
+      timeline.body.data.events.map((e: { kind: string; source: string }) => [
+        e.source,
+        e.kind,
+      ]),
+    ).toEqual([
+      ["extension", "step-failed"],
+      ["extension", "review"],
+      ["server", "trace-problem"],
+    ]);
     const jobs = await json("/trace/jobs");
     expect(jobs.body.data[0]).toMatchObject({
       jobId: job.id,

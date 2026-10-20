@@ -81,6 +81,43 @@ describe("TraceRecorder", () => {
     expect(sent.flat().map((e) => e.kind)).not.toContain("late");
   });
 
+  it("never sends an empty message, and doesn't retry a batch the server refused", async () => {
+    const sent: TraceEvent[][] = [];
+    let calls = 0;
+    const api: TraceApi = {
+      traceEvents: async (events) => {
+        calls++;
+        if (calls === 1)
+          throw Object.assign(new Error("Invalid"), { status: 400 });
+        sent.push([...events]);
+      },
+      traceSnapshot: async () => {},
+    };
+    const recorder = new TraceRecorder(api, "job-1", { batch: 100 });
+    recorder.event("console-error", "   ", { source: "page" });
+    await recorder.flush();
+    recorder.event("run-ended", "Stopped");
+    await recorder.close();
+    expect(calls).toBe(2);
+    expect(sent.flat().map((e) => [e.kind, e.message])).toEqual([
+      [
+        "trace-problem",
+        "1 trace event(s) were dropped (server unreachable or the batch was refused)",
+      ],
+      ["run-ended", "Stopped"],
+    ]);
+    const empty = new TraceRecorder(
+      {
+        traceEvents: async (e) => void sent.push([...e]),
+        traceSnapshot: async () => {},
+      },
+      "job-2",
+    );
+    empty.event("console-error", "");
+    await empty.close();
+    expect(sent.at(-1)?.[0]?.message).toBe("(no message)");
+  });
+
   it("uploads snapshots in order, and turns a failed capture into an event", async () => {
     const { api, sent, snapshots } = fakeApi();
     const recorder = new TraceRecorder(api, "job-1");
