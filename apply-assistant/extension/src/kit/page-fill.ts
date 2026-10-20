@@ -184,7 +184,7 @@ const isWebPage = (tab: chrome.tabs.Tab) => /^https?:/.test(tab.url ?? "");
  * The page you're applying on: the window's active tab, or (when that is the kit itself, opened
  * as a tab) the web page you used last.
  */
-async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
+export async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   // In the side panel there is no "current tab"; only the kit opened as a tab has one.
   const self = await chrome.tabs.getCurrent();

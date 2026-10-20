@@ -1,4 +1,5 @@
 import { RunController } from "../../src/fill/controller";
+import { activeTab } from "../../src/kit/page-fill";
 import { ApiError, ApplyClient, type QueueItem } from "../../src/lib/api";
 import {
   type CaptureEntry,
@@ -7,6 +8,7 @@ import {
   loadSettings,
   saveSettings,
 } from "../../src/lib/settings";
+import { jobForTab } from "../../src/lib/tab-match";
 import type { RunSummary } from "../../src/lib/worker";
 import { showKit } from "./kit-view";
 import { renderRun as renderRunView } from "./run-view";
@@ -65,7 +67,8 @@ function countdownPicker(current: number): HTMLElement {
   return select;
 }
 
-async function startFill(item: QueueItem) {
+/** `tabId`: fill that open tab (you're on the application already) instead of a new one. */
+async function startFill(item: QueueItem, tabId?: number) {
   if (!client || activeRun) return;
   const box = $("run-box");
   box.hidden = false;
@@ -87,6 +90,7 @@ async function startFill(item: QueueItem) {
       client,
       job: item,
       countdownSeconds: await countdownSetting(),
+      ...(tabId === undefined ? {} : { tabId }),
       onChange: (view) =>
         renderRunView(
           box,
@@ -324,6 +328,8 @@ async function loadQueue() {
     handle(error);
     return;
   }
+  queueItems = items;
+  void checkTab();
   const list = $("queue");
   if (items.length === 0) {
     list.replaceChildren(
@@ -446,5 +452,61 @@ async function showPlan(item: QueueItem) {
     box.replaceChildren(el("p", { class: "error" }, message(error)));
   }
 }
+
+// ---- the page you're on ----------------------------------------------------------------
+
+let queueItems: QueueItem[] = [];
+
+/**
+ * When the current tab is the application page of a queued job (say LinkedIn's Apply took you
+ * there), offer to fill that page or open the job's kit, right at the top.
+ */
+async function checkTab() {
+  const box = $("here");
+  if (!client || activeRun) {
+    box.hidden = true;
+    return;
+  }
+  const tab = await activeTab();
+  const item = jobForTab(tab?.url, queueItems);
+  if (!item || tab?.id === undefined) {
+    box.hidden = true;
+    box.replaceChildren();
+    return;
+  }
+  const tabId = tab.id;
+  const fill = el(
+    "button",
+    { type: "button", class: "primary" },
+    "Fill this page",
+  );
+  fill.addEventListener("click", () => {
+    box.hidden = true;
+    void startFill(item, tabId);
+  });
+  box.replaceChildren(
+    el("strong", {}, `You're on the application for ${item.title}`),
+    el("p", { class: "muted" }, item.employer),
+    item.plan
+      ? el("div", { class: "controls" }, fill, kitButton(item))
+      : el(
+          "div",
+          { class: "controls" },
+          el(
+            "span",
+            { class: "muted" },
+            "No fill plan yet (Run now builds one).",
+          ),
+          kitButton(item),
+        ),
+  );
+  box.hidden = false;
+}
+
+chrome.tabs.onActivated.addListener(() => void checkTab());
+chrome.tabs.onUpdated.addListener((_id, change, tab) => {
+  if (tab.active && (change.url || change.status === "complete"))
+    void checkTab();
+});
 
 void start();

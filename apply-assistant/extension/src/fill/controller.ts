@@ -5,6 +5,7 @@ import {
   type Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import type { ApplyClient, QueueItem } from "../lib/api";
+import { pageKey } from "../lib/tab-match";
 import { errorText, TraceRecorder } from "../trace/recorder";
 import { attachDriver, formUrlFor, resumeFirst } from "./drivers";
 import { decisionEvent, pageCapture, watchPage } from "./run-trace";
@@ -59,6 +60,27 @@ function waitForTabLoad(tabId: number): Promise<void> {
   });
 }
 
+/**
+ * The tab to fill: a new one on the form, or the tab you're on (moved to the form only when
+ * it shows something else, so nothing you already typed there is reloaded away).
+ */
+async function openForm(url: string, tabId?: number): Promise<chrome.tabs.Tab> {
+  if (tabId === undefined) {
+    const tab = await chrome.tabs.create({ url, active: true });
+    if (tab.id !== undefined) await waitForTabLoad(tab.id);
+    return tab;
+  }
+  const current = await chrome.tabs.get(tabId);
+  if (current.url && pageKey(current.url) === pageKey(url)) {
+    if (current.status !== "complete") await waitForTabLoad(tabId);
+    return (await chrome.tabs.update(tabId, { active: true })) ?? current;
+  }
+  const loading = waitForTabLoad(tabId);
+  const moved = await chrome.tabs.update(tabId, { url, active: true });
+  await loading;
+  return moved ?? current;
+}
+
 /** Only the job's own site and Greenhouse; anything else pauses the run. */
 export function allowedHost(host: string, startHost: string): boolean {
   return (
@@ -106,6 +128,8 @@ export class RunController {
     job: QueueItem;
     countdownSeconds: number;
     onChange: (view: RunView) => void;
+    /** Fill this already-open tab (moved to the form first if needed) instead of a new one. */
+    tabId?: number;
   }): Promise<RunController> {
     const { client, job } = options;
     const posting = job.target.postingUrl;
@@ -131,13 +155,13 @@ export class RunController {
     } catch (error) {
       throw await fail(`Couldn't load the plan: ${errorText(error)}`);
     }
-    const tab = await chrome.tabs.create({ url, active: true });
-    if (tab.id === undefined) throw await fail("Couldn't open the posting");
+    let tab: chrome.tabs.Tab;
     try {
-      await waitForTabLoad(tab.id);
+      tab = await openForm(url, options.tabId);
     } catch (error) {
       throw await fail(errorText(error));
     }
+    if (tab.id === undefined) throw await fail("Couldn't open the posting");
     const browser = await connect({
       transport: await ExtensionTransport.connectTab(tab.id),
       defaultViewport: null,

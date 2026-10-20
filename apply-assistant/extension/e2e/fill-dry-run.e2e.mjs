@@ -121,15 +121,39 @@ if (STUB) {
   await panel.getByLabel("Password").fill(process.env.password ?? "");
   await panel.getByRole("button", { name: "Sign in" }).click();
 }
-await panel
-  .locator("#queue li.clickable", { hasText: jobTitle })
-  .first()
-  .click();
-await panel.getByRole("button", { name: "Start supervised fill" }).waitFor();
-await panel.locator("#plan select").selectOption("1");
-const postingPromise = context.waitForEvent("page");
-await panel.getByRole("button", { name: "Start supervised fill" }).click();
-const posting = await postingPromise;
+// HERE=<application url>: you're already on the form (LinkedIn's Apply took you there), so the
+// run starts from the side panel's "Fill this page" and fills that same tab.
+const here = process.env.HERE;
+let posting;
+if (here) {
+  await panel.locator("#queue li.clickable", { hasText: jobTitle }).waitFor();
+  await worker.evaluate(() =>
+    chrome.storage.local.set({ countdownSeconds: 1 }),
+  );
+  posting = await context.newPage();
+  await posting.goto(here);
+  const tabsBefore = context.pages().length;
+  await panel.bringToFront();
+  await panel.getByRole("button", { name: "Fill this page" }).click();
+  await panel
+    .locator("#run-box")
+    .getByText("Timeline")
+    .waitFor({ timeout: 60_000 });
+  if (context.pages().length !== tabsBefore)
+    throw new Error(
+      "Fill this page opened a new tab instead of using this one",
+    );
+} else {
+  await panel
+    .locator("#queue li.clickable", { hasText: jobTitle })
+    .first()
+    .click();
+  await panel.getByRole("button", { name: "Start supervised fill" }).waitFor();
+  await panel.locator("#plan select").selectOption("1");
+  const postingPromise = context.waitForEvent("page");
+  await panel.getByRole("button", { name: "Start supervised fill" }).click();
+  posting = await postingPromise;
+}
 
 const clicks = [];
 const skipped = [];

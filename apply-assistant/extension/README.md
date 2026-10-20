@@ -13,6 +13,9 @@ apply-assistant server never contacts Greenhouse or company sites.
   Ops (or press "I submitted it"). Every step is logged on the server. Closing the side panel stops
   the run. Chrome shows "Apply Copilot started debugging this browser" while a run is active: that is
   the trusted input.
+- **On the application page already** (say LinkedIn's Apply took you to the Ashby form): the side
+  panel shows "You're on the application for …" with **Fill this page** (a supervised fill in that
+  same tab) and **Apply kit**. It recognises the job's matched posting and pages under it.
 - **Run trace**: every run sends its steps, your decisions, the page's navigations, console errors
   and failed requests, plus snapshots (form DOM + screenshot) at start, on a failed step, on a stall,
   at review and at the end. See them under **Timeline** on apply.hueint.com, or export one job's

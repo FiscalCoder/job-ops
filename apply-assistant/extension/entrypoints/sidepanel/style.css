@@ -310,3 +310,8 @@ label.inline input {
 .kit-status:empty {
   display: none;
 }
+
+/* "You're on the application for …": the page you're on is a queued job. */
+.here {
+  border-color: var(--accent);
+}
