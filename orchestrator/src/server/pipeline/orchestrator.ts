@@ -277,6 +277,14 @@ function buildRepeatedChallengeMessage(args: {
   return `${extractorNames} still returned a Cloudflare challenge after the solve step, so the pipeline stopped before importing incomplete jobs.${sourceDetails}`;
 }
 
+function buildSkippedChallengeMessage(challenges: PendingChallenge[]): string {
+  const extractorNames = challenges
+    .map((challenge) => challenge.extractorName || challenge.extractorId)
+    .filter(Boolean)
+    .join(", ");
+  return `${extractorNames} still returned a Cloudflare challenge after the solve step, so its jobs were skipped; jobs from the other sources were imported.`;
+}
+
 function mergeRetriedJobs(
   originalJobs: CreateJobInput[],
   retriedJobs: CreateJobInput[],
@@ -490,22 +498,39 @@ export async function runPipeline(
               ),
           );
           if (unrecoveredOrdinary.length > 0) {
-            throw new Error(
-              buildRepeatedChallengeMessage({
-                challenges: unrecoveredOrdinary,
-                sourceErrors: retryResult.sourceErrors,
-              }),
-            );
+            // Nothing to import at all: fail loudly, as before.
+            if (discoveredJobs.length === 0) {
+              throw new Error(
+                buildRepeatedChallengeMessage({
+                  challenges: unrecoveredOrdinary,
+                  sourceErrors: retryResult.sourceErrors,
+                }),
+              );
+            }
+            // Fork: a source still blocked after the solve contributed no jobs, so skip it
+            // and keep the other sources' results instead of discarding the whole run.
+            const skippedMessage =
+              buildSkippedChallengeMessage(unrecoveredOrdinary);
+            pipelineLogger.warn(skippedMessage, {
+              skippedSources: unrecoveredOrdinary.map(
+                (challenge) => challenge.extractorId,
+              ),
+            });
+            sourceErrors = [...sourceErrors, skippedMessage];
+            await persistResultSummary({ stage: "discovery", sourceErrors });
           }
 
-          if (ordinaryChallenges.length > 0) {
+          const recoveredOrdinary = ordinaryChallenges.filter(
+            (challenge) => !unrecoveredOrdinary.includes(challenge),
+          );
+          if (recoveredOrdinary.length > 0) {
             pipelineLogger.warn(
               buildRepeatedChallengeMessage({
-                challenges: ordinaryChallenges,
+                challenges: recoveredOrdinary,
                 sourceErrors: retryResult.sourceErrors,
               }),
               {
-                retryPendingChallenges: ordinaryChallenges.map(
+                retryPendingChallenges: recoveredOrdinary.map(
                   (challenge) => challenge.extractorId,
                 ),
               },

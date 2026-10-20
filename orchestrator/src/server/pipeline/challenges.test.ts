@@ -114,6 +114,66 @@ describe.sequential("pipeline challenge handling", () => {
     );
   });
 
+  it("skips a source still challenged after the solve and imports the other sources' jobs", async () => {
+    const pipeline = await import("./orchestrator");
+    const pipelineRepo = await import("../repositories/pipeline");
+    const steps = await import("./steps");
+    const hiringCafe = {
+      extractorId: "hiringcafe",
+      extractorName: "Hiring Cafe",
+      url: "https://hiringcafe.com/?searchState=x",
+      sources: ["hiringcafe" as const],
+    };
+    const otherJob = {
+      source: "startupjobs",
+      sourceJobId: "s-1",
+      title: "Engineer",
+      employer: "Acme",
+      jobUrl: "https://startup.jobs/engineer-acme-1",
+    };
+    const challenged = "Hiring Cafe: Hiring Cafe returned a challenge page.";
+    vi.mocked(steps.discoverJobsStep)
+      .mockReset()
+      .mockResolvedValueOnce({
+        discoveredJobs: [otherJob],
+        sourceErrors: [challenged],
+        pendingChallenges: [hiringCafe],
+      })
+      .mockResolvedValueOnce({
+        discoveredJobs: [],
+        sourceErrors: [challenged],
+        pendingChallenges: [hiringCafe],
+      });
+
+    const runPromise = pipeline.runPipeline({
+      sources: ["hiringcafe", "startupjobs"],
+    });
+    await vi.waitFor(() => {
+      expect(pipeline.getPendingChallenges()).toHaveLength(1);
+    });
+    pipeline.resolvePipelineChallenge("hiringcafe");
+    const result = await runPromise;
+
+    expect(result).toEqual(
+      expect.objectContaining({ success: true, jobsDiscovered: 1 }),
+    );
+    expect(vi.mocked(steps.importJobsStep)).toHaveBeenCalledWith({
+      discoveredJobs: [expect.objectContaining({ sourceJobId: "s-1" })],
+    });
+    expect(vi.mocked(pipelineRepo.updatePipelineRun)).toHaveBeenCalledWith(
+      "run-challenge-1",
+      expect.objectContaining({
+        resultSummary: expect.objectContaining({
+          sourceErrors: expect.arrayContaining([
+            expect.stringContaining(
+              "Hiring Cafe still returned a Cloudflare challenge after the solve step, so its jobs were skipped",
+            ),
+          ]),
+        }),
+      }),
+    );
+  });
+
   it("holds partial Hiring Cafe jobs until solve, retries the detail URL, and imports the enriched job", async () => {
     const pipeline = await import("./orchestrator");
     const steps = await import("./steps");
@@ -261,8 +321,9 @@ describe.sequential("pipeline challenge handling", () => {
     });
   });
 
-  it("fails an ordinary repeated challenge even when Hiring Cafe is also paused", async () => {
+  it("skips an ordinary repeated challenge but keeps pausing for a Hiring Cafe detail challenge", async () => {
     const pipeline = await import("./orchestrator");
+    const pipelineRepo = await import("../repositories/pipeline");
     const steps = await import("./steps");
     const partialJob = {
       source: "hiringcafe" as const,
@@ -290,6 +351,11 @@ describe.sequential("pipeline challenge handling", () => {
         discoveredJobs: [partialJob],
         sourceErrors: [],
         pendingChallenges: [detailChallenge, challenge],
+      })
+      .mockResolvedValueOnce({
+        discoveredJobs: [{ ...partialJob, jobDescription: "Full detail" }],
+        sourceErrors: [],
+        pendingChallenges: [],
       });
 
     const runPromise = pipeline.runPipeline({
@@ -301,12 +367,32 @@ describe.sequential("pipeline challenge handling", () => {
     pipeline.resolvePipelineChallenge("hiringcafe");
     pipeline.resolvePipelineChallenge("gradcracker");
 
-    const result = await runPromise;
-    expect(result).toMatchObject({
-      success: false,
-      error: expect.stringContaining("Gradcracker still returned"),
+    // Gradcracker is skipped; the partial Hiring Cafe job is still held for its detail solve.
+    await vi.waitFor(() => {
+      expect(vi.mocked(steps.discoverJobsStep)).toHaveBeenCalledTimes(2);
+      expect(pipeline.getPendingChallenges()).toEqual([
+        expect.objectContaining({ extractorId: "hiringcafe" }),
+      ]);
     });
-    expect(vi.mocked(steps.discoverJobsStep)).toHaveBeenCalledTimes(2);
     expect(vi.mocked(steps.importJobsStep)).not.toHaveBeenCalled();
+    pipeline.resolvePipelineChallenge("hiringcafe");
+
+    const result = await runPromise;
+    expect(result).toMatchObject({ success: true });
+    expect(vi.mocked(steps.importJobsStep)).toHaveBeenCalledWith({
+      discoveredJobs: [
+        expect.objectContaining({ jobDescription: "Full detail" }),
+      ],
+    });
+    expect(vi.mocked(pipelineRepo.updatePipelineRun)).toHaveBeenCalledWith(
+      "run-challenge-1",
+      expect.objectContaining({
+        resultSummary: expect.objectContaining({
+          sourceErrors: expect.arrayContaining([
+            expect.stringContaining("Gradcracker still returned"),
+          ]),
+        }),
+      }),
+    );
   });
 });
