@@ -406,6 +406,21 @@ Verified on real data (read-only run, `spike/e2e-real.ts`): 24 lookups → 3 mat
 
 **M3a/M3b (2026-10-20):** extension in `apply-assistant/extension` (WXT, puppeteer-core `ExtensionTransport` for trusted input). Lookups run from the browser every 30 min. Supervised fill runs in the side panel and logs each step on the server; Submit is always yours. A dry run on a real Greenhouse form passes 9/9 steps. Findings: Location is `input_text` in the API but an async react-select on the page; search text must be inserted in one event; the phone Country select shows only the dial code.
 
+## 12C. Beyond Greenhouse (2026-10-20, deployed)
+
+**LinkedIn apply-link capture (M3c).** When you click Apply on a LinkedIn job, the extension follows the tab that opens. It uses `webNavigation`, so it sees addresses only and never reads LinkedIn's pages. It decodes `externalApply` and job-ad redirectors, and the server saves the company link to the job in Job Ops (`applicationLink` plus a note). The job's old lookup is then forgotten, so the next lookup starts from the real application page. `e2e/capture.e2e.mjs` runs in a real Chrome with every hostname resolved to a local stub.
+
+**Several application systems.** Every target, board-cache entry and stored form names its system (`ats`, migration 4). A cached "no board" answer records which systems were searched, so adding a system rechecks those companies (migration 5). Each system has a board module in the extension (exists, list, describe, verify, form), a server parser, and a driver on the shared `TrustedDriver` base.
+
+| System | Listings / liveness | Form definition | Driver notes | Verified on a real form (dry run) |
+|---|---|---|---|---|
+| Greenhouse | Job Board API | `?questions=true` | react-select via keyboard | Platform Science, 9/9 |
+| Ashby | posting API (descriptions included) | read-only `ApiJobPosting` query | `data-field-path` containers; radios; location search; a Location field can be country-only (`locationTypes`) | ElevenLabs: everything filled except the 2 needs-you |
+| Lever | postings API | the apply page's `<form>`, parsed on the server (card JSON plus labelled standard fields) | fields by `name`; resume attached **first** (Lever fills fields from it) | Valiantys, stub mode with fake details: 14 steps |
+| SmartRecruiters | public API works | — | **Not supported.** Application pages are behind DataDome bot protection (403 to automated browsers); not worked around | — |
+
+Live result: ElevenLabs (a Ready job) is matched on Ashby and planned. Its 2 needs-you are "How did you hear" (empty in the answer bank) and GitHub (not on the resume).
+
 ## 12A. M0 spike results (2026-10-19, dry run, fake data, nothing submitted)
 
 Forms tested:
