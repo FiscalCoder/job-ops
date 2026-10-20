@@ -345,3 +345,11 @@ label.inline input {
 .tell form {
   margin-top: 6px;
 }
+
+/* "This looks like a confirmation page": stands out inside the banner. */
+.here .confirm {
+  display: grid;
+  gap: 6px;
+  border-left: 3px solid var(--ok);
+  padding-left: 8px;
+}

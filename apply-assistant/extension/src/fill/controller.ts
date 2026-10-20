@@ -7,6 +7,7 @@ import {
 import type { ApplyClient, QueueItem } from "../lib/api";
 import { pageKey } from "../lib/tab-match";
 import { errorText, TraceRecorder } from "../trace/recorder";
+import { trackTab } from "../track/tabs";
 import { attachDriver, formUrlFor, resumeFirst } from "./drivers";
 import { decisionEvent, pageCapture, watchPage } from "./run-trace";
 import {
@@ -162,6 +163,7 @@ export class RunController {
       throw await fail(errorText(error));
     }
     if (tab.id === undefined) throw await fail("Couldn't open the posting");
+    await trackTab(tab.id, job.jobId);
     const browser = await connect({
       transport: await ExtensionTransport.connectTab(tab.id),
       defaultViewport: null,

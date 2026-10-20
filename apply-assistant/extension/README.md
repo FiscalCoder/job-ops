@@ -13,6 +13,11 @@ apply-assistant server never contacts Greenhouse or company sites.
   Ops (or press "I submitted it"). Every step is logged on the server. Closing the side panel stops
   the run. Chrome shows "Apply Copilot started debugging this browser" while a run is active: that is
   the trusted input.
+- **Recognises the job you're on**: on a queued job's LinkedIn or Naukri page, the company page
+  you reach from there, or its application form, the side panel says "You're on …" with **Apply
+  kit** (and **Fill this page** where the form can be filled). On a confirmation page ("Thank you
+  for applying", not on LinkedIn) it asks **Mark Applied?**. It knows tabs only by their address,
+  kept for the browser session.
 - **On the application page already** (say LinkedIn's Apply took you to the Ashby form): the side
   panel shows "You're on the application for …" with **Fill this page** (a supervised fill in that
   same tab) and **Apply kit**. It recognises the job's matched posting and pages under it.

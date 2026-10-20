@@ -189,7 +189,10 @@ export async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   // In the side panel there is no "current tab"; only the kit opened as a tab has one.
   const self = await chrome.tabs.getCurrent();
   if (!self || tab?.id !== self.id) return tab;
-  const pages = (await chrome.tabs.query({})).filter(isWebPage);
+  // Web pages, including ones whose address Chrome hides (sites not allowed, like LinkedIn).
+  const pages = (await chrome.tabs.query({})).filter(
+    (t) => t.id !== self.id && (isWebPage(t) || t.url === undefined),
+  );
   return pages.sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0))[0];
 }
 

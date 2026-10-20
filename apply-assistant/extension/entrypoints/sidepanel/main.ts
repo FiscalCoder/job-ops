@@ -8,8 +8,10 @@ import {
   loadSettings,
   saveSettings,
 } from "../../src/lib/settings";
-import { jobForTab } from "../../src/lib/tab-match";
 import type { RunSummary } from "../../src/lib/worker";
+import { looksSubmitted } from "../../src/track/confirm";
+import { resolveTab } from "../../src/track/tabs";
+import { renderHere } from "./here-view";
 import { showKit } from "./kit-view";
 import { renderRun as renderRunView } from "./run-view";
 
@@ -487,50 +489,57 @@ async function showPlan(item: QueueItem) {
 
 let queueItems: QueueItem[] = [];
 
+/** Confirmation pages you answered "Not yet" on (tab + address). */
+const dismissed = new Set<string>();
+let checking = 0;
+
 /**
- * When the current tab is the application page of a queued job (say LinkedIn's Apply took you
- * there), offer to fill that page or open the job's kit, right at the top.
+ * When the current tab belongs to a queued job (its LinkedIn or Naukri page, the company page
+ * you reached from there, or its application form), say so at the top: Fill this page where
+ * it can be filled, the Apply kit, and "Mark Applied?" on a confirmation page.
  */
 async function checkTab() {
   const box = $("here");
+  const turn = ++checking;
   if (!client || activeRun) {
     box.hidden = true;
     return;
   }
   const tab = await activeTab();
-  const item = jobForTab(tab?.url, queueItems);
-  if (!item || tab?.id === undefined) {
+  const match =
+    tab?.id === undefined
+      ? null
+      : await resolveTab(tab.id, tab.url, queueItems);
+  if (turn !== checking) return; // a newer check is running
+  if (!match || tab?.id === undefined) {
     box.hidden = true;
     box.replaceChildren();
     return;
   }
   const tabId = tab.id;
-  const fill = el(
-    "button",
-    { type: "button", class: "primary" },
-    "Fill this page",
-  );
-  fill.addEventListener("click", () => {
-    box.hidden = true;
-    void startFill(item, tabId);
+  const seenKey = `${tabId} ${tab.url ?? ""}`;
+  const submitted =
+    !dismissed.has(seenKey) && (await looksSubmitted(tab)) === true;
+  if (turn !== checking) return;
+  renderHere(box, match, submitted, {
+    kitButton,
+    fill: () => {
+      box.hidden = true;
+      void startFill(match.item, tabId);
+    },
+    markApplied: async () => {
+      await (client as ApplyClient).kitOutcome(match.item.jobId, "applied");
+      box.hidden = true;
+      showNotice(
+        `${match.item.title} · ${match.item.employer}: Marked Applied in Job Ops.`,
+      );
+      await loadQueue();
+    },
+    dismiss: () => {
+      dismissed.add(seenKey);
+      void checkTab();
+    },
   });
-  box.replaceChildren(
-    el("strong", {}, `You're on the application for ${item.title}`),
-    el("p", { class: "muted" }, item.employer),
-    item.plan
-      ? el("div", { class: "controls" }, fill, kitButton(item))
-      : el(
-          "div",
-          { class: "controls" },
-          el(
-            "span",
-            { class: "muted" },
-            "No fill plan yet (Run now builds one).",
-          ),
-          kitButton(item),
-        ),
-  );
-  box.hidden = false;
 }
 
 chrome.tabs.onActivated.addListener(() => void checkTab());

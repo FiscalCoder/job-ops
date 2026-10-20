@@ -21,6 +21,10 @@ export interface QueueItem {
   readonly title: string;
   readonly employer: string;
   readonly score: number | null;
+  /** Where Job Ops found the job (LinkedIn, Naukri, a job board). Absent on old servers. */
+  readonly jobUrl?: string;
+  /** Where it takes applications, when known (often captured from LinkedIn's Apply). */
+  readonly applicationLink?: string | null;
   readonly target: {
     status: string;
     ats?: Ats;

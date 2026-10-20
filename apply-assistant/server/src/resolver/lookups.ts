@@ -382,6 +382,10 @@ export function createLookups(deps: LookupsDeps) {
           title: job.title,
           employer: job.employer,
           score: job.suitabilityScore,
+          // Where the job was found and where it takes applications: the side panel matches
+          // the tab you're on against these (LinkedIn, Naukri, the company's page).
+          jobUrl: job.jobUrl,
+          applicationLink: job.applicationLink,
           target: target
             ? {
                 ats: target.ats,

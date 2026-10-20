@@ -129,7 +129,7 @@ Tracking ends when the tab closes, after 30 minutes idle, or at a confirmation p
 |---|---|
 | T1 run trace | **deployed 2026-10-20** |
 | T2 apply kit | **deployed 2026-10-20** |
-| T3 tracked tabs | planned |
+| T3 tracked tabs | **deployed 2026-10-21** (see §T3 status below) |
 | T4 learning | planned (kit fills already record the field data it needs) |
 
 **Verified (2026-10-20):**
@@ -175,3 +175,30 @@ Tracking ends when the tab closes, after 30 minutes idle, or at a confirmation p
 | One ElevenLabs run was left open after an interrupted session | A new run closes the job's earlier open run |
 | "I applied" / "Skip" were traced twice | Now traced once, by the server |
 | Several steps were "edited" to the same value | No change: the same as Approve |
+
+## T3 status (2026-10-21)
+
+**What's recorded:** the background script keeps addresses, from navigation events and never page content, only for:
+- job listings: LinkedIn `/jobs` pages and Naukri `job-listings`;
+- application systems;
+- tabs opened for a job (the kit's **Open application**, supervised fills), and tabs opened from those.
+
+**Where:** `chrome.storage.session`, dropped after 30 minutes idle or when the tab closes (`src/track/`).
+
+**Banner:** the side panel resolves the tab you're on, in this order:
+1. its matched posting ("Fill this page");
+2. its LinkedIn job, including search pages showing it;
+3. its listing or saved application page (Naukri, a captured company page);
+4. the tab it was opened from (LinkedIn Apply → company page → its system).
+
+It then shows "You're on …" with Apply kit (and Fill this page where it can).
+
+**Confirmation:** on sites the extension may read (never LinkedIn), a confirmation page (URL or text such as "Thank you for applying") asks **Mark Applied?** "Not yet" stops asking on that page.
+
+**Tests:** `e2e/kit.e2e.mjs` (11 checks) covers LinkedIn page, then lineage to the company page, then "Not yet" and "Mark Applied". Fill this page was re-checked on the real ElevenLabs Ashby form.
+
+**Also 2026-10-21:**
+- **Tell agent** (`POST /plans/:jobId/tell`): instruct Claude for one field; its proposal goes into the Edit box.
+- **Start supervised fill** inside the kit.
+- **Kit actions:** steady confirm buttons, and the kit closes itself after I applied / Skip.
+- **Saved search:** "Remote+onsite v1" synced with the last run's settings and given the work-eligibility rule.

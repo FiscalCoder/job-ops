@@ -7,6 +7,7 @@ import {
 import { saveResume } from "../../src/kit/resume-file";
 import type { ApplyClient, Kit, KitItem } from "../../src/lib/api";
 import { errorText, TraceRecorder } from "../../src/trace/recorder";
+import { trackTab } from "../../src/track/tabs";
 
 /**
  * The apply kit (APPLY_TRACE_AND_KIT_PLAN.md §T2): every answer for a job, one click each.
@@ -194,8 +195,13 @@ export async function showKit(
         ". On LinkedIn the kit only copies.",
       );
 
-  const openButton = button("Open application ↗", () => {
-    void chrome.tabs.create({ url: kit.job.applyUrl, active: true });
+  const openButton = button("Open application ↗", async () => {
+    const tab = await chrome.tabs.create({
+      url: kit.job.applyUrl,
+      active: true,
+    });
+    // Pages opened from here (Apply, the company's form) are recognised as this job.
+    if (tab.id !== undefined) await trackTab(tab.id, job.jobId);
     trace.event("kit-open-application", `Opened ${kit.job.applyUrl}`);
   });
 

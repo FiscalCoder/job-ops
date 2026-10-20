@@ -30,7 +30,7 @@ const job = {
   title: "Platform Engineer",
   employer: "Acme Robotics",
   status: "ready",
-  jobUrl: "https://www.linkedin.com/jobs/view/1",
+  jobUrl: "https://www.linkedin.com/jobs/view/4400000001",
   applicationLink: `https://${HOST}/test/careers`,
   suitabilityScore: 80,
 };
@@ -135,6 +135,19 @@ const server = https.createServer(
   { key: readFileSync(key), cert: readFileSync(cert) },
   (req, res) => {
     const host = (req.headers.host ?? "").replace(/:\d+$/, "");
+    const page = (html) => {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(`<!doctype html>${html}`);
+    };
+    // A stand-in LinkedIn job page whose Apply opens the company's page in a new tab.
+    if (host === "www.linkedin.com") {
+      if (req.url?.startsWith("/jobs/view/"))
+        return page(
+          `<h1>Platform Engineer</h1><a id="apply" href="https://${HOST}/test/company-apply" target="_blank">Apply</a>`,
+        );
+      res.writeHead(404).end(); // its favicon: part of the stand-in, not a stray
+      return;
+    }
     if (host !== HOST) {
       strays.push(`${req.method} ${host}${req.url}`);
       res.writeHead(404).end();
@@ -145,6 +158,10 @@ const server = https.createServer(
       res.end(req.url === "/test/careers" ? careers : embed);
       return;
     }
+    if (req.url === "/test/company-apply")
+      return page("<h1>Acme Robotics careers</h1><p>Apply below.</p>");
+    if (req.url?.startsWith("/test/thank-you"))
+      return page("<h1>Thank you for applying!</h1>");
     app(req, res);
   },
 );
@@ -374,6 +391,77 @@ try {
       assert.ok(await panel.locator("#kit-box").isHidden(), "kit closed");
       await panel.getByText("No Ready jobs in Job Ops.").waitFor();
       assert.deepEqual(jobOpsCalls, ["apply"]);
+    },
+  );
+
+  await check(
+    "the side panel recognises the job's LinkedIn page, the company page opened from it, and its confirmation page",
+    async () => {
+      // Back in the queue (the previous check applied to it).
+      jobStatus = "ready";
+      jobOpsCalls.length = 0;
+      await panel.getByRole("button", { name: "Refresh" }).click();
+      await panel
+        .locator("#queue li", { hasText: "Platform Engineer" })
+        .waitFor();
+      const here = panel.locator("#here");
+
+      const linkedIn = await context.newPage();
+      await linkedIn.goto(
+        "https://www.linkedin.com/jobs/view/4400000001/?refId=x",
+      );
+      await panel.bringToFront();
+      await here
+        .getByText("You're on the LinkedIn page for Platform Engineer")
+        .waitFor({ timeout: 10_000 });
+      assert.ok(
+        await here.getByRole("button", { name: "Apply kit" }).isVisible(),
+      );
+      assert.equal(
+        await here.getByRole("button", { name: "Fill this page" }).count(),
+        0,
+        "no fill on LinkedIn",
+      );
+
+      // LinkedIn's Apply opens the company's page in a new tab: same job, by lineage.
+      await linkedIn.bringToFront();
+      const [company] = await Promise.all([
+        context.waitForEvent("page"),
+        linkedIn.click("#apply"),
+      ]);
+      await company.waitForLoadState();
+      await panel.bringToFront();
+      await here
+        .getByText("You're applying to Platform Engineer")
+        .waitFor({ timeout: 10_000 });
+
+      // The company page shows a confirmation: "Not yet" stops asking, "Mark Applied" marks it.
+      // You're on the company tab when its confirmation loads.
+      await company.bringToFront();
+      await company.goto(`https://${HOST}/test/thank-you`);
+      await panel.bringToFront();
+      await here
+        .getByText("This looks like a confirmation page")
+        .waitFor({ timeout: 10_000 });
+      await here.getByRole("button", { name: "Not yet" }).click();
+      await panel.waitForTimeout(800);
+      assert.equal(
+        await here.getByText("This looks like a confirmation page").count(),
+        0,
+        "Not yet stops asking on that page",
+      );
+      assert.deepEqual(jobOpsCalls, []);
+      await company.bringToFront();
+      await company.goto(`https://${HOST}/test/thank-you?step=done`);
+      await panel.bringToFront();
+      await here
+        .getByRole("button", { name: "Mark Applied" })
+        .click({ timeout: 10_000 });
+      await panel
+        .locator("#notice", { hasText: "Marked Applied in Job Ops." })
+        .waitFor({ timeout: 10_000 });
+      assert.deepEqual(jobOpsCalls, ["apply"]);
+      if (shots) await panel.screenshot({ path: `${shots}/kit-3-here.png` });
     },
   );
 

@@ -421,6 +421,18 @@ Verified on real data (read-only run, `spike/e2e-real.ts`): 24 lookups → 3 mat
 
 Live result: ElevenLabs (a Ready job) is matched on Ashby and planned. Its 2 needs-you are "How did you hear" (empty in the answer bank) and GitHub (not on the resume).
 
+## 12F. Phase 1 status (2026-10-21)
+
+Everything planned for Phase 1 is built and live:
+- M0–M3c;
+- Greenhouse, Ashby and Lever;
+- the Claude step, Tell agent and remembered answers;
+- run trace, apply kit and tracked tabs (T1–T3).
+
+What's left is **M4**: your real supervised applications until the §1 targets hold on the Progress tab (5 of 20 so far).
+
+**Workday (Phase 1b) is on hold.** Your jobs now mostly come from LinkedIn and Naukri; only 1 of 74 recent candidates was on Workday. Reconsider when Progress or Timeline data shows otherwise.
+
 ## 12E. M4: dogfooding (started 2026-10-21)
 
 M4 is about 20 real supervised applications measured against the §1 targets. Built for it:
