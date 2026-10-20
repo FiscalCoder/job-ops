@@ -15,6 +15,14 @@ import {
   type Question,
   type QuestionContext,
 } from "./questions.js";
+import {
+  checkTellReply,
+  TELL_SCHEMA,
+  TELL_SYSTEM,
+  type TellAnswer,
+  TellRejectedError,
+  tellPrompt,
+} from "./tell.js";
 
 /**
  * Answers the questions the rules don't recognise: one mapping call (Haiku) for all of a form's
@@ -31,6 +39,13 @@ export interface QuestionAnswerer {
     context: QuestionContext,
     onUsage?: UsageListener,
   ): Promise<ReadonlyMap<string, ClaudeAnswer>>;
+  /** "Tell agent": one field, answered your way. Throws when the proposal doesn't fit. */
+  tell(
+    question: Question,
+    instruction: string,
+    context: QuestionContext,
+    onUsage?: UsageListener,
+  ): Promise<TellAnswer>;
 }
 
 /** The one SDK call used (the real client's `messages`, or a fake in tests). */
@@ -165,6 +180,30 @@ export function createClaudeAnswerer(
   }
 
   return {
+    async tell(question, instruction, context, onUsage = () => {}) {
+      // Long-answer fields get the drafting model; everything else the quick one.
+      const model = question.type === "textarea" ? draftModel : mapModel;
+      const message = await messages.create({
+        model,
+        max_tokens: DRAFT_MAX_TOKENS,
+        system: TELL_SYSTEM,
+        messages: [
+          {
+            role: "user",
+            content: tellPrompt(question, instruction, context),
+          },
+        ],
+        output_config: {
+          effort: "low",
+          format: { type: "json_schema", schema: TELL_SCHEMA },
+        },
+      });
+      usage("answered 1 field as told", message, onUsage);
+      if (message.stop_reason === "refusal")
+        throw new TellRejectedError("Claude declined to answer this");
+      return checkTellReply(question, replyText(message), model);
+    },
+
     async answer(questions, context, onUsage = () => {}) {
       if (questions.length === 0) return new Map();
       const known = new Map<string, Cached>();

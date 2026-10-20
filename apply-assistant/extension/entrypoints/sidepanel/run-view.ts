@@ -9,6 +9,12 @@ import {
 
 type Send = (event: RunEvent) => void;
 
+/** "Tell agent": Claude's proposal for one field from your instruction. */
+export type Tell = (
+  ref: string,
+  instruction: string,
+) => Promise<{ value: string | readonly string[]; why: string }>;
+
 function el(
   tag: string,
   attrs: Record<string, string | undefined> = {},
@@ -70,7 +76,7 @@ function countdown(seconds: number): HTMLElement {
   return node;
 }
 
-function editor(step: Step, send: Send): HTMLElement {
+function editor(step: Step, send: Send, tell?: Tell): HTMLElement {
   const input = el("input", {
     "aria-label": `Value for ${step.entry.label}`,
   }) as HTMLInputElement;
@@ -94,10 +100,60 @@ function editor(step: Step, send: Send): HTMLElement {
           : text,
     });
   });
-  return form;
+  if (!tell) return form;
+  return el("div", { class: "editor" }, form, tellAgent(step, input, tell));
 }
 
-function currentCard(view: RunView, send: Send): HTMLElement | null {
+/** Say how to answer; Claude's proposal lands in the edit box for you to check and use. */
+function tellAgent(
+  step: Step,
+  target: HTMLInputElement,
+  tell: Tell,
+): HTMLElement {
+  const instruction = el("input", {
+    "aria-label": `Tell agent how to answer ${step.entry.label}`,
+    placeholder: 'e.g. "use my portfolio site", "say 30 days"',
+  }) as HTMLInputElement;
+  const ask = el(
+    "button",
+    { type: "submit" },
+    "Tell agent",
+  ) as HTMLButtonElement;
+  const note = el("p", { class: "muted" });
+  const form = el("form", { class: "row" }, instruction, ask);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = instruction.value.trim();
+    if (text.length < 2) return;
+    ask.disabled = true;
+    note.className = "muted";
+    note.textContent = "Asking Claude…";
+    try {
+      const answer = await tell(step.entry.ref, text);
+      target.value = valueText(answer.value);
+      note.textContent = `Claude: ${answer.why}. Check it above, then "Use this".`;
+      target.focus();
+    } catch (error) {
+      note.className = "error";
+      note.textContent = error instanceof Error ? error.message : String(error);
+    } finally {
+      ask.disabled = false;
+    }
+  });
+  return el(
+    "details",
+    { class: "tell" },
+    el("summary", {}, "Tell agent how to answer"),
+    form,
+    note,
+  );
+}
+
+function currentCard(
+  view: RunView,
+  send: Send,
+  tell?: Tell,
+): HTMLElement | null {
   const { action, busy } = view;
   if (
     action.kind !== "countdown" &&
@@ -170,7 +226,7 @@ function currentCard(view: RunView, send: Send): HTMLElement | null {
           el("div", { class: "muted" }, step.entry.source),
         ),
     step.note && !needsValue ? el("p", { class: "error" }, step.note) : null,
-    action.kind === "fill" ? null : editor(step, send),
+    action.kind === "fill" ? null : editor(step, send, tell),
     el("div", { class: "controls" }, ...controls),
   );
 }
@@ -180,6 +236,7 @@ export function renderRun(
   view: RunView,
   send: Send,
   onClose: () => void,
+  tell?: Tell,
 ): void {
   const { state, action } = view;
   const finished = state.steps.filter((s) => STATE_LABEL[s.state]);
@@ -199,7 +256,7 @@ export function renderRun(
         ),
   );
 
-  let body: HTMLElement | null = currentCard(view, send);
+  let body: HTMLElement | null = currentCard(view, send, tell);
   if (action.kind === "paused")
     body = el(
       "p",

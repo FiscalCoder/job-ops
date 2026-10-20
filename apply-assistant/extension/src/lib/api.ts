@@ -138,6 +138,14 @@ export class ApplyClient implements TraceApi {
     return this.request(`/kit/${encodeURIComponent(jobId)}`);
   }
 
+  /** "Tell agent": Claude's proposal for one field from your instruction (nothing is filled). */
+  tellAgent(
+    jobId: string,
+    body: { ref: string; instruction: string },
+  ): Promise<{ value: string | readonly string[]; why: string }> {
+    return this.request(`/plans/${encodeURIComponent(jobId)}/tell`, body);
+  }
+
   /** Remembers your answer to a form question for the next form that asks it. */
   learn(answer: {
     jobId: string;

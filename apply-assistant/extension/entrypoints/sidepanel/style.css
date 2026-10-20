@@ -315,3 +315,33 @@ label.inline input {
 .here {
   border-color: var(--accent);
 }
+
+/* "Done with this job?": label above, fixed-width buttons, so nothing moves when one arms. */
+.outcome {
+  display: grid;
+  gap: 4px;
+}
+
+.outcome button {
+  min-width: 9.5em;
+}
+
+/* Note after the kit closes itself ("Marked Applied in Job Ops."). */
+#notice {
+  margin: 0 0 12px;
+}
+
+.editor {
+  display: grid;
+  gap: 6px;
+}
+
+.tell summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tell form {
+  margin-top: 6px;
+}

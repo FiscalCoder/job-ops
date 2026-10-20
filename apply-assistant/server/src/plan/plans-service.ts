@@ -2,6 +2,7 @@ import { ATS_NAMES } from "../ats.js";
 import type { QuestionAnswerer } from "../claude/answerer.js";
 import type { ClaudeAnswer } from "../claude/questions.js";
 import { isAnswerable, toQuestion } from "../claude/questions.js";
+import type { TellAnswer } from "../claude/tell.js";
 import { traceUsage } from "../claude/usage-trace.js";
 import type { JobOpsApi } from "../jobops/client.js";
 import type { AnswerBankRepo } from "../store/answer-bank-repo.js";
@@ -115,12 +116,8 @@ export function createPlans(deps: PlansDeps) {
 
   const bankMap = () => new Map(answers.list().map((a) => [a.key, a.value]));
 
-  async function buildWith(
-    token: string,
-    jobId: string,
-    resume: ResumeFacts,
-    bank: ReadonlyMap<string, string>,
-  ): Promise<FillPlan> {
+  /** The job's matched posting and its stored form, or NotPlannableError. */
+  function formOf(jobId: string) {
     const target = targets.get(jobId);
     if (
       !target ||
@@ -142,6 +139,16 @@ export function createPlans(deps: PlansDeps) {
         jobId,
         `The ${ATS_NAMES[target.ats]} form hasn't been fetched yet`,
       );
+    return { target, stored };
+  }
+
+  async function buildWith(
+    token: string,
+    jobId: string,
+    resume: ResumeFacts,
+    bank: ReadonlyMap<string, string>,
+  ): Promise<FillPlan> {
+    const { target, stored } = formOf(jobId);
     const job = await jobOps.getJob(token, jobId);
     const schema = parseFormSchema(target.ats, stored.payload);
     const learned: PlanInput["learned"] = (label) =>
@@ -195,6 +202,51 @@ export function createPlans(deps: PlansDeps) {
     resumeFacts(await jobOps.getDesignResume(token));
 
   return {
+    /** "Tell agent": Claude's proposal for one field, following your instruction. */
+    async tell(
+      token: string,
+      jobId: string,
+      ref: string,
+      instruction: string,
+    ): Promise<TellAnswer> {
+      const { target, stored } = formOf(jobId);
+      const field = parseFormSchema(target.ats, stored.payload).fields.find(
+        (f) => f.ref === ref,
+      );
+      if (!field)
+        throw new NotPlannableError(jobId, "That field isn't on this form");
+      if (!answerer)
+        throw new NotPlannableError(
+          jobId,
+          "Claude isn't set up on the server (no Anthropic key)",
+        );
+      const [job, resume] = await Promise.all([
+        jobOps.getJob(token, jobId),
+        loadResume(token),
+      ]);
+      const answer = await answerer.tell(
+        toQuestion(field),
+        instruction,
+        {
+          job: {
+            title: job.title,
+            employer: job.employer,
+            description: job.jobDescription,
+          },
+          resume,
+          bank: bankMap(),
+        },
+        traceUsage(trace, jobId),
+      );
+      trace({
+        jobId,
+        kind: "tell-agent",
+        message: `Told Claude how to answer "${field.label.slice(0, 80)}"`,
+        data: { ref, instruction, answer },
+      });
+      return answer;
+    },
+
     async build(token: string, jobId: string): Promise<FillPlan> {
       return buildWith(token, jobId, await loadResume(token), bankMap());
     },

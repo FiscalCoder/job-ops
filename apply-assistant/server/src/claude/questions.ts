@@ -121,7 +121,7 @@ export function resumeForPrompt(resume: ResumeFacts): string {
   return lines.filter(Boolean).join("\n\n");
 }
 
-const jobForPrompt = (job: QuestionContext["job"]) =>
+export const jobForPrompt = (job: QuestionContext["job"]) =>
   [
     `${job.title} at ${job.employer}`,
     job.description?.slice(0, MAX_DESCRIPTION_CHARS) ?? "",
@@ -129,7 +129,7 @@ const jobForPrompt = (job: QuestionContext["job"]) =>
     .filter(Boolean)
     .join("\n\n");
 
-const questionForPrompt = (q: Question) =>
+export const questionForPrompt = (q: Question) =>
   [
     `<question ref="${q.ref}" type="${q.type}">`,
     q.label,

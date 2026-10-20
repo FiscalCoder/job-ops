@@ -343,29 +343,43 @@ try {
     "I applied and Skip job need a second click, then use Job Ops' own actions",
     async () => {
       const skip = panel.getByRole("button", { name: "Skip job" });
+      const box = async (name) =>
+        panel.getByRole("button", { name }).boundingBox();
+      await skip.scrollIntoViewIfNeeded();
+      const before = await box("Skip job");
       await skip.click();
-      await panel
-        .getByRole("button", { name: "Click again: skip it" })
-        .waitFor();
+      const armed = panel.getByRole("button", { name: "Confirm skip" });
+      await armed.waitFor();
+      // The armed button stays where it was, so the second click lands on it.
+      const after = await armed.boundingBox();
+      assert.deepEqual(
+        [after?.x, after?.y],
+        [before?.x, before?.y],
+        "the button didn't move",
+      );
       // Not confirmed in time: it goes back and nothing happens.
       await skip.waitFor({ timeout: 6_000 });
       assert.deepEqual(jobOpsCalls, []);
       await panel.getByRole("button", { name: "I applied ✓" }).click();
+      await panel.getByRole("button", { name: "Confirm applied" }).click();
+      assert.equal(
+        (await await box("Skip job")) === null ? true : await skip.isDisabled(),
+        true,
+        "Skip is off once it's applied",
+      );
+      // The kit closes by itself: back to a fresh queue, with a note of what happened.
       await panel
-        .getByRole("button", { name: "Click again: mark Applied" })
-        .click();
-      await panel.getByText("Marked Applied in Job Ops.").waitFor();
+        .locator("#notice", { hasText: "Marked Applied in Job Ops." })
+        .waitFor({ timeout: 10_000 });
+      assert.ok(await panel.locator("#kit-box").isHidden(), "kit closed");
+      await panel.getByText("No Ready jobs in Job Ops.").waitFor();
       assert.deepEqual(jobOpsCalls, ["apply"]);
-      assert.ok(await skip.isDisabled(), "Skip is off once it's applied");
     },
   );
 
   await check(
     "every fill and copy is in the job's trace, with the field it went into",
     async () => {
-      await panel.getByRole("button", { name: "Back" }).click();
-      // Back to a fresh queue: the applied job has left it.
-      await panel.getByText("No Ready jobs in Job Ops.").waitFor();
       const token = await panel.evaluate(
         async () => (await chrome.storage.local.get("token")).token,
       );

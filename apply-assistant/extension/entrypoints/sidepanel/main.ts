@@ -97,6 +97,8 @@ async function startFill(item: QueueItem, tabId?: number) {
           view,
           (event) => activeRun?.dispatch(event),
           closeRun,
+          (ref, instruction) =>
+            (client as ApplyClient).tellAgent(item.jobId, { ref, instruction }),
         ),
     });
   } catch (error) {
@@ -117,19 +119,47 @@ async function openKit(item: QueueItem) {
   const box = $("kit-box");
   box.hidden = false;
   $("main").hidden = true;
+  const back = () => {
+    closeKit = null;
+    box.hidden = true;
+    $("main").hidden = false;
+    // The job may now be applied or skipped: its plan is stale and the queue changed.
+    $("plan").hidden = true;
+    $("plan").replaceChildren();
+    void loadQueue();
+  };
+  const fillable = item.plan !== null && item.target.status === "matched";
   closeKit = await showKit(box, {
     client,
     job: { jobId: item.jobId, title: item.title, employer: item.employer },
-    onBack: () => {
-      closeKit = null;
-      box.hidden = true;
-      $("main").hidden = false;
-      // The job may now be applied or skipped: its plan is stale and the queue changed.
-      $("plan").hidden = true;
-      $("plan").replaceChildren();
-      void loadQueue();
+    onBack: back,
+    onDone: (note) => {
+      back();
+      showNotice(`${item.title} · ${item.employer}: ${note}`);
     },
+    ...(fillable
+      ? {
+          onFill: () => {
+            closeKit = null;
+            box.hidden = true;
+            void startFill(item);
+          },
+        }
+      : {}),
   });
+}
+
+let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** A short note at the top of the main view (what the kit just did). */
+function showNotice(text: string) {
+  const notice = $("notice");
+  notice.textContent = text;
+  notice.hidden = false;
+  if (noticeTimer) clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => {
+    notice.hidden = true;
+  }, 8_000);
 }
 
 function kitButton(item: QueueItem): HTMLElement {

@@ -49,12 +49,19 @@ export interface KitViewOptions {
   readonly client: ApplyClient;
   readonly job: { jobId: string; title: string; employer: string };
   readonly onBack: () => void;
+  /** Present when the job has a fill plan: starts the supervised fill from the kit. */
+  readonly onFill?: () => void;
+  /** After "I applied" / "Skip job": back to the queue with a note of what was done. */
+  readonly onDone?: (note: string) => void;
 }
+
+/** How long "Marked Applied" stays visible before the kit closes by itself. */
+const DONE_PAUSE_MS = 900;
 
 /** Shows the kit in `box`; returns a function that ends the kit session. */
 export async function showKit(
   box: HTMLElement,
-  { client, job, onBack }: KitViewOptions,
+  { client, job, onBack, onFill, onDone }: KitViewOptions,
 ): Promise<() => Promise<void>> {
   const trace = new TraceRecorder(client, job.jobId);
   const close = async () => {
@@ -78,9 +85,21 @@ export async function showKit(
   try {
     kit = await client.kit(job.jobId);
   } catch (error) {
+    // The answers didn't load, but a planned job can still be filled.
+    const fill = onFill
+      ? button(
+          "Start supervised fill",
+          () => {
+            void close();
+            onFill();
+          },
+          true,
+        )
+      : null;
     box.replaceChildren(
       el("div", { class: "row" }, el("strong", {}, "Apply kit"), back),
       el("p", { class: "error" }, errorText(error)),
+      ...(fill ? [el("div", { class: "controls" }, fill)] : []),
     );
     return close;
   }
@@ -218,12 +237,34 @@ export async function showKit(
     }
   });
 
-  const outcomes = outcomeButtons(client, job.jobId, say);
+  const outcomes = outcomeButtons(client, job.jobId, say, (note) =>
+    setTimeout(() => {
+      void close();
+      (onDone ?? onBack)(note);
+    }, DONE_PAUSE_MS),
+  );
+  const fillButton = onFill
+    ? button(
+        "Start supervised fill",
+        () => {
+          void close();
+          onFill();
+        },
+        true,
+      )
+    : null;
 
   box.replaceChildren(
     el("div", { class: "row" }, el("strong", {}, "Apply kit"), back),
     el("p", { class: "muted" }, `${kit.job.title} · ${kit.job.employer}`),
-    el("div", { class: "controls" }, openButton, saveButton, attachButton),
+    el(
+      "div",
+      { class: "controls" },
+      ...(fillButton ? [fillButton] : []),
+      openButton,
+      saveButton,
+      attachButton,
+    ),
     outcomes,
     ...(allow ? [allow] : []),
     el(
@@ -249,10 +290,12 @@ function outcomeButtons(
   client: ApplyClient,
   jobId: string,
   say: (text: string, tone?: "muted" | "ok" | "error") => void,
+  onDone: (note: string) => void,
 ): HTMLElement {
+  // Same-length labels in a fixed-width button: the second click lands where the first did.
   const labels = {
-    applied: ["I applied ✓", "Click again: mark Applied"],
-    skipped: ["Skip job", "Click again: skip it"],
+    applied: ["I applied ✓", "Confirm applied"],
+    skipped: ["Skip job", "Confirm skip"],
   } as const;
   const done = {
     applied: "Marked Applied in Job Ops.",
@@ -279,6 +322,7 @@ function outcomeButtons(
           await client.kitOutcome(jobId, outcome);
           say(done[outcome], "ok");
           b.textContent = labels[outcome][0];
+          onDone(done[outcome]);
         } catch (error) {
           say(errorText(error), "error");
           b.textContent = labels[outcome][0];
@@ -292,8 +336,12 @@ function outcomeButtons(
   };
   return el(
     "div",
-    { class: "row outcome" },
-    el("span", { class: "muted" }, "Done with this job?"),
+    { class: "outcome" },
+    el(
+      "span",
+      { class: "muted" },
+      "Done with this job? Click twice to confirm.",
+    ),
     el("div", { class: "controls" }, make("applied"), make("skipped")),
   );
 }

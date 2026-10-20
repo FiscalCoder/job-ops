@@ -67,6 +67,18 @@ const stubServer = (route, url) => {
       },
     ]);
   if (url.pathname === "/plans/stub") return ok(STUB.plan);
+  if (url.pathname === "/kit/stub")
+    return ok({
+      job: {
+        jobId: "stub",
+        title: jobTitle,
+        employer: "Stub",
+        location: null,
+        applyUrl: STUB.url,
+        tailoredSummary: null,
+      },
+      groups: [],
+    });
   if (url.pathname === "/runs" && route.request().method() === "POST")
     return ok({ id: "stub-run" });
   if (url.pathname.startsWith("/runs/")) return ok({});
@@ -143,6 +155,22 @@ if (here) {
     throw new Error(
       "Fill this page opened a new tab instead of using this one",
     );
+} else if (process.env.VIA === "kit") {
+  // From the job's Apply kit: "Start supervised fill" sits next to the kit's other actions.
+  await worker.evaluate(() =>
+    chrome.storage.local.set({ countdownSeconds: 1 }),
+  );
+  await panel
+    .locator("#queue li", { hasText: jobTitle })
+    .first()
+    .getByRole("button", { name: "Apply kit" })
+    .click();
+  const postingPromise = context.waitForEvent("page");
+  await panel
+    .locator("#kit-box")
+    .getByRole("button", { name: "Start supervised fill" })
+    .click();
+  posting = await postingPromise;
 } else {
   await panel
     .locator("#queue li.clickable", { hasText: jobTitle })

@@ -1,10 +1,17 @@
 import { type Response, Router } from "express";
+import { z } from "zod";
+import { TellRejectedError } from "../claude/tell.js";
 import { JobOpsError } from "../jobops/client.js";
 import { NotPlannableError, type PlansService } from "../plan/plans-service.js";
 import { type AuthedRequest, sendJobOpsFailure } from "./auth.js";
 import { sendError, sendOk } from "./envelope.js";
 
-/** Fill plans: one per job with a matched, fetched Greenhouse form. */
+const tellBody = z.object({
+  ref: z.string().min(1).max(200),
+  instruction: z.string().trim().min(2).max(500),
+});
+
+/** Fill plans: one per job with a matched, fetched form, and "Tell agent" for one field. */
 export function createPlanRoutes(plans: PlansService) {
   const router = Router();
   const tokenOf = (req: AuthedRequest) => req.jobOpsToken ?? "";
@@ -17,6 +24,53 @@ export function createPlanRoutes(plans: PlansService) {
       sendJobOpsFailure(res, error);
     }
   });
+
+  /** "Tell agent": Claude proposes one field's value from your instruction (nothing is filled). */
+  router.post(
+    "/plans/:jobId/tell",
+    async (req: AuthedRequest, res: Response) => {
+      const body = tellBody.safeParse(req.body);
+      if (!body.success) {
+        sendError(
+          res,
+          400,
+          "INVALID_REQUEST",
+          "Say how to answer (a few words), and which field",
+        );
+        return;
+      }
+      try {
+        sendOk(
+          res,
+          await plans.tell(
+            tokenOf(req),
+            String(req.params.jobId),
+            body.data.ref,
+            body.data.instruction,
+          ),
+        );
+      } catch (error) {
+        if (error instanceof NotPlannableError) {
+          sendError(res, 409, "NOT_PLANNABLE", error.message);
+          return;
+        }
+        if (error instanceof TellRejectedError) {
+          sendError(res, 422, "NO_ANSWER", error.message);
+          return;
+        }
+        if (error instanceof JobOpsError) {
+          sendJobOpsFailure(res, error);
+          return;
+        }
+        sendError(
+          res,
+          502,
+          "CLAUDE_FAILED",
+          "Claude couldn't be reached; try again",
+        );
+      }
+    },
+  );
 
   router.get("/plans/:jobId", async (req: AuthedRequest, res: Response) => {
     try {
