@@ -156,3 +156,22 @@ Tracking ends when the tab closes, after 30 minutes idle, or at a confirmation p
 **Known limits:**
 - If the side panel is closed mid-run, events from its last ~2 s may not be sent.
 - Under test automation Chrome renames downloads, so the `Downloads/JobOps/<Employer> - <Title>/` path is covered by unit tests only.
+
+## First real batch (2026-10-21)
+
+**What you did:**
+- **Supervised fill:** GitLab on Greenhouse, submitted (17 steps).
+- **By hand with the kit, all from LinkedIn:** Bank of America, Uplers and Thompsons HR, each with the resume saved and the job marked Applied.
+- **Skipped from the kit:** Deloitte, Ciklum and IQVIA.
+- No trace failures. In the GitLab run, 2 steps failed and 8 were edited.
+
+| Finding (from the trail) | Fix |
+|---|---|
+| "Are you located in India?" (Yes/No) was planned as "India" and failed | Yes/No questions only take Yes/No rules. A new located-in rule answers from your saved country, city or state. |
+| "Employment agreements with your current employer?" (Yes/No) was planned as your employer's name | Same Yes/No guard; it now goes to Claude or you |
+| Race: "Field not found on the page" | Greenhouse shows Race only after its page-only "Are you Hispanic/Latino?" is answered No. The driver now answers that first, from your saved race answer. Checked on the real GitLab form. |
+| "Name you'd prefer us to use" was left empty | New rule: your preferred name, else your first name |
+| "Do you have publications (blog posts…)?" got your website URL | The website rule now needs a label that asks for the link |
+| One ElevenLabs run was left open after an interrupted session | A new run closes the job's earlier open run |
+| "I applied" / "Skip" were traced twice | Now traced once, by the server |
+| Several steps were "edited" to the same value | No change: the same as Approve |

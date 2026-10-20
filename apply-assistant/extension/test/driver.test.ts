@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ashbyFormUrl } from "../src/fill/ashby-driver";
 import {
   bestOption,
+  ethnicityAnswer,
   rankOption,
   selectionMatches,
   selectorFor,
@@ -36,6 +37,16 @@ describe("driver helpers", () => {
     expect(selectionMatches("India", "India")).toBe(true);
     expect(selectionMatches("+246", "India +91")).toBe(false);
     expect(selectionMatches("", "India")).toBe(false);
+  });
+});
+
+describe("ethnicityAnswer (Greenhouse shows Race only after Hispanic/Latino: No)", () => {
+  it("derives the Hispanic/Latino answer from the saved race answer", () => {
+    expect(ethnicityAnswer("Asian")).toBe("No");
+    expect(ethnicityAnswer("Two or More Races")).toBe("No");
+    expect(ethnicityAnswer("Hispanic or Latino")).toBe("Yes");
+    expect(ethnicityAnswer("Decline To Self Identify")).toBe("Decline");
+    expect(ethnicityAnswer("I don't wish to answer")).toBe("Decline");
   });
 });
 

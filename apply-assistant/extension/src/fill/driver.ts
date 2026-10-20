@@ -35,6 +35,16 @@ export function selectorFor(ref: string): string {
   return `[id="${ref.replace(/["\\]/g, "")}"]`;
 }
 
+/** Greenhouse's page-only "Are you Hispanic/Latino?" question (not in its API). */
+const ETHNICITY = "hispanic_ethnicity";
+
+/** The Hispanic/Latino answer that goes with a saved race answer. */
+export function ethnicityAnswer(race: string): "Yes" | "No" | "Decline" {
+  if (/decline|prefer not|don'?t wish|not to (say|answer)/i.test(race))
+    return "Decline";
+  return /hispanic|latin/i.test(race) ? "Yes" : "No";
+}
+
 const isDropdown = (element: ElementHandle) =>
   element.evaluate(
     (el) =>
@@ -110,6 +120,10 @@ export class GreenhouseDriver extends TrustedDriver {
           ? await this.attachFile(selectorFor(entry.ref), resume)
           : { ok: false, reason: "Tailored PDF not loaded" };
       const element = await this.frame.$(selectorFor(entry.ref));
+      if (!element && entry.ref === "race")
+        return await this.raceAfterEthnicity(
+          String(Array.isArray(value) ? value[0] : value),
+        );
       if (!element)
         return {
           ok: false,
@@ -135,6 +149,44 @@ export class GreenhouseDriver extends TrustedDriver {
     } catch (error) {
       return failed(error);
     }
+  }
+
+  /**
+   * Greenhouse's US voluntary questions: the page asks "Are you Hispanic/Latino?" (missing from
+   * its API) and shows Race only after "No". Answers that first, from your saved race answer,
+   * then picks Race when it appears.
+   */
+  private async raceAfterEthnicity(race: string): Promise<FillOutcome> {
+    const ethnicity = await this.frame.$(selectorFor(ETHNICITY));
+    if (!ethnicity)
+      return {
+        ok: false,
+        reason: "Field not found on the page; fill it yourself",
+      };
+    const answer = ethnicityAnswer(race);
+    const first = await this.select(ethnicity, answer);
+    if (!first.ok)
+      return {
+        ok: false,
+        reason: `"Are you Hispanic/Latino?": ${first.reason}`,
+      };
+    if (answer !== "No")
+      return { ok: true, result: `answered Hispanic/Latino: ${answer}` };
+    const deadline = Date.now() + OPTION_WAIT_MS;
+    while (Date.now() < deadline) {
+      const shown = await this.frame.$(selectorFor("race"));
+      if (shown) {
+        const picked = await this.select(shown, race);
+        return picked.ok
+          ? { ok: true, result: `Hispanic/Latino: No, then ${picked.result}` }
+          : picked;
+      }
+      await sleep(POLL_MS);
+    }
+    return {
+      ok: false,
+      reason: "Race didn't appear after answering Hispanic/Latino",
+    };
   }
 
   private async optionLabels(): Promise<string[]> {
@@ -237,8 +289,13 @@ export class GreenhouseDriver extends TrustedDriver {
   /** What the field shows now: typed text, or the chosen option of a dropdown. */
   async readBack(entry: PlanEntry): Promise<string> {
     if (entry.type === "file") return "";
+    // Race hidden (Hispanic/Latino answered Yes or declined): that answer stands in for it.
+    const ref =
+      entry.ref === "race" && !(await this.frame.$(selectorFor("race")))
+        ? ETHNICITY
+        : entry.ref;
     return this.frame
-      .$eval(selectorFor(entry.ref), (el) => {
+      .$eval(selectorFor(ref), (el) => {
         const control = el.closest(".select__control");
         if (control)
           return [
