@@ -1,6 +1,8 @@
 import { RunController } from "../../src/fill/controller";
 import { ApiError, ApplyClient, type QueueItem } from "../../src/lib/api";
 import {
+  type CaptureEntry,
+  loadCaptures,
   loadLastRun,
   loadSettings,
   saveSettings,
@@ -132,6 +134,7 @@ async function showMain() {
   $("main").hidden = false;
   $("signout").hidden = false;
   renderRun(await loadLastRun());
+  renderCaptures(await loadCaptures());
   $("sites").hidden = await chrome.permissions.contains({
     origins: ["https://*/*"],
   });
@@ -173,6 +176,41 @@ $("signout").addEventListener("click", async () => {
   await saveSettings({ token: null });
   client = null;
   showLogin();
+});
+
+function captureLine(entry: CaptureEntry): string {
+  const host = (url: string) => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url;
+    }
+  };
+  const { outcome } = entry;
+  switch (outcome.status) {
+    case "saved":
+      return `${outcome.employer} · ${outcome.title} → ${host(outcome.link)} (saved)`;
+    case "unchanged":
+      return `${outcome.employer} · ${outcome.title} → ${host(outcome.link)} (already saved)`;
+    case "unknown-job":
+      return `${host(entry.report.applyUrl)}: not a job in your Job Ops list`;
+    case "rejected":
+    case "error":
+      return `${host(entry.report.applyUrl)}: not saved (${outcome.reason})`;
+  }
+}
+
+function renderCaptures(entries: readonly CaptureEntry[]) {
+  $("captures").replaceChildren(
+    ...(entries.length
+      ? entries.map((e) => el("li", {}, captureLine(e)))
+      : [el("li", { class: "muted" }, "None yet.")]),
+  );
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.captures)
+    renderCaptures((changes.captures.newValue as CaptureEntry[]) ?? []);
 });
 
 function renderRun(summary: RunSummary | null) {

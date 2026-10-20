@@ -1,3 +1,5 @@
+import type { CaptureReport } from "../capture/tracker";
+import type { CaptureOutcome } from "./api";
 import type { RunSummary } from "./worker";
 
 /** What the extension keeps in chrome.storage.local (this browser only). */
@@ -43,3 +45,26 @@ export async function loadLastRun(): Promise<RunSummary | null> {
 
 export const saveLastRun = (lastRun: RunSummary) =>
   chrome.storage.local.set({ lastRun });
+
+/** Recent LinkedIn apply-link captures, newest first (shown in the side panel). */
+export interface CaptureEntry {
+  readonly at: string;
+  readonly report: CaptureReport;
+  readonly outcome:
+    | CaptureOutcome
+    | { readonly status: "error"; readonly reason: string };
+}
+
+const MAX_CAPTURES = 10;
+
+export async function loadCaptures(): Promise<CaptureEntry[]> {
+  const { captures } = await chrome.storage.local.get("captures");
+  return Array.isArray(captures) ? (captures as CaptureEntry[]) : [];
+}
+
+export async function addCapture(entry: CaptureEntry): Promise<void> {
+  const captures = await loadCaptures();
+  await chrome.storage.local.set({
+    captures: [entry, ...captures].slice(0, MAX_CAPTURES),
+  });
+}

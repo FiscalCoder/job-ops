@@ -1,3 +1,4 @@
+import { listenForLinkedInApplies } from "../src/capture/listen";
 import { ApplyClient } from "../src/lib/api";
 import {
   loadFailures,
@@ -40,6 +41,7 @@ function runNow(): Promise<RunSummary | null> {
 }
 
 export default defineBackground(() => {
+  listenForLinkedInApplies();
   chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch(() => {});

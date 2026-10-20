@@ -7,6 +7,7 @@ import type { JobOpsApi } from "../jobops/client.js";
 import { createPlans } from "../plan/plans-service.js";
 import { createAnswerBankRepo } from "../store/answer-bank-repo.js";
 import { createApplyTargetsRepo } from "../store/apply-targets-repo.js";
+import { createCapturedLinksRepo } from "../store/captured-links-repo.js";
 import { createClaudeAnswersRepo } from "../store/claude-answers-repo.js";
 import { createFillPlansRepo } from "../store/fill-plans-repo.js";
 import { createFormSchemasRepo } from "../store/form-schemas-repo.js";
@@ -14,6 +15,7 @@ import { createGhBoardsRepo } from "../store/gh-boards-repo.js";
 import { createRunsRepo } from "../store/runs-repo.js";
 import { createAnswerBankRoutes } from "./answer-bank-routes.js";
 import { createAuthMiddleware, sendJobOpsFailure } from "./auth.js";
+import { createCaptureRoutes } from "./capture-routes.js";
 import { sendError, sendOk } from "./envelope.js";
 import { createLookupRoutes } from "./lookup-routes.js";
 import { createPlanRoutes } from "./plan-routes.js";
@@ -119,6 +121,15 @@ export function createApp({
       schemas,
       plans,
       planStore,
+    }),
+  );
+
+  app.use(
+    requireUser,
+    createCaptureRoutes({
+      jobOps,
+      targets,
+      links: createCapturedLinksRepo(db),
     }),
   );
 

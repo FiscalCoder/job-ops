@@ -13,9 +13,16 @@ export default defineConfig({
   manifest: {
     name: "Apply Copilot",
     description:
-      "Greenhouse lookups and supervised applying for your Job Ops queue.",
+      "Greenhouse lookups, LinkedIn apply-link capture and supervised applying for your Job Ops queue.",
     // debugger: trusted typing/clicking on the form (Greenhouse ignores synthetic input).
-    permissions: ["storage", "alarms", "sidePanel", "debugger"],
+    // webNavigation: tab addresses only, to follow the tab LinkedIn's Apply button opens.
+    permissions: [
+      "storage",
+      "alarms",
+      "sidePanel",
+      "debugger",
+      "webNavigation",
+    ],
     host_permissions: [
       "https://apply.hueint.com/*",
       "https://boards-api.greenhouse.io/*",

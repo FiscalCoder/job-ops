@@ -48,6 +48,8 @@ export function createApplyTargetsRepo(db: DatabaseSync) {
        desc_score = excluded.desc_score, status = excluded.status, updated_at = excluded.updated_at`,
   );
 
+  const removeStmt = db.prepare("delete from apply_targets where job_id = ?");
+
   return {
     get(jobId: string): ApplyTarget | null {
       const row = getStmt.get(jobId) as TargetRow | undefined;
@@ -68,6 +70,10 @@ export function createApplyTargetsRepo(db: DatabaseSync) {
         target.status,
       );
       return toTarget(getStmt.get(target.jobId) as TargetRow);
+    },
+    /** Forget the job's target so the next lookup starts again (a new apply link). */
+    remove(jobId: string): void {
+      removeStmt.run(jobId);
     },
   };
 }

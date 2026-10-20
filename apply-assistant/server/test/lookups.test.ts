@@ -37,7 +37,7 @@ const jobs: JobOpsJob[] = [
     title: "Senior Backend Engineer",
     employer: "Gamma Labs Inc.",
     status: "ready",
-    jobUrl: "https://www.linkedin.com/jobs/view/1",
+    jobUrl: "https://www.linkedin.com/jobs/view/4400000001",
     applicationLink: null,
     suitabilityScore: 79,
   },
@@ -558,6 +558,91 @@ describe("lookups", () => {
         reason: expect.stringContaining("Claude couldn't be reached"),
       });
       expect(entry("email")).toMatchObject({ status: "fill" });
+    });
+  });
+
+  describe("LinkedIn apply-link capture", () => {
+    it("saves the company link to the LinkedIn job, with a note, and records it", async () => {
+      const { call, log } = await start();
+      const res = await call("/captures", {
+        linkedinJobId: "4400000001",
+        applyUrl: "https://click.appcast.io/t/abc",
+        finalUrl:
+          "https://job-boards.greenhouse.io/gamma/jobs/77?utm_source=linkedin&gh_src=x",
+      });
+      expect(res.json.data).toEqual({
+        status: "saved",
+        jobId: "linkedin",
+        title: "Senior Backend Engineer",
+        employer: "Gamma Labs Inc.",
+        link: "https://job-boards.greenhouse.io/gamma/jobs/77?gh_src=x",
+      });
+      expect(log.updates).toEqual([
+        [
+          "linkedin",
+          {
+            applicationLink:
+              "https://job-boards.greenhouse.io/gamma/jobs/77?gh_src=x",
+          },
+        ],
+      ]);
+      expect(log.notes).toEqual([
+        ["linkedin", "Apply link captured from LinkedIn"],
+      ]);
+      const recent = await call("/captures");
+      expect(recent.json.data[0]).toMatchObject({
+        jobId: "linkedin",
+        sourceUrl: "https://www.linkedin.com/jobs/view/4400000001",
+        capturedUrl: "https://click.appcast.io/t/abc",
+      });
+    });
+
+    it("forgets the job's old lookup result so the next lookup uses the new link", async () => {
+      const { call } = await start();
+      await call("/lookups/results", {
+        type: "board",
+        jobId: "linkedin",
+        employer: "Gamma Labs Inc.",
+        token: null,
+        method: "slug",
+      });
+      const before = await call("/lookups/pending");
+      expect(
+        before.json.data.find((p: any) => p.jobId === "linkedin"),
+      ).toBeUndefined();
+      await call("/captures", {
+        linkedinJobId: "4400000001",
+        applyUrl: "https://jobs.lever.co/gamma/123",
+      });
+      const queue = await call("/queue");
+      expect(
+        queue.json.data.find((q: any) => q.jobId === "linkedin")?.greenhouse,
+      ).toEqual({ status: "pending" });
+    });
+
+    it("ignores jobs Job Ops doesn't have and links that aren't company pages", async () => {
+      const { call, log } = await start();
+      expect(
+        (
+          await call("/captures", {
+            linkedinJobId: "9999999999",
+            applyUrl: "https://jobs.lever.co/x/1",
+          })
+        ).json.data,
+      ).toEqual({ status: "unknown-job" });
+      expect(
+        (
+          await call("/captures", {
+            linkedinJobId: "4400000001",
+            applyUrl: "https://www.linkedin.com/jobs/view/4400000001",
+          })
+        ).json.data,
+      ).toMatchObject({ status: "rejected" });
+      expect(
+        (await call("/captures", { linkedinJobId: "abc", applyUrl: "x" }))
+          .status,
+      ).toBe(400);
+      expect(log.updates).toEqual([]);
     });
   });
 });

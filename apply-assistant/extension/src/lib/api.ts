@@ -1,3 +1,4 @@
+import type { CaptureReport } from "../capture/tracker";
 import type { LookupResult, PendingLookup, ResultOutcome } from "./lookups";
 
 /** Client for the apply-assistant server (same envelope as Job Ops: {ok, data, error}). */
@@ -21,6 +22,18 @@ export interface QueueItem {
   readonly greenhouse: { status: string; ghUrl?: string | null };
   readonly plan: { summary: Record<string, number>; builtAt: string } | null;
 }
+
+/** What the server did with a captured LinkedIn apply link. */
+export type CaptureOutcome =
+  | {
+      readonly status: "saved" | "unchanged";
+      readonly jobId: string;
+      readonly title: string;
+      readonly employer: string;
+      readonly link: string;
+    }
+  | { readonly status: "unknown-job" }
+  | { readonly status: "rejected"; readonly reason: string };
 
 export class ApplyClient {
   constructor(
@@ -47,6 +60,10 @@ export class ApplyClient {
 
   submit(result: LookupResult): Promise<ResultOutcome> {
     return this.request("/lookups/results", result);
+  }
+
+  capture(report: CaptureReport): Promise<CaptureOutcome> {
+    return this.request("/captures", report);
   }
 
   queue(): Promise<QueueItem[]> {
