@@ -23,7 +23,9 @@ apply-assistant server never contacts Greenhouse or company sites.
   otherwise copies it. "Save resume, copy path" saves the tailored PDF to
   `Downloads/JobOps/<Employer> - <Title>/` and copies its full path: in the upload dialog press
   Ctrl+V, Enter. "Attach resume to page" puts it straight into the page's resume field. "Ask Claude"
-  answers a question you paste. Every fill and copy is recorded in the job's trace.
+  answers a question you paste. **I applied ✓** and **Skip job** (click twice to confirm) update Job
+  Ops with its own Apply/Skip actions, so the applied date and stage are recorded. Every fill, copy
+  and outcome is recorded in the job's trace.
 
 ## Install (unpacked)
 

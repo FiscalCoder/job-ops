@@ -34,17 +34,24 @@ const job = {
   applicationLink: `https://${HOST}/test/careers`,
   suitabilityScore: 80,
 };
+/** The job's status in the fake Job Ops, and the actions it was asked for. */
+let jobStatus = "ready";
+const jobOpsCalls = [];
 const jobOps = {
   login: async () => ({ token: "good", expiresIn: 3600 }),
   me: async (t) => {
     if (t === "good") return { id: "u1", username: "me" };
     throw new JobOpsError(401, "UNAUTHORIZED", "nope");
   },
-  listJobs: async () => ({ jobs: [job], total: 1, revision: "r" }),
+  listJobs: async () => {
+    const jobs = jobStatus === "ready" ? [job] : [];
+    return { jobs, total: jobs.length, revision: jobStatus };
+  },
   getJob: async (_t, id) => {
     if (id !== job.id) throw new JobOpsError(404, "NOT_FOUND", "Job not found");
     return {
       ...job,
+      status: jobStatus,
       location: "Remote",
       jobDescription: "Build things",
       tailoredSummary: "Platform engineer who ships.",
@@ -53,6 +60,14 @@ const jobOps = {
   updateJob: async () => {},
   addNote: async () => {},
   getPdf: async () => new Uint8Array(PDF),
+  markApplied: async () => {
+    jobOpsCalls.push("apply");
+    jobStatus = "applied";
+  },
+  skipJob: async () => {
+    jobOpsCalls.push("skip");
+    jobStatus = "skipped";
+  },
   getDesignResume: async () => fakeDesignResume,
 };
 
@@ -327,9 +342,32 @@ try {
   });
 
   await check(
+    "I applied and Skip job need a second click, then use Job Ops' own actions",
+    async () => {
+      const skip = panel.getByRole("button", { name: "Skip job" });
+      await skip.click();
+      await panel
+        .getByRole("button", { name: "Click again: skip it" })
+        .waitFor();
+      // Not confirmed in time: it goes back and nothing happens.
+      await skip.waitFor({ timeout: 6_000 });
+      assert.deepEqual(jobOpsCalls, []);
+      await panel.getByRole("button", { name: "I applied ✓" }).click();
+      await panel
+        .getByRole("button", { name: "Click again: mark Applied" })
+        .click();
+      await panel.getByText("Marked Applied in Job Ops.").waitFor();
+      assert.deepEqual(jobOpsCalls, ["apply"]);
+      assert.ok(await skip.isDisabled(), "Skip is off once it's applied");
+    },
+  );
+
+  await check(
     "every fill and copy is in the job's trace, with the field it went into",
     async () => {
       await panel.getByRole("button", { name: "Back" }).click();
+      // Back to a fresh queue: the applied job has left it.
+      await panel.getByText("No Ready jobs in Job Ops.").waitFor();
       const token = await panel.evaluate(
         async () => (await chrome.storage.local.get("token")).token,
       );
@@ -358,6 +396,7 @@ try {
         "kit-copy",
         "resume-attached",
         "resume-saved",
+        "kit-outcome",
       ])
         assert.ok(
           kinds.includes(kind),

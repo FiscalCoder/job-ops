@@ -218,10 +218,18 @@ export async function showKit(
     }
   });
 
+  const outcomes = outcomeButtons(client, job.jobId, say, (outcome) =>
+    trace.event(
+      "kit-outcome",
+      outcome === "applied" ? "You marked it Applied" : "You skipped it",
+    ),
+  );
+
   box.replaceChildren(
     el("div", { class: "row" }, el("strong", {}, "Apply kit"), back),
     el("p", { class: "muted" }, `${kit.job.title} · ${kit.job.employer}`),
     el("div", { class: "controls" }, openButton, saveButton, attachButton),
+    outcomes,
     ...(allow ? [allow] : []),
     el(
       "p",
@@ -233,6 +241,68 @@ export async function showKit(
     askClaude(client, job.jobId, itemRow),
   );
   return close;
+}
+
+/** A click arms the button; a second click within this time does it. */
+const CONFIRM_MS = 4_000;
+
+/**
+ * "I applied" and "Skip job": update Job Ops after applying (or deciding not to) by hand.
+ * Each needs a second click to confirm, so a stray click changes nothing.
+ */
+function outcomeButtons(
+  client: ApplyClient,
+  jobId: string,
+  say: (text: string, tone?: "muted" | "ok" | "error") => void,
+  onDone: (outcome: "applied" | "skipped") => void,
+): HTMLElement {
+  const labels = {
+    applied: ["I applied ✓", "Click again: mark Applied"],
+    skipped: ["Skip job", "Click again: skip it"],
+  } as const;
+  const done = {
+    applied: "Marked Applied in Job Ops.",
+    skipped: "Skipped in Job Ops.",
+  } as const;
+  const buttons: HTMLButtonElement[] = [];
+  const make = (outcome: "applied" | "skipped") => {
+    let armed: ReturnType<typeof setTimeout> | null = null;
+    const b = button(
+      labels[outcome][0],
+      async () => {
+        if (!armed) {
+          b.textContent = labels[outcome][1];
+          armed = setTimeout(() => {
+            armed = null;
+            b.textContent = labels[outcome][0];
+          }, CONFIRM_MS);
+          return;
+        }
+        clearTimeout(armed);
+        armed = null;
+        for (const each of buttons) each.disabled = true;
+        try {
+          await client.kitOutcome(jobId, outcome);
+          say(done[outcome], "ok");
+          b.textContent = labels[outcome][0];
+          onDone(outcome);
+        } catch (error) {
+          say(errorText(error), "error");
+          b.textContent = labels[outcome][0];
+          for (const each of buttons) each.disabled = false;
+        }
+      },
+      outcome === "applied",
+    );
+    buttons.push(b);
+    return b;
+  };
+  return el(
+    "div",
+    { class: "row outcome" },
+    el("span", { class: "muted" }, "Done with this job?"),
+    el("div", { class: "controls" }, make("applied"), make("skipped")),
+  );
 }
 
 /** Paste a question the kit doesn't cover; Claude answers from your resume and answers. */

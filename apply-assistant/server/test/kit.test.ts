@@ -164,6 +164,10 @@ const job: JobOpsJob = {
   suitabilityScore: 82,
 };
 
+/** What the fake Job Ops was asked to do, and the job's status there. */
+const jobOpsLog: string[] = [];
+let jobStatus = "ready";
+
 const jobOps: JobOpsApi = {
   login: async () => ({ token: "good", expiresIn: 3600 }),
   me: async (t) => {
@@ -175,14 +179,25 @@ const jobOps: JobOpsApi = {
     if (id !== job.id) throw new JobOpsError(404, "NOT_FOUND", "Job not found");
     return {
       ...job,
+      status: jobStatus,
       location: "Bengaluru",
       jobDescription: "Build APIs",
       tailoredSummary: "Backend engineer.",
     };
   },
   updateJob: async () => {},
-  addNote: async () => {},
+  addNote: async (_t, _id, note) => {
+    jobOpsLog.push(`note: ${note.title}`);
+  },
   getPdf: async () => new Uint8Array(),
+  markApplied: async () => {
+    jobOpsLog.push("apply");
+    jobStatus = "applied";
+  },
+  skipJob: async () => {
+    jobOpsLog.push("skip");
+    jobStatus = "skipped";
+  },
   getDesignResume: async () => fakeDesignResume,
 };
 
@@ -277,5 +292,32 @@ describe("kit routes", () => {
     expect((await call("/kit/job-1/answer", { question: "x" })).status).toBe(
       400,
     );
+  });
+
+  it("marks a job applied or skipped with Job Ops' own actions, once", async () => {
+    const call = await start();
+    jobOpsLog.length = 0;
+    jobStatus = "ready";
+    const skipped = await call("/kit/job-1/outcome", { outcome: "skipped" });
+    expect(skipped.body.data).toEqual({ status: "skipped" });
+    expect(
+      (await call("/kit/job-1/outcome", { outcome: "skipped" })).status,
+    ).toBe(409);
+    // A skipped job can still be applied to (you changed your mind).
+    const applied = await call("/kit/job-1/outcome", { outcome: "applied" });
+    expect(applied.body.data).toEqual({ status: "applied" });
+    const again = await call("/kit/job-1/outcome", { outcome: "skipped" });
+    expect(again.status).toBe(409);
+    expect(again.body.error.message).toBe(
+      "Job Ops already has this job as Applied",
+    );
+    expect(jobOpsLog).toEqual(["skip", "apply", "note: Applied by hand"]);
+    expect(
+      (await call("/kit/job-1/outcome", { outcome: "maybe" })).status,
+    ).toBe(400);
+    expect(
+      (await call("/kit/nope/outcome", { outcome: "applied" })).status,
+    ).toBe(404);
+    jobStatus = "ready";
   });
 });

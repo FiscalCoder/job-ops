@@ -120,6 +120,10 @@ async function openKit(item: QueueItem) {
       closeKit = null;
       box.hidden = true;
       $("main").hidden = false;
+      // The job may now be applied or skipped: its plan is stale and the queue changed.
+      $("plan").hidden = true;
+      $("plan").replaceChildren();
+      void loadQueue();
     },
   });
 }

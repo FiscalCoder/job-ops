@@ -209,9 +209,7 @@ export function createRunRoutes({
       });
       if (run.outcome === "submitted") {
         try {
-          await jobOps.updateJob(tokenOf(req), run.jobId, {
-            status: "applied",
-          });
+          await jobOps.markApplied(tokenOf(req), run.jobId);
           await jobOps.addNote(tokenOf(req), run.jobId, {
             title: "Applied via Apply Copilot",
             content: `Application filled with Apply Copilot and submitted by you: ${actions.length} steps, ${run.interventions} by you. Run ${run.id}.`,

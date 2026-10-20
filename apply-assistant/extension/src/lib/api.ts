@@ -138,6 +138,16 @@ export class ApplyClient implements TraceApi {
     return this.request(`/kit/${encodeURIComponent(jobId)}`);
   }
 
+  /** You applied by hand, or skipped the job: Job Ops' own apply/skip actions. */
+  kitOutcome(
+    jobId: string,
+    outcome: "applied" | "skipped",
+  ): Promise<{ status: string }> {
+    return this.request(`/kit/${encodeURIComponent(jobId)}/outcome`, {
+      outcome,
+    });
+  }
+
   kitAnswer(
     jobId: string,
     question: { question: string; options?: string[]; long?: boolean },

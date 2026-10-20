@@ -100,6 +100,12 @@ Two more routes:
   - Needs the `downloads` permission.
 - **Ask Claude:** paste a question, get an answer to copy or fill.
 - **Open application:** opens the posting link (or Job Ops' link) for the job. The tab is remembered for T3.
+- **I applied ✓ / Skip job** (added 2026-10-20, at your request): after applying by hand, or deciding not to.
+  - Each needs a second click within 4 s.
+  - The server uses Job Ops' own `POST /api/jobs/:id/apply` and `/skip` actions, so the applied date and the Applied stage are recorded.
+  - Applying adds an "Applied by hand" note.
+  - A job already marked Applied is refused.
+  - Supervised runs now use the same apply action; they used to only change the status.
 - Every copy or fill writes a `kit` trace event. For a fill it includes the field's description and site, which is the raw data for T4.
 
 ## T3. Tracked application tabs (next)

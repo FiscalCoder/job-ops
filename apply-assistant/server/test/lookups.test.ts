@@ -116,6 +116,8 @@ function fakeJobOps(log: {
       log.notes.push([id, note.title]);
     },
     getPdf: async () => new Uint8Array(),
+    markApplied: async () => {},
+    skipJob: async () => {},
     getDesignResume: async () => fakeDesignResume,
   };
 }

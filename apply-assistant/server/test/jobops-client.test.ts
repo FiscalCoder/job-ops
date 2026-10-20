@@ -136,6 +136,19 @@ describe("JobOpsClient", () => {
     });
   });
 
+  it("uses Job Ops' own apply and skip actions", async () => {
+    const { fetchImpl, calls } = fakeFetch(() =>
+      json({ ok: true, data: { id: "j1" } }),
+    );
+    const client = new JobOpsClient(BASE, fetchImpl);
+    await client.markApplied("tok", "j1");
+    await client.skipJob("tok", "j 2");
+    expect(calls.map((c) => [c.init?.method, c.url])).toEqual([
+      ["POST", `${BASE}/api/jobs/j1/apply`],
+      ["POST", `${BASE}/api/jobs/j%202/skip`],
+    ]);
+  });
+
   it("adds a note", async () => {
     const { fetchImpl, calls } = fakeFetch(() =>
       json({ ok: true, data: { id: "n1" } }, 201),

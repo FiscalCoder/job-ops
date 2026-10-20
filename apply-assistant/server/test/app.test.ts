@@ -24,6 +24,8 @@ function fakeJobOps(overrides: Partial<JobOpsApi> = {}): JobOpsApi {
     updateJob: async () => undefined,
     addNote: async () => undefined,
     getPdf: async () => new Uint8Array(),
+    markApplied: async () => {},
+    skipJob: async () => {},
     getDesignResume: async () => fakeDesignResume,
     ...overrides,
   };

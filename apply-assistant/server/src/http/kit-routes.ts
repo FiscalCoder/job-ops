@@ -21,6 +21,9 @@ const answerBody = z.object({
   long: z.boolean().optional(),
 });
 
+/** What you did with a job you handled by hand. */
+const outcomeBody = z.object({ outcome: z.enum(["applied", "skipped"]) });
+
 export interface KitRoutesDeps {
   readonly jobOps: JobOpsApi;
   readonly targets: ApplyTargetsRepo;
@@ -103,6 +106,69 @@ export function createKitRoutes(deps: KitRoutesDeps) {
       failJobOps(res, error);
     }
   });
+
+  /** "I applied" / "Skip job": Job Ops' own actions, so its stages and dates stay right. */
+  router.post(
+    "/kit/:jobId/outcome",
+    async (req: AuthedRequest, res: Response) => {
+      const body = outcomeBody.safeParse(req.body);
+      if (!body.success) {
+        sendError(
+          res,
+          400,
+          "INVALID_REQUEST",
+          "outcome must be applied or skipped",
+        );
+        return;
+      }
+      const jobId = String(req.params.jobId);
+      const { outcome } = body.data;
+      try {
+        const { status } = await jobOps.getJob(tokenOf(req), jobId);
+        if (status === "applied" || status === outcome) {
+          sendError(
+            res,
+            409,
+            "ALREADY_DONE",
+            status === "applied"
+              ? "Job Ops already has this job as Applied"
+              : "Job Ops already has this job as Skipped",
+          );
+          return;
+        }
+        if (outcome === "applied") {
+          await jobOps.markApplied(tokenOf(req), jobId);
+          await jobOps
+            .addNote(tokenOf(req), jobId, {
+              title: "Applied by hand",
+              content:
+                "You applied yourself, with the Apply Copilot kit, and marked it applied from the side panel.",
+            })
+            .catch((error: unknown) =>
+              trace({
+                jobId,
+                kind: "error",
+                message: `Couldn't add the Applied note: ${error instanceof Error ? error.message : String(error)}`,
+              }),
+            );
+        } else {
+          await jobOps.skipJob(tokenOf(req), jobId);
+        }
+        trace({
+          jobId,
+          kind: "kit-outcome",
+          message:
+            outcome === "applied"
+              ? "You marked it Applied (applied by hand)"
+              : "You skipped this job",
+          data: { outcome, previousStatus: status },
+        });
+        sendOk(res, { status: outcome });
+      } catch (error) {
+        failJobOps(res, error);
+      }
+    },
+  );
 
   router.post(
     "/kit/:jobId/answer",

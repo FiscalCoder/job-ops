@@ -49,6 +49,11 @@ function fakeJobOps(log: {
       if (id !== job.id) throw new JobOpsError(404, "NOT_FOUND", "No PDF");
       return PDF;
     },
+    markApplied: async (_t, id) => {
+      log.updates.push([id, { status: "applied" }]);
+      status = "applied";
+    },
+    skipJob: async () => {},
     getDesignResume: async () => fakeDesignResume,
   };
 }

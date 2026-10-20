@@ -169,6 +169,10 @@ function fakeJobOps(): JobOpsApi {
     },
     addNote: async () => {},
     getPdf: async () => new Uint8Array(),
+    markApplied: async () => {
+      status = "applied";
+    },
+    skipJob: async () => {},
     getDesignResume: async () => fakeDesignResume,
   };
 }

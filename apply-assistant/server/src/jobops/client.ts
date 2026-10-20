@@ -61,6 +61,10 @@ export interface JobOpsApi {
   ): Promise<{ jobs: JobOpsJob[]; total: number; revision: string }>;
   getJob(token: string, jobId: string): Promise<JobOpsJobDetail>;
   updateJob(token: string, jobId: string, update: JobUpdate): Promise<void>;
+  /** Job Ops' own "Applied" action: status, applied date and the Applied stage event. */
+  markApplied(token: string, jobId: string): Promise<void>;
+  /** Job Ops' own "Skip" action. */
+  skipJob(token: string, jobId: string): Promise<void>;
   addNote(token: string, jobId: string, note: JobNote): Promise<void>;
   getPdf(token: string, jobId: string): Promise<Uint8Array>;
   /** Resume Studio document (Reactive Resume JSON): the source the tailored PDFs are built from. */
@@ -164,6 +168,22 @@ export class JobOpsClient implements JobOpsApi {
       token,
       body: update,
     });
+  }
+
+  async markApplied(token: string, jobId: string): Promise<void> {
+    await this.request(
+      `/api/jobs/${encodeURIComponent(jobId)}/apply`,
+      z.unknown(),
+      { method: "POST", token, body: {} },
+    );
+  }
+
+  async skipJob(token: string, jobId: string): Promise<void> {
+    await this.request(
+      `/api/jobs/${encodeURIComponent(jobId)}/skip`,
+      z.unknown(),
+      { method: "POST", token, body: {} },
+    );
   }
 
   async addNote(token: string, jobId: string, note: JobNote): Promise<void> {
