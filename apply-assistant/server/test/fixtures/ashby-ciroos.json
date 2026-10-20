@@ -1,0 +1,264 @@
+{
+  "jobPosting": {
+    "id": "4d77d75a-fca4-485e-90a7-69ee980e6e1a",
+    "title": "Software Development Engineer",
+    "isListed": true,
+    "locationName": "Bengaluru",
+    "applicationForm": {
+      "id": "bc2b721f-02d3-47ab-bd76-131cad7ca9b1",
+      "sections": [
+        {
+          "title": null,
+          "descriptionHtml": null,
+          "fieldEntries": [
+            {
+              "id": "bc2b721f-02d3-47ab-bd76-131cad7ca9b1__systemfield_name",
+              "field": {
+                "id": "665b4ac1-e3b8-400d-9b81-1867fd9037ee",
+                "path": "_systemfield_name",
+                "humanReadablePath": "Name",
+                "title": "Name",
+                "isNullable": false,
+                "isPrivate": false,
+                "isDeactivated": false,
+                "isMany": false,
+                "metadata": {},
+                "type": "String",
+                "__autoSerializationID": "StringField"
+              },
+              "isRequired": true,
+              "descriptionHtml": "<p>Your name</p>",
+              "isHidden": null
+            },
+            {
+              "id": "bc2b721f-02d3-47ab-bd76-131cad7ca9b1_a53009cf-0f36-4d6b-92c6-3c0cdbae95eb",
+              "field": {
+                "id": "7c102fb3-0dc3-47b4-93df-1cde27b957e9",
+                "path": "a53009cf-0f36-4d6b-92c6-3c0cdbae95eb",
+                "humanReadablePath": "",
+                "title": "Mobile/Phone",
+                "isNullable": false,
+                "isPrivate": false,
+                "isDeactivated": false,
+                "isMany": false,
+                "metadata": {},
+                "type": "Phone",
+                "__autoSerializationID": "PhoneField"
+              },
+              "isRequired": true,
+              "descriptionHtml": null,
+              "isHidden": null
+            },
+            {
+              "id": "bc2b721f-02d3-47ab-bd76-131cad7ca9b1__systemfield_email",
+              "field": {
+                "id": "18347b25-6e77-4a5f-9e14-fdd11842f7be",
+                "path": "_systemfield_email",
+                "humanReadablePath": "Email",
+                "title": "Email",
+                "isNullable": false,
+                "isPrivate": false,
+                "isDeactivated": false,
+                "isMany": false,
+                "metadata": {},
+                "type": "Email",
+                "__autoSerializationID": "EmailField"
+              },
+              "isRequired": true,
+              "descriptionHtml": "<p>Your preferred email address for communication</p>",
+              "isHidden": null
+            },
+            {
+              "id": "bc2b721f-02d3-47ab-bd76-131cad7ca9b1__systemfield_resume",
+              "field": {
+                "id": "0ab61712-3b7e-4c6f-b110-1ad0710f9f15",
+                "path": "_systemfield_resume",
+                "humanReadablePath": "Resume",
+                "title": "Resume",
+                "isNullable": false,
+                "isPrivate": false,
+                "isDeactivated": false,
+                "isMany": false,
+                "metadata": {},
+                "type": "File",
+                "__autoSerializationID": "FileField"
+              },
+              "isRequired": true,
+              "descriptionHtml": null,
+              "isHidden": null
+            },
+            {
+              "id": "bc2b721f-02d3-47ab-bd76-131cad7ca9b1_396dee6c-b79c-4811-977b-afc71a1fca02",
+              "field": {
+                "id": "2fe0aff1-196f-45c2-bf64-c8c773a69f6c",
+                "path": "396dee6c-b79c-4811-977b-afc71a1fca02",
+                "humanReadablePath": "",
+                "title": "LinkedIn Profile Link",
+                "isNullable": false,
+                "isPrivate": false,
+                "isDeactivated": false,
+                "isMany": false,
+                "metadata": {},
+                "type": "Url",
+                "__autoSerializationID": "UrlField"
+              },
+              "isRequired": true,
+              "descriptionHtml": null,
+              "isHidden": null
+            },
+            {
+              "id": "bc2b721f-02d3-47ab-bd76-131cad7ca9b1_4041810a-0d8b-4cb5-b19a-8c3aacbe4ae8",
+              "field": {
+                "id": "4041810a-0d8b-4cb5-b19a-8c3aacbe4ae8",
+                "path": "4041810a-0d8b-4cb5-b19a-8c3aacbe4ae8",
+                "humanReadablePath": "",
+                "title": "What excites you most about the opportunity to join an early-stage startup like Ciroos?",
+                "isNullable": false,
+                "isPrivate": false,
+                "isDeactivated": false,
+                "isMany": false,
+                "metadata": {},
+                "type": "LongText",
+                "__autoSerializationID": "LongTextField"
+              },
+              "isRequired": true,
+              "descriptionHtml": null,
+              "isHidden": null
+            },
+            {
+              "id": "bc2b721f-02d3-47ab-bd76-131cad7ca9b1_e46513c1-798d-41e5-a06c-9dd6f8eb3e6f",
+              "field": {
+                "id": "e46513c1-798d-41e5-a06c-9dd6f8eb3e6f",
+                "path": "e46513c1-798d-41e5-a06c-9dd6f8eb3e6f",
+                "humanReadablePath": "",
+                "title": "What value do you hope to gain by working at an early-stage startup like Ciroos?",
+                "isNullable": false,
+                "isPrivate": false,
+                "isDeactivated": false,
+                "isMany": false,
+                "metadata": {},
+                "type": "LongText",
+                "__autoSerializationID": "LongTextField"
+              },
+              "isRequired": true,
+              "descriptionHtml": null,
+              "isHidden": null
+            },
+            {
+              "id": "bc2b721f-02d3-47ab-bd76-131cad7ca9b1_6a35d006-ce7d-4177-8cc7-ace862aef41e",
+              "field": {
+                "id": "2daa9084-93dd-40d1-9d9b-7f423c93b832",
+                "path": "6a35d006-ce7d-4177-8cc7-ace862aef41e",
+                "humanReadablePath": "",
+                "title": "What value  would you bring to Ciroos?",
+                "isNullable": false,
+                "isPrivate": false,
+                "isDeactivated": false,
+                "isMany": false,
+                "metadata": {},
+                "type": "LongText",
+                "__autoSerializationID": "LongTextField"
+              },
+              "isRequired": true,
+              "descriptionHtml": null,
+              "isHidden": null
+            },
+            {
+              "id": "bc2b721f-02d3-47ab-bd76-131cad7ca9b1_38602e42-c14e-4ce5-982c-c45c2b707afc",
+              "field": {
+                "id": "69d3b7ae-28ed-44ed-bdc7-f72605574808",
+                "path": "38602e42-c14e-4ce5-982c-c45c2b707afc",
+                "humanReadablePath": "",
+                "title": "Total Work Experience",
+                "isNullable": false,
+                "isPrivate": false,
+                "isDeactivated": false,
+                "isMany": false,
+                "metadata": {},
+                "type": "Number",
+                "__autoSerializationID": "NumberField"
+              },
+              "isRequired": true,
+              "descriptionHtml": null,
+              "isHidden": null
+            },
+            {
+              "id": "bc2b721f-02d3-47ab-bd76-131cad7ca9b1__systemfield_location",
+              "field": {
+                "id": "982d9c27-6376-4f0b-baec-b72495aa3802",
+                "path": "_systemfield_location",
+                "humanReadablePath": "Location",
+                "title": "Location",
+                "isNullable": false,
+                "isPrivate": false,
+                "isDeactivated": false,
+                "isMany": false,
+                "metadata": {},
+                "type": "Location",
+                "locationTypes": ["Country", "Region", "City"],
+                "__autoSerializationID": "LocationField"
+              },
+              "isRequired": true,
+              "descriptionHtml": null,
+              "isHidden": null
+            },
+            {
+              "id": "bc2b721f-02d3-47ab-bd76-131cad7ca9b1_a07b5abb-9e75-4505-83f7-360c9be871a1",
+              "field": {
+                "id": "76f15f0c-f511-4f45-9fe7-261bc7c64a47",
+                "path": "a07b5abb-9e75-4505-83f7-360c9be871a1",
+                "humanReadablePath": "",
+                "title": "Current / Last Drawn CTC ",
+                "isNullable": false,
+                "isPrivate": false,
+                "isDeactivated": false,
+                "isMany": false,
+                "metadata": {},
+                "type": "Number",
+                "__autoSerializationID": "NumberField"
+              },
+              "isRequired": true,
+              "descriptionHtml": "<p>Enter the amount in your local currency. Do not use commas or symbols. (Example: <code>600000)</code></p>",
+              "isHidden": null
+            },
+            {
+              "id": "bc2b721f-02d3-47ab-bd76-131cad7ca9b1_841f6246-ee94-4fe1-9317-c509c5650604",
+              "field": {
+                "id": "939c032a-1bcb-4cb4-9506-777c7d36d61a",
+                "path": "841f6246-ee94-4fe1-9317-c509c5650604",
+                "humanReadablePath": "",
+                "title": "Availability to Join",
+                "isNullable": false,
+                "isPrivate": false,
+                "isDeactivated": false,
+                "isMany": false,
+                "metadata": {},
+                "type": "ValueSelect",
+                "selectableValues": [
+                  {
+                    "label": "Immediate/Within 15 Days",
+                    "value": "Immediate/Within 15 Days"
+                  },
+                  {
+                    "label": "30 Days",
+                    "value": "30 Days",
+                    "isArchived": false
+                  },
+                  {
+                    "label": "More than 30 Days",
+                    "value": "More than 30 Days",
+                    "isArchived": false
+                  }
+                ],
+                "__autoSerializationID": "ValueSelectField"
+              },
+              "isRequired": true,
+              "descriptionHtml": null,
+              "isHidden": null
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

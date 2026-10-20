@@ -216,6 +216,21 @@ function resolveRule(
       return "skip";
     case "bank":
       return resolveBank(rule, input.bank, field, jobCountry);
+    case "full-name": {
+      const first = input.bank.get("identity.first_name")?.trim();
+      const last = input.bank.get("identity.last_name")?.trim();
+      return first
+        ? {
+            value: [first, last].filter(Boolean).join(" "),
+            source: "bank:identity.first_name+last_name",
+            bankKey: "identity.first_name",
+          }
+        : missing(
+            "bank:identity.first_name",
+            "No saved answer in your answer bank",
+            "identity.first_name",
+          );
+    }
     case "profile":
       return resolveProfile(rule.fact, input.resume);
     case "work-auth":

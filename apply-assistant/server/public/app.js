@@ -170,13 +170,20 @@ for (const tab of document.querySelectorAll(".tab"))
 
 // ---- queue & plans ---------------------------------------------------------------------
 
-const GH_BADGE = {
-  matched: ["ok", "On Greenhouse"],
-  possible: ["warn", "Possible match"],
-  none: ["", "Not on Greenhouse"],
-  closed: ["bad", "Posting closed"],
-  pending: ["", "Not checked yet"],
-};
+const ATS_NAMES = { greenhouse: "Greenhouse", ashby: "Ashby" };
+
+/** Badge for a job's posting: "On Ashby", "Not found", … */
+function targetBadge(target) {
+  const system = ATS_NAMES[target.ats] ?? "a supported system";
+  const badges = {
+    matched: ["ok", `On ${system}`],
+    possible: ["warn", `Possible match on ${system}`],
+    none: ["", "Not found"],
+    closed: ["bad", "Posting closed"],
+    pending: ["", "Not checked yet"],
+  };
+  return badges[target.status] ?? ["", target.status];
+}
 
 function planCell(plan) {
   if (!plan) return el("span", { class: "muted" }, "—");
@@ -213,10 +220,7 @@ async function loadQueue() {
     return;
   }
   const rows = jobs.map((job) => {
-    const [tone, label] = GH_BADGE[job.greenhouse.status] ?? [
-      "",
-      job.greenhouse.status,
-    ];
+    const [tone, label] = targetBadge(job.target);
     const openPlan = () => go(`plan/${encodeURIComponent(job.jobId)}`);
     return el(
       "tr",
@@ -241,14 +245,14 @@ async function loadQueue() {
         "td",
         {},
         el("span", { class: `badge ${tone}` }, label),
-        job.greenhouse.ghUrl
+        job.target.postingUrl
           ? el(
               "div",
               {},
               el(
                 "a",
                 {
-                  href: job.greenhouse.ghUrl,
+                  href: job.target.postingUrl,
                   target: "_blank",
                   rel: "noopener",
                 },
@@ -272,7 +276,7 @@ async function loadQueue() {
           {},
           el("th", {}, "Job"),
           el("th", { class: "hide-sm" }, "Score"),
-          el("th", {}, "Greenhouse"),
+          el("th", {}, "Posting"),
           el("th", {}, "Plan"),
         ),
       ),

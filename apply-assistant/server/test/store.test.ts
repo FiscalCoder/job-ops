@@ -1,7 +1,10 @@
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { createAnswerBankRepo } from "../src/store/answer-bank-repo.js";
 import { createApplyTargetsRepo } from "../src/store/apply-targets-repo.js";
-import { openStore } from "../src/store/db.js";
+import { createAtsBoardsRepo } from "../src/store/ats-boards-repo.js";
+import { MIGRATIONS, openStore } from "../src/store/db.js";
+import { createFormSchemasRepo } from "../src/store/form-schemas-repo.js";
 
 const memoryStore = () => openStore(":memory:");
 
@@ -22,13 +25,41 @@ describe("openStore", () => {
         "employer_domains",
         "fill_plans",
         "form_schemas",
-        "gh_boards",
+        "ats_boards",
         "question_map",
         "run_actions",
         "runs",
         "schema_version",
       ]),
     );
+  });
+
+  it("keeps Greenhouse data when adding other application systems (migration 4)", () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec("create table schema_version (version integer not null)");
+    MIGRATIONS.slice(0, 3).forEach((sql, i) => {
+      db.exec(sql);
+      db.prepare("insert into schema_version (version) values (?)").run(i + 1);
+    });
+    db.exec(`insert into form_schemas (gh_token, gh_job_id, payload_json, schema_hash)
+             values ('acme', '11', '{}', 'h');
+             insert into gh_boards (employer_norm, token, method) values ('acme', 'acme', 'slug'), ('none co', null, 'slug');
+             insert into apply_targets (job_id, gh_token, gh_job_id, match_method, status)
+             values ('j1', 'acme', '11', 'direct', 'matched');`);
+    openStore(db);
+    expect(
+      createFormSchemasRepo(db).getAny("greenhouse", "acme", "11")?.hash,
+    ).toBe("h");
+    expect(createApplyTargetsRepo(db).get("j1")?.ats).toBe("greenhouse");
+    const boards = createAtsBoardsRepo(db);
+    expect(boards.getFresh("acme")).toMatchObject({
+      ats: "greenhouse",
+      token: "acme",
+    });
+    expect(boards.getFresh("none co")).toMatchObject({
+      ats: null,
+      token: null,
+    });
   });
 
   it("is idempotent when opened twice on the same database", () => {
@@ -103,16 +134,18 @@ describe("apply targets repo", () => {
     const repo = createApplyTargetsRepo(memoryStore());
     repo.upsert({
       jobId: "j1",
-      ghToken: "fivetran",
-      ghJobId: "7768594003",
-      ghUrl: "https://www.fivetran.com/careers/job?gh_jid=7768594003",
+      ats: "greenhouse",
+      boardToken: "fivetran",
+      postingId: "7768594003",
+      postingUrl: "https://www.fivetran.com/careers/job?gh_jid=7768594003",
       matchMethod: "board title match",
       titleScore: 1,
       descScore: null,
       status: "matched",
     });
     expect(repo.get("j1")).toMatchObject({
-      ghToken: "fivetran",
+      ats: "greenhouse",
+      boardToken: "fivetran",
       status: "matched",
       titleScore: 1,
       descScore: null,
@@ -122,9 +155,10 @@ describe("apply targets repo", () => {
   it("lists targets by status", () => {
     const repo = createApplyTargetsRepo(memoryStore());
     const base = {
-      ghToken: null,
-      ghJobId: null,
-      ghUrl: null,
+      ats: "greenhouse" as const,
+      boardToken: null,
+      postingId: null,
+      postingUrl: null,
       matchMethod: "none",
       titleScore: null,
       descScore: null,
@@ -134,9 +168,9 @@ describe("apply targets repo", () => {
       ...base,
       jobId: "b",
       status: "matched",
-      ghToken: "x",
-      ghJobId: "1",
-      ghUrl: "https://g/1",
+      boardToken: "x",
+      postingId: "1",
+      postingUrl: "https://g/1",
     });
     expect(repo.listByStatus("matched").map((t) => t.jobId)).toEqual(["b"]);
   });

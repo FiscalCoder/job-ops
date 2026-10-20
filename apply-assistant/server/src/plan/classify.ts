@@ -18,6 +18,8 @@ export type ProfileFact =
 
 export type FieldRule =
   | { kind: "bank"; key: string; fallbackKey?: string }
+  /** One "Name" field (Ashby): first and last name from the bank. */
+  | { kind: "full-name" }
   | { kind: "profile"; fact: ProfileFact }
   | { kind: "work-auth"; ask: "authorized" | "sponsorship" }
   | { kind: "resume-file" }
@@ -40,6 +42,7 @@ const profile = (fact: ProfileFact): FieldRule => ({ kind: "profile", fact });
 
 const BY_REF: Record<string, FieldRule> = {
   first_name: bank("identity.first_name"),
+  full_name: { kind: "full-name" },
   last_name: bank("identity.last_name"),
   preferred_name: {
     kind: "bank",
@@ -59,6 +62,7 @@ const BY_REF: Record<string, FieldRule> = {
   "school--0": { kind: "education", part: "school" },
   "degree--0": { kind: "education", part: "degree" },
   "discipline--0": { kind: "education", part: "discipline" },
+  location: bank("location.current_city"),
 };
 
 const CONSENT_VERB =
@@ -132,10 +136,8 @@ const LABEL_RULES: readonly [RegExp, FieldRule][] = [
 
 function ruleFor(field: FormField): FieldRule {
   if (field.type === "hidden") return { kind: "hidden" };
-  const byRef = BY_REF[field.ref];
+  const byRef = BY_REF[field.canonical ?? field.ref];
   if (byRef) return byRef;
-  if (field.section === "location" && field.ref === "location")
-    return bank("location.current_city");
 
   const label = field.label.toLowerCase().replace(/’/g, "'").trim();
   const isChoice = field.type === "select" || field.type === "multiselect";

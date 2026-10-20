@@ -1,49 +1,24 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
+import {
+  type FieldSection,
+  type FieldType,
+  type FormField,
+  type FormSchema,
+  schemaHash,
+} from "./form-schema.js";
 
 /**
  * Normalises Greenhouse's public `?questions=true` job payload into one flat field list the
  * planner works on. The extension fetches the payload (your IP); the server only parses it.
  */
 
-export type FieldType =
-  | "text"
-  | "textarea"
-  | "file"
-  | "select"
-  | "multiselect"
-  | "hidden"
-  | "unknown";
-
-export type FieldSection =
-  | "main"
-  | "location"
-  | "compliance"
-  | "demographic"
-  | "education";
-
-export interface FieldOption {
-  readonly label: string;
-  readonly value: string;
-}
-
-export interface FormField {
-  readonly ref: string;
-  readonly label: string;
-  readonly type: FieldType;
-  readonly required: boolean;
-  readonly options: readonly FieldOption[];
-  readonly section: FieldSection;
-}
-
-export interface FormSchema {
-  readonly ghJobId: string;
-  readonly title: string;
-  readonly location: string;
-  readonly education: "required" | "optional" | null;
-  readonly fields: readonly FormField[];
-  readonly hash: string;
-}
+export type {
+  FieldOption,
+  FieldSection,
+  FieldType,
+  FormField,
+  FormSchema,
+} from "./form-schema.js";
 
 const TYPE_MAP: Record<string, FieldType> = {
   input_text: "text",
@@ -165,13 +140,10 @@ export function parseGreenhouseSchema(payload: unknown): FormSchema {
     })),
   ];
 
-  const hash = createHash("sha256")
-    .update(JSON.stringify({ education, fields }))
-    .digest("hex")
-    .slice(0, 16);
+  const hash = schemaHash({ education, fields });
 
   return {
-    ghJobId: job.id,
+    postingId: job.id,
     title: job.title,
     location: job.location?.name ?? "",
     education,

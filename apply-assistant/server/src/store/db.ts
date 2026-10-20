@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
  * Lives at <APPLY_DATA_DIR>/apply.db on the server; never shared with Job Ops' jobs.db.
  */
 
-const MIGRATIONS: readonly string[] = [
+export const MIGRATIONS: readonly string[] = [
   `create table employer_domains (
      employer_norm text primary key,
      domain text,
@@ -102,6 +102,24 @@ const MIGRATIONS: readonly string[] = [
      model text not null,
      created_at text not null default (datetime('now'))
    );`,
+  // More application systems than Greenhouse: every target, board and form names its ATS.
+  `alter table apply_targets add column ats text not null default 'greenhouse';
+   alter table gh_boards rename to ats_boards;
+   alter table ats_boards add column ats text;
+   update ats_boards set ats = 'greenhouse' where token is not null;
+   create table form_schemas_v2 (
+     ats text not null,
+     board text not null,
+     posting_id text not null,
+     payload_json text not null,
+     schema_hash text not null,
+     fetched_at text not null default (datetime('now')),
+     primary key (ats, board, posting_id)
+   );
+   insert into form_schemas_v2 (ats, board, posting_id, payload_json, schema_hash, fetched_at)
+     select 'greenhouse', gh_token, gh_job_id, payload_json, schema_hash, fetched_at from form_schemas;
+   drop table form_schemas;
+   alter table form_schemas_v2 rename to form_schemas;`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

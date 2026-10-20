@@ -1,3 +1,4 @@
+import { ATS_NAMES } from "../ats.js";
 import type { QuestionAnswerer } from "../claude/answerer.js";
 import type { ClaudeAnswer } from "../claude/questions.js";
 import { isAnswerable, toQuestion } from "../claude/questions.js";
@@ -7,9 +8,10 @@ import type { ApplyTargetsRepo } from "../store/apply-targets-repo.js";
 import type { FillPlansRepo } from "../store/fill-plans-repo.js";
 import type { FormSchemasRepo } from "../store/form-schemas-repo.js";
 import { classifyField } from "./classify.js";
-import { type FormSchema, parseGreenhouseSchema } from "./gh-schema.js";
+import type { FormSchema } from "./form-schema.js";
 import { buildPlan, type FillPlan } from "./planner.js";
 import { type ResumeFacts, resumeFacts } from "./resume-facts.js";
+import { parseFormSchema } from "./schemas.js";
 
 /**
  * Builds and stores fill plans. Inputs: the matched Greenhouse posting's stored form, your Job
@@ -93,21 +95,25 @@ export function createPlans(deps: PlansDeps) {
     if (
       !target ||
       target.status !== "matched" ||
-      !target.ghToken ||
-      !target.ghJobId
+      !target.boardToken ||
+      !target.postingId
     )
       throw new NotPlannableError(
         jobId,
-        "This job has no confirmed Greenhouse posting yet",
+        "This job has no confirmed posting on a supported system yet",
       );
-    const stored = schemas.getAny(target.ghToken, target.ghJobId);
+    const stored = schemas.getAny(
+      target.ats,
+      target.boardToken,
+      target.postingId,
+    );
     if (!stored)
       throw new NotPlannableError(
         jobId,
-        "The Greenhouse form hasn't been fetched yet",
+        `The ${ATS_NAMES[target.ats]} form hasn't been fetched yet`,
       );
     const job = await jobOps.getJob(token, jobId);
-    const schema = parseGreenhouseSchema(stored.payload);
+    const schema = parseFormSchema(target.ats, stored.payload);
     const fromClaude = await askClaude(schema, {
       job: {
         title: job.title,

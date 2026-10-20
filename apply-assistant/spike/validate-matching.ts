@@ -88,7 +88,7 @@ for (const job of data.jobs.filter((j) => j.status !== "applied")) {
   const region = link.kind === "greenhouse-job" ? link.region : "us";
   const expectedId =
     link.kind === "greenhouse-job" || link.kind === "greenhouse-embedded"
-      ? link.ghJobId
+      ? link.postingId
       : null;
   if (!token) {
     tally.skipped++;
@@ -112,7 +112,7 @@ for (const job of data.jobs.filter((j) => j.status !== "applied")) {
   let result = matchOnBoard(input, board, {});
   if (result.status === "need-details") {
     const details: Record<string, string> = {};
-    for (const id of result.ghJobIds) {
+    for (const id of result.postingIds) {
       details[id] = await content(token, id, region);
       await sleep(250);
     }

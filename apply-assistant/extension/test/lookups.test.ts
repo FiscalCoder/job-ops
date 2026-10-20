@@ -114,10 +114,10 @@ describe("runTask", () => {
     const web = fakeWeb(board);
     const { deps: d, submitted } = deps(web.fetchImpl, (r) =>
       r.type === "board" && !r.details
-        ? { status: "need-details", ghJobIds: ["11"] }
+        ? { status: "need-details", postingIds: ["11"] }
         : {
             status: "matched",
-            ghUrl: "https://job-boards.greenhouse.io/acme/jobs/11",
+            postingUrl: "https://job-boards.greenhouse.io/acme/jobs/11",
           },
     );
     const outcome = await runTask(
@@ -125,10 +125,11 @@ describe("runTask", () => {
       pending({ type: "find-board", employer: "Acme Inc." }),
     );
     expect(outcome).toBe(
-      "board acme: matched https://job-boards.greenhouse.io/acme/jobs/11",
+      "greenhouse board acme: matched https://job-boards.greenhouse.io/acme/jobs/11",
     );
     expect(submitted[0]).toMatchObject({
       type: "board",
+      ats: "greenhouse",
       token: "acme",
       method: "name-slug",
       jobs: [
@@ -172,10 +173,133 @@ describe("runTask", () => {
         d,
         pending({ type: "find-board", employer: "Nobody" }, "Nobody"),
       ),
-    ).toBe("no Greenhouse board");
+    ).toBe("no board on a supported system");
     expect(submitted).toEqual([
       expect.objectContaining({ type: "board", token: null }),
     ]);
+  });
+
+  describe("Ashby", () => {
+    const ASHBY = "https://api.ashbyhq.com/posting-api/job-board";
+    const GRAPHQL =
+      "https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiJobPosting";
+    const POSTING = "c7d59014-b918-4c15-ae33-79f5c9f2cf9f";
+    const ashbyBoard = {
+      [`${ASHBY}/elevenlabs`]: () =>
+        json({
+          jobs: [
+            {
+              id: POSTING,
+              title: "Full-Stack Engineer (Backend Leaning)",
+              location: "United Kingdom",
+              jobUrl: `https://jobs.ashbyhq.com/elevenlabs/${POSTING}`,
+              isListed: true,
+              descriptionPlain: "Build voice AI products.",
+            },
+            { id: "x", title: "Unlisted", isListed: false },
+          ],
+        }),
+    };
+
+    it("finds the board when Greenhouse has none, and answers detail requests from the listing", async () => {
+      const web = fakeWeb(ashbyBoard);
+      const { deps: d, submitted } = deps(web.fetchImpl, (r) =>
+        r.type === "board" && !r.details
+          ? { status: "need-details", postingIds: [POSTING] }
+          : { status: "matched" },
+      );
+      const outcome = await runTask(
+        d,
+        pending({ type: "find-board", employer: "ElevenLabs" }, "ElevenLabs"),
+      );
+      expect(outcome).toBe("ashby board elevenlabs: matched");
+      expect(submitted[0]).toMatchObject({
+        ats: "ashby",
+        token: "elevenlabs",
+        jobs: [{ id: POSTING, title: "Full-Stack Engineer (Backend Leaning)" }],
+      });
+      expect(submitted[1]).toMatchObject({
+        details: { [POSTING]: "Build voice AI products." },
+      });
+      // Descriptions came with the listing: no request per posting.
+      expect(web.calls.filter((c) => c.includes(POSTING))).toEqual([]);
+    });
+
+    it("verifies a posting against the listing", async () => {
+      const { deps: d, submitted } = deps(fakeWeb(ashbyBoard).fetchImpl);
+      await runTask(
+        d,
+        pending({
+          type: "verify-job",
+          ats: "ashby",
+          token: "elevenlabs",
+          postingId: POSTING,
+          region: "us",
+        }),
+      );
+      await runTask(
+        d,
+        pending({
+          type: "verify-job",
+          ats: "ashby",
+          token: "elevenlabs",
+          postingId: "gone",
+          region: "us",
+        }),
+      );
+      expect(submitted).toEqual([
+        expect.objectContaining({
+          ats: "ashby",
+          live: true,
+          url: `https://jobs.ashbyhq.com/elevenlabs/${POSTING}`,
+        }),
+        expect.objectContaining({ ats: "ashby", live: false }),
+      ]);
+    });
+
+    it("fetches the form with Ashby's read-only form query", async () => {
+      const bodies: unknown[] = [];
+      const form = {
+        jobPosting: { id: POSTING, applicationForm: { sections: [] } },
+      };
+      const fetchImpl = (async (
+        input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        if (url === GRAPHQL) {
+          bodies.push(JSON.parse(String(init?.body)));
+          return json({ data: form });
+        }
+        return new Response("", { status: 404 });
+      }) as typeof fetch;
+      const { deps: d, submitted } = deps(fetchImpl, () => ({
+        status: "planned",
+      }));
+      expect(
+        await runTask(
+          d,
+          pending({
+            type: "fetch-schema",
+            ats: "ashby",
+            token: "elevenlabs",
+            postingId: POSTING,
+          }),
+        ),
+      ).toBe("form fetched, plan built");
+      expect(bodies[0]).toMatchObject({
+        operationName: "ApiJobPosting",
+        variables: {
+          organizationHostedJobsPageName: "elevenlabs",
+          jobPostingId: POSTING,
+        },
+      });
+      expect(submitted[0]).toMatchObject({
+        type: "schema",
+        ats: "ashby",
+        payload: form,
+      });
+    });
   });
 
   it("verify-job: live posting, and a closed one", async () => {
@@ -184,8 +308,9 @@ describe("runTask", () => {
       live.deps,
       pending({
         type: "verify-job",
+        ats: "greenhouse",
         token: "acme",
-        ghJobId: "11",
+        postingId: "11",
         region: "us",
       }),
     );
@@ -199,8 +324,9 @@ describe("runTask", () => {
       closed.deps,
       pending({
         type: "verify-job",
+        ats: "greenhouse",
         token: "acme",
-        ghJobId: "99",
+        postingId: "99",
         region: "us",
       }),
     );
@@ -219,7 +345,7 @@ describe("runTask", () => {
     expect(submitted[0]).toMatchObject({
       type: "job",
       token: "acme",
-      ghJobId: "11",
+      postingId: "11",
       live: true,
     });
   });
@@ -237,14 +363,14 @@ describe("runTask", () => {
       d,
       pending({
         type: "resolve-embedded",
-        ghJobId: "11",
+        postingId: "11",
         pageUrl: "https://acme.com/careers?gh_jid=11",
       }),
     );
     expect(submitted[0]).toMatchObject({
       type: "job",
       token: "acme",
-      ghJobId: "11",
+      postingId: "11",
     });
   });
 
@@ -253,7 +379,12 @@ describe("runTask", () => {
     expect(
       await runTask(
         ok.deps,
-        pending({ type: "fetch-schema", token: "acme", ghJobId: "11" }),
+        pending({
+          type: "fetch-schema",
+          ats: "greenhouse",
+          token: "acme",
+          postingId: "11",
+        }),
       ),
     ).toBe("form fetched, plan built");
     expect(ok.submitted[0]).toMatchObject({
@@ -263,7 +394,12 @@ describe("runTask", () => {
     const gone = deps(fakeWeb({}).fetchImpl, () => ({ status: "closed" }));
     await runTask(
       gone.deps,
-      pending({ type: "fetch-schema", token: "acme", ghJobId: "99" }),
+      pending({
+        type: "fetch-schema",
+        ats: "greenhouse",
+        token: "acme",
+        postingId: "99",
+      }),
     );
     expect(gone.submitted[0]).toMatchObject({ type: "job", live: false });
   });

@@ -10,7 +10,7 @@ describe("classifyApplyUrl", () => {
     ).toEqual({
       kind: "greenhouse-job",
       token: "newrelic",
-      ghJobId: "5453390008",
+      postingId: "5453390008",
       region: "us",
     });
   });
@@ -23,7 +23,7 @@ describe("classifyApplyUrl", () => {
     ).toMatchObject({
       kind: "greenhouse-job",
       token: "litmos",
-      ghJobId: "4982603101",
+      postingId: "4982603101",
       region: "eu",
     });
     expect(
@@ -32,7 +32,7 @@ describe("classifyApplyUrl", () => {
       ),
     ).toMatchObject({
       token: "celonis",
-      ghJobId: "7791427003",
+      postingId: "7791427003",
     });
   });
 
@@ -43,7 +43,7 @@ describe("classifyApplyUrl", () => {
       ),
     ).toEqual({
       kind: "greenhouse-embedded",
-      ghJobId: "7768594003",
+      postingId: "7768594003",
       pageUrl: "https://www.fivetran.com/careers/job?gh_jid=7768594003",
     });
   });
@@ -52,6 +52,22 @@ describe("classifyApplyUrl", () => {
     expect(classifyApplyUrl("https://grnh.se/3p6v950q1us")).toEqual({
       kind: "greenhouse-short",
       url: "https://grnh.se/3p6v950q1us",
+    });
+  });
+
+  it("recognises Ashby postings and their application pages", () => {
+    expect(
+      classifyApplyUrl(
+        "https://jobs.ashbyhq.com/elevenlabs/C7D59014-B918-4C15-AE33-79F5C9F2CF9F/application?utm_source=x",
+      ),
+    ).toEqual({
+      kind: "posting",
+      ats: "ashby",
+      token: "elevenlabs",
+      postingId: "c7d59014-b918-4c15-ae33-79f5c9f2cf9f",
+    });
+    expect(classifyApplyUrl("https://jobs.ashbyhq.com/elevenlabs")).toEqual({
+      kind: "other",
     });
   });
 

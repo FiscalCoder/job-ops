@@ -1,11 +1,11 @@
 import {
-  GREENHOUSE_BOARDS_API_ORIGIN,
-  getJobDetails,
-  getJobsFromBoard,
   isGreenhouseUrl,
   parseGreenhouseUrl,
   resolveGreenhouseSource,
 } from "@career-boards/greenhouse";
+import { ashby } from "./boards/ashby";
+import { greenhouse } from "./boards/greenhouse";
+import type { Ats, BoardApi, BoardJob, BoardListing } from "./boards/types";
 
 /**
  * The extension half of the resolver: performs each lookup task the server hands out, from
@@ -13,13 +13,21 @@ import {
  * apply-assistant/server/src/resolver/lookups.ts.
  */
 
+export type { BoardJob };
+
 export type LookupTask =
-  | { type: "verify-job"; token: string; ghJobId: string; region: "us" | "eu" }
-  | { type: "resolve-embedded"; ghJobId: string; pageUrl: string }
+  | {
+      type: "verify-job";
+      ats: Ats;
+      token: string;
+      postingId: string;
+      region: "us" | "eu";
+    }
+  | { type: "resolve-embedded"; postingId: string; pageUrl: string }
   | { type: "follow-short-link"; url: string }
-  | { type: "list-board"; token: string }
+  | { type: "list-board"; ats: Ats; token: string }
   | { type: "find-board"; employer: string }
-  | { type: "fetch-schema"; token: string; ghJobId: string };
+  | { type: "fetch-schema"; ats: Ats; token: string; postingId: string };
 
 export interface PendingLookup {
   readonly jobId: string;
@@ -28,24 +36,19 @@ export interface PendingLookup {
   readonly task: LookupTask;
 }
 
-export interface BoardJob {
-  readonly id: string;
-  readonly title: string;
-  readonly location: string;
-  readonly url: string;
-}
-
 export type LookupResult =
   | {
       type: "job";
+      ats: Ats;
       jobId: string;
       token: string;
-      ghJobId: string;
+      postingId: string;
       url: string;
       live: boolean;
     }
   | {
       type: "board";
+      ats: Ats;
       jobId: string;
       employer: string;
       token: string | null;
@@ -55,17 +58,18 @@ export type LookupResult =
     }
   | {
       type: "schema";
+      ats: Ats;
       jobId: string;
       token: string;
-      ghJobId: string;
+      postingId: string;
       payload: unknown;
     };
 
 /** What the server answers to a result (subset the extension cares about). */
 export interface ResultOutcome {
   readonly status: string;
-  readonly ghJobIds?: string[];
-  readonly ghUrl?: string;
+  readonly postingIds?: string[];
+  readonly postingUrl?: string;
   readonly reason?: string;
 }
 
@@ -76,27 +80,9 @@ export interface LookupDeps {
   readonly submit: (result: LookupResult) => Promise<ResultOutcome>;
 }
 
-/** At most this many postings' descriptions are fetched to pick the match. */
-const MAX_DETAILS = 8;
-const API = `${GREENHOUSE_BOARDS_API_ORIGIN}/v1/boards`;
-
-async function getJson(
-  deps: LookupDeps,
-  url: string,
-): Promise<Record<string, unknown> | null> {
-  await deps.pause();
-  try {
-    const res = await deps.fetch(url, {
-      headers: { accept: "application/json" },
-    });
-    return res.ok ? ((await res.json()) as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
-}
-
-const boardExists = async (deps: LookupDeps, token: string) =>
-  (await getJson(deps, `${API}/${encodeURIComponent(token)}`)) !== null;
+export const BOARDS: Readonly<Record<Ats, BoardApi>> = { greenhouse, ashby };
+/** Systems in the order a company's board is searched for. */
+const SEARCH_ORDER: readonly BoardApi[] = [greenhouse, ashby];
 
 /** Company name → likely board tokens: "Platform Science Inc." → platformscience, platform-science, platform. */
 export function slugGuesses(employer: string): string[] {
@@ -120,22 +106,31 @@ async function companyDomain(
   deps: LookupDeps,
   employer: string,
 ): Promise<string | null> {
-  const data = (await getJson(
-    deps,
-    `https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(employer)}`,
-  )) as unknown;
-  const first = Array.isArray(data)
-    ? (data[0] as { domain?: unknown } | undefined)
-    : undefined;
-  return typeof first?.domain === "string" ? first.domain : null;
+  await deps.pause();
+  try {
+    const res = await deps.fetch(
+      `https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(employer)}`,
+      { headers: { accept: "application/json" } },
+    );
+    const data = res.ok ? ((await res.json()) as unknown) : null;
+    const first = Array.isArray(data)
+      ? (data[0] as { domain?: unknown } | undefined)
+      : undefined;
+    return typeof first?.domain === "string" ? first.domain : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function findBoard(
   deps: LookupDeps,
   employer: string,
-): Promise<{ token: string; method: string } | null> {
-  for (const token of slugGuesses(employer))
-    if (await boardExists(deps, token)) return { token, method: "name-slug" };
+): Promise<{ ats: Ats; token: string; method: string } | null> {
+  for (const api of SEARCH_ORDER)
+    for (const token of slugGuesses(employer))
+      if (await api.exists(deps, token))
+        return { ats: api.ats, token, method: "name-slug" };
+  // A company's own careers page can embed a Greenhouse board under another name.
   const domain = await companyDomain(deps, employer);
   if (!domain) return null;
   try {
@@ -144,111 +139,76 @@ export async function findBoard(
       url: `https://${domain}`,
       fetchImpl: deps.fetch,
     });
-    return { token: found.token, method: `domain:${found.method}` };
+    return {
+      ats: "greenhouse",
+      token: found.token,
+      method: `domain:${found.method}`,
+    };
   } catch {
     return null;
   }
-}
-
-async function listBoard(
-  deps: LookupDeps,
-  token: string,
-): Promise<BoardJob[] | null> {
-  try {
-    await deps.pause();
-    const { jobs } = await getJobsFromBoard({
-      careersUrl: `https://job-boards.greenhouse.io/${token}`,
-      fetchImpl: deps.fetch,
-    });
-    return jobs.map((j) => ({
-      id: j.externalId,
-      title: j.title,
-      location: j.locationText ?? "",
-      url: j.jobUrl,
-    }));
-  } catch {
-    return null;
-  }
-}
-
-async function jobDescriptions(
-  deps: LookupDeps,
-  token: string,
-  ids: readonly string[],
-) {
-  const details: Record<string, string> = {};
-  for (const id of ids.slice(0, MAX_DETAILS)) {
-    try {
-      await deps.pause();
-      const { job } = await getJobDetails({
-        jobRef: `${API}/${token}/jobs/${id}`,
-        fetchImpl: deps.fetch,
-      });
-      details[id] = job.jobDescriptionHtml.slice(0, 150_000);
-    } catch {
-      /* a posting that vanished mid-lookup is simply left out */
-    }
-  }
-  return details;
 }
 
 async function boardLookup(
   deps: LookupDeps,
   p: PendingLookup,
-  token: string | null,
+  board: { ats: Ats; token: string } | null,
   method: string,
 ) {
-  if (!token) {
+  if (!board) {
     await deps.submit({
       type: "board",
+      ats: "greenhouse",
       jobId: p.jobId,
       employer: p.employer,
       token: null,
       method,
     });
-    return "no Greenhouse board";
+    return "no board on a supported system";
   }
-  const jobs = await listBoard(deps, token);
-  if (!jobs) return `board ${token} unreachable`;
+  const api = BOARDS[board.ats];
+  const listing: BoardListing | null = await api.list(deps, board.token);
+  if (!listing) return `${board.ats} board ${board.token} unreachable`;
   const base = {
     type: "board" as const,
+    ats: board.ats,
     jobId: p.jobId,
     employer: p.employer,
-    token,
+    token: board.token,
     method,
-    jobs,
+    jobs: [...listing.jobs],
   };
   let outcome = await deps.submit(base);
-  if (outcome.status === "need-details" && outcome.ghJobIds?.length) {
+  if (outcome.status === "need-details" && outcome.postingIds?.length) {
     outcome = await deps.submit({
       ...base,
-      details: await jobDescriptions(deps, token, outcome.ghJobIds),
+      details: await api.describe(
+        deps,
+        board.token,
+        outcome.postingIds,
+        listing,
+      ),
     });
   }
-  return `board ${token}: ${outcome.status}${outcome.ghUrl ? ` ${outcome.ghUrl}` : ""}`;
+  return `${board.ats} board ${board.token}: ${outcome.status}${outcome.postingUrl ? ` ${outcome.postingUrl}` : ""}`;
 }
 
 async function verifyJob(
   deps: LookupDeps,
   jobId: string,
+  ats: Ats,
   token: string,
-  ghJobId: string,
+  postingId: string,
 ) {
-  const posting = await getJson(
-    deps,
-    `${API}/${encodeURIComponent(token)}/jobs/${encodeURIComponent(ghJobId)}`,
-  );
-  const url =
-    typeof posting?.absolute_url === "string"
-      ? posting.absolute_url
-      : `https://job-boards.greenhouse.io/${token}/jobs/${ghJobId}`;
+  const { live, url } = await BOARDS[ats].verify(deps, token, postingId);
   const outcome = await deps.submit({
     type: "job",
+    ats,
     jobId,
     token,
-    ghJobId,
+    postingId,
     url,
-    live: posting !== null,
+    live,
   });
   return `posting ${outcome.status}`;
 }
@@ -257,7 +217,7 @@ async function resolveEmbedded(
   deps: LookupDeps,
   jobId: string,
   pageUrl: string,
-  ghJobId: string,
+  postingId: string,
 ) {
   try {
     await deps.pause();
@@ -265,7 +225,7 @@ async function resolveEmbedded(
       url: pageUrl,
       fetchImpl: deps.fetch,
     });
-    return verifyJob(deps, jobId, token, ghJobId);
+    return verifyJob(deps, jobId, "greenhouse", token, postingId);
   } catch {
     return "couldn't find the Greenhouse board behind that careers page";
   }
@@ -285,6 +245,7 @@ async function followShortLink(deps: LookupDeps, jobId: string, url: string) {
     return verifyJob(
       deps,
       jobId,
+      "greenhouse",
       parseGreenhouseUrl(landed).token,
       jobMatch[1],
     );
@@ -295,29 +256,30 @@ async function followShortLink(deps: LookupDeps, jobId: string, url: string) {
 async function fetchSchema(
   deps: LookupDeps,
   jobId: string,
+  ats: Ats,
   token: string,
-  ghJobId: string,
+  postingId: string,
 ) {
-  const payload = await getJson(
-    deps,
-    `${API}/${encodeURIComponent(token)}/jobs/${encodeURIComponent(ghJobId)}?questions=true`,
-  );
+  const payload = await BOARDS[ats].form(deps, token, postingId);
   if (!payload) {
+    const { url } = await BOARDS[ats].verify(deps, token, postingId);
     const outcome = await deps.submit({
       type: "job",
+      ats,
       jobId,
       token,
-      ghJobId,
-      url: `https://job-boards.greenhouse.io/${token}/jobs/${ghJobId}`,
+      postingId,
+      url,
       live: false,
     });
     return `form gone: posting ${outcome.status}`;
   }
   const outcome = await deps.submit({
     type: "schema",
+    ats,
     jobId,
     token,
-    ghJobId,
+    postingId,
     payload,
   });
   return outcome.status === "planned"
@@ -333,23 +295,18 @@ export async function runTask(
   const { task } = p;
   switch (task.type) {
     case "verify-job":
-      return verifyJob(deps, p.jobId, task.token, task.ghJobId);
+      return verifyJob(deps, p.jobId, task.ats, task.token, task.postingId);
     case "resolve-embedded":
-      return resolveEmbedded(deps, p.jobId, task.pageUrl, task.ghJobId);
+      return resolveEmbedded(deps, p.jobId, task.pageUrl, task.postingId);
     case "follow-short-link":
       return followShortLink(deps, p.jobId, task.url);
     case "list-board":
-      return boardLookup(deps, p, task.token, "cached");
+      return boardLookup(deps, p, task, "cached");
     case "find-board": {
       const found = await findBoard(deps, task.employer);
-      return boardLookup(
-        deps,
-        p,
-        found?.token ?? null,
-        found?.method ?? "name-slug+domain",
-      );
+      return boardLookup(deps, p, found, found?.method ?? "name-slug+domain");
     }
     case "fetch-schema":
-      return fetchSchema(deps, p.jobId, task.token, task.ghJobId);
+      return fetchSchema(deps, p.jobId, task.ats, task.token, task.postingId);
   }
 }

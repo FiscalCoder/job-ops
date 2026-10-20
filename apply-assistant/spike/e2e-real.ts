@@ -143,14 +143,14 @@ async function runTask({ jobId, employer, task }: Task): Promise<string> {
       let out = await api("/lookups/results", result);
       if (out.data?.status === "need-details") {
         const details: Record<string, string> = {};
-        for (const id of out.data.ghJobIds.slice(0, 8)) {
+        for (const id of out.data.postingIds.slice(0, 8)) {
           const d = await ghGet(`/${token}/jobs/${id}`);
           if (d) details[id] = String(d.content ?? "").slice(0, 150_000);
         }
         out = await api("/lookups/results", { ...result, details });
       }
-      const where = out.data?.ghUrl
-        ? ` ${out.data.ghUrl} (title ${out.data.titleScore?.toFixed(2)}, desc ${out.data.descScore?.toFixed(2) ?? "-"})`
+      const where = out.data?.postingUrl
+        ? ` ${out.data.postingUrl} (title ${out.data.titleScore?.toFixed(2)}, desc ${out.data.descScore?.toFixed(2) ?? "-"})`
         : "";
       return `board ${token}: ${out.data?.status ?? out.error?.message}${where}`;
     }
@@ -164,29 +164,29 @@ async function runTask({ jobId, employer, task }: Task): Promise<string> {
     return "no Greenhouse board found";
   }
   if (task.type === "verify-job") {
-    const d = await ghGet(`/${task.token}/jobs/${task.ghJobId}`);
+    const d = await ghGet(`/${task.token}/jobs/${task.postingId}`);
     const out = await api("/lookups/results", {
       type: "job",
       jobId,
       token: task.token,
-      ghJobId: task.ghJobId,
+      postingId: task.postingId,
       url:
         (d?.absolute_url as string) ??
-        `https://job-boards.greenhouse.io/${task.token}/jobs/${task.ghJobId}`,
+        `https://job-boards.greenhouse.io/${task.token}/jobs/${task.postingId}`,
       live: d !== null,
     });
     return `posting ${out.data?.status}`;
   }
   if (task.type === "fetch-schema") {
     const payload = await ghGet(
-      `/${task.token}/jobs/${task.ghJobId}?questions=true`,
+      `/${task.token}/jobs/${task.postingId}?questions=true`,
     );
     if (!payload) return "form not reachable";
     const out = await api("/lookups/results", {
       type: "schema",
       jobId,
       token: task.token,
-      ghJobId: task.ghJobId,
+      postingId: task.postingId,
       payload,
     });
     return out.ok
@@ -220,7 +220,7 @@ console.log(
   "\nqueue (Ready jobs):",
   queue.map((q) => ({
     employer: q.employer,
-    greenhouse: q.greenhouse.status,
+    target: q.target.status,
     plan: q.plan?.summary ?? null,
   })),
 );

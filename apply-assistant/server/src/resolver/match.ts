@@ -14,7 +14,7 @@ export interface JobToMatch {
 }
 
 export type MatchResult =
-  | { status: "need-details"; ghJobIds: string[] }
+  | { status: "need-details"; postingIds: string[] }
   | {
       status: "matched" | "possible";
       job: BoardJob;
@@ -62,7 +62,8 @@ export function matchOnBoard(
   const missing = candidates
     .filter(({ b }) => details[b.id] === undefined)
     .map(({ b }) => b.id);
-  if (missing.length > 0) return { status: "need-details", ghJobIds: missing };
+  if (missing.length > 0)
+    return { status: "need-details", postingIds: missing };
 
   if (!job.description.trim()) {
     const best = candidates[0];

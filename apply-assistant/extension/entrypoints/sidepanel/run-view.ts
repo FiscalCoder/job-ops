@@ -206,7 +206,7 @@ export function renderRun(
       el(
         "p",
         { class: "muted" },
-        "Apply Copilot never submits. It notices Greenhouse's confirmation and marks the job applied.",
+        "Apply Copilot never submits. It notices the confirmation page and marks the job applied.",
       ),
       el(
         "div",

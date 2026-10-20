@@ -6,6 +6,7 @@ import { createApp } from "../src/http/app.js";
 import type { JobOpsApi, JobOpsJob, JobUpdate } from "../src/jobops/client.js";
 import { JobOpsError } from "../src/jobops/client.js";
 import { openStore } from "../src/store/db.js";
+import ashbyForm from "./fixtures/ashby-elevenlabs.json" with { type: "json" };
 import { fakeDesignResume } from "./fixtures/fake-resume.js";
 import newrelic from "./fixtures/gh-newrelic.json" with { type: "json" };
 
@@ -40,6 +41,16 @@ const jobs: JobOpsJob[] = [
     jobUrl: "https://www.linkedin.com/jobs/view/4400000001",
     applicationLink: null,
     suitabilityScore: 79,
+  },
+  {
+    id: "ashby",
+    title: "Full-Stack Engineer (Backend Leaning)",
+    employer: "ElevenLabs",
+    status: "ready",
+    jobUrl: "https://www.linkedin.com/jobs/view/4400000002",
+    applicationLink:
+      "https://jobs.ashbyhq.com/elevenlabs/c7d59014-b918-4c15-ae33-79f5c9f2cf9f/application",
+    suitabilityScore: 77,
   },
   {
     id: "discovered-high",
@@ -171,8 +182,9 @@ describe("lookups", () => {
         title: "Senior Backend Engineer",
         task: {
           type: "verify-job",
+          ats: "greenhouse",
           token: "acme",
-          ghJobId: "11",
+          postingId: "11",
           region: "us",
         },
       },
@@ -189,6 +201,18 @@ describe("lookups", () => {
         task: { type: "find-board", employer: "Gamma Labs Inc." },
       },
       {
+        jobId: "ashby",
+        employer: "ElevenLabs",
+        title: "Full-Stack Engineer (Backend Leaning)",
+        task: {
+          type: "verify-job",
+          ats: "ashby",
+          token: "elevenlabs",
+          postingId: "c7d59014-b918-4c15-ae33-79f5c9f2cf9f",
+          region: "us",
+        },
+      },
+      {
         jobId: "discovered-high",
         employer: "Delta",
         title: "Backend Engineer",
@@ -203,7 +227,7 @@ describe("lookups", () => {
       type: "job",
       jobId: "direct",
       token: "acme",
-      ghJobId: "11",
+      postingId: "11",
       url: "https://job-boards.greenhouse.io/acme/jobs/11",
       live: true,
     });
@@ -225,7 +249,7 @@ describe("lookups", () => {
       type: "job",
       jobId: "direct",
       token: "acme",
-      ghJobId: "11",
+      postingId: "11",
       url: "https://x",
       live: false,
     });
@@ -260,7 +284,7 @@ describe("lookups", () => {
     });
     expect(first.json.data).toEqual({
       status: "need-details",
-      ghJobIds: ["77"],
+      postingIds: ["77"],
     });
 
     const second = await call("/lookups/results", {
@@ -274,7 +298,7 @@ describe("lookups", () => {
     });
     expect(second.json.data).toMatchObject({
       status: "matched",
-      ghUrl: "https://job-boards.greenhouse.io/gammalabs/jobs/77",
+      postingUrl: "https://job-boards.greenhouse.io/gammalabs/jobs/77",
     });
     expect(log.updates).toEqual([
       [
@@ -289,7 +313,12 @@ describe("lookups", () => {
     const pending = await call("/lookups/pending");
     expect(
       pending.json.data.find((p: any) => p.jobId === "linkedin")?.task,
-    ).toEqual({ type: "fetch-schema", token: "gammalabs", ghJobId: "77" });
+    ).toEqual({
+      type: "fetch-schema",
+      ats: "greenhouse",
+      token: "gammalabs",
+      postingId: "77",
+    });
   });
 
   it("remembers that a company has no Greenhouse board", async () => {
@@ -333,20 +362,20 @@ describe("lookups", () => {
       type: "job",
       jobId: "nope",
       token: "a",
-      ghJobId: "1",
+      postingId: "1",
       url: "https://x",
       live: true,
     });
     expect(res.status).toBe(404);
   });
 
-  it("shows the queue with each job's Greenhouse status", async () => {
+  it("shows the queue with each job's posting status (an older extension sends no system: Greenhouse)", async () => {
     const { call } = await start();
     await call("/lookups/results", {
       type: "job",
       jobId: "direct",
       token: "acme",
-      ghJobId: "11",
+      postingId: "11",
       url: "https://job-boards.greenhouse.io/acme/jobs/11",
       live: true,
     });
@@ -354,18 +383,23 @@ describe("lookups", () => {
     expect(json.data).toEqual([
       expect.objectContaining({
         jobId: "direct",
-        greenhouse: expect.objectContaining({
+        target: expect.objectContaining({
+          ats: "greenhouse",
           status: "matched",
-          ghUrl: "https://job-boards.greenhouse.io/acme/jobs/11",
+          postingUrl: "https://job-boards.greenhouse.io/acme/jobs/11",
         }),
       }),
       expect.objectContaining({
         jobId: "linkedin",
-        greenhouse: { status: "pending" },
+        target: { status: "pending" },
+      }),
+      expect.objectContaining({
+        jobId: "ashby",
+        target: { status: "pending" },
       }),
       expect.objectContaining({
         jobId: "short",
-        greenhouse: { status: "pending" },
+        target: { status: "pending" },
       }),
     ]);
   });
@@ -376,7 +410,7 @@ describe("lookups", () => {
         type: "job",
         jobId: "direct",
         token: "acme",
-        ghJobId: "11",
+        postingId: "11",
         url: "https://job-boards.greenhouse.io/acme/jobs/11",
         live: true,
       });
@@ -390,15 +424,16 @@ describe("lookups", () => {
         before.json.data.find((p: any) => p.jobId === "direct")?.task,
       ).toEqual({
         type: "fetch-schema",
+        ats: "greenhouse",
         token: "acme",
-        ghJobId: "11",
+        postingId: "11",
       });
 
       const res = await call("/lookups/results", {
         type: "schema",
         jobId: "direct",
         token: "acme",
-        ghJobId: "11",
+        postingId: "11",
         payload: formFor11,
       });
       expect(res.status).toBe(200);
@@ -422,7 +457,7 @@ describe("lookups", () => {
         type: "schema",
         jobId: "direct",
         token: "acme",
-        ghJobId: "99",
+        postingId: "99",
         payload: formFor11,
       });
       expect(wrongPosting.status).toBe(400);
@@ -431,7 +466,7 @@ describe("lookups", () => {
         type: "schema",
         jobId: "direct",
         token: "acme",
-        ghJobId: "11",
+        postingId: "11",
         payload: { nope: true },
       });
       expect(notAForm.status).toBe(400);
@@ -439,7 +474,7 @@ describe("lookups", () => {
         type: "schema",
         jobId: "direct",
         token: "acme",
-        ghJobId: "11",
+        postingId: "11",
         payload: newrelic,
       });
       expect(mismatchedId.status).toBe(400);
@@ -457,7 +492,7 @@ describe("lookups", () => {
         type: "schema",
         jobId: "direct",
         token: "acme",
-        ghJobId: "11",
+        postingId: "11",
         payload: formFor11,
       });
 
@@ -492,7 +527,7 @@ describe("lookups", () => {
         type: "schema",
         jobId: "direct",
         token: "acme",
-        ghJobId: "11",
+        postingId: "11",
         payload: formFor11,
       });
       const plan = await call("/plans/direct");
@@ -616,7 +651,7 @@ describe("lookups", () => {
       });
       const queue = await call("/queue");
       expect(
-        queue.json.data.find((q: any) => q.jobId === "linkedin")?.greenhouse,
+        queue.json.data.find((q: any) => q.jobId === "linkedin")?.target,
       ).toEqual({ status: "pending" });
     });
 
@@ -643,6 +678,82 @@ describe("lookups", () => {
           .status,
       ).toBe(400);
       expect(log.updates).toEqual([]);
+    });
+  });
+
+  it("takes an Ashby posting from its link through verification and form to a plan", async () => {
+    const { call, put, log } = await start();
+    const POSTING = "c7d59014-b918-4c15-ae33-79f5c9f2cf9f";
+    const URL = `https://jobs.ashbyhq.com/elevenlabs/${POSTING}`;
+    const verified = await call("/lookups/results", {
+      type: "job",
+      ats: "ashby",
+      jobId: "ashby",
+      token: "elevenlabs",
+      postingId: POSTING,
+      url: URL,
+      live: true,
+    });
+    expect(verified.json.data).toMatchObject({
+      status: "matched",
+      postingUrl: URL,
+    });
+    expect(log.notes).toContainEqual(["ashby", "Ashby posting confirmed"]);
+
+    const pending = await call("/lookups/pending");
+    expect(
+      pending.json.data.find((p: any) => p.jobId === "ashby")?.task,
+    ).toEqual({
+      type: "fetch-schema",
+      ats: "ashby",
+      token: "elevenlabs",
+      postingId: POSTING,
+    });
+
+    // A Greenhouse payload for an Ashby posting is refused.
+    const wrong = await call("/lookups/results", {
+      type: "schema",
+      ats: "greenhouse",
+      jobId: "ashby",
+      token: "elevenlabs",
+      postingId: POSTING,
+      payload: newrelic,
+    });
+    expect(wrong.status).toBe(400);
+
+    await put("/answer-bank/identity.first_name", { value: "Test" });
+    await put("/answer-bank/identity.last_name", { value: "C" });
+    const planned = await call("/lookups/results", {
+      type: "schema",
+      ats: "ashby",
+      jobId: "ashby",
+      token: "elevenlabs",
+      postingId: POSTING,
+      payload: ashbyForm,
+    });
+    expect(planned.json.data.status).toBe("planned");
+    const plan = await call("/plans/ashby");
+    const entry = (ref: string) =>
+      plan.json.data.entries.find((e: any) => e.ref === ref);
+    expect(entry("_systemfield_name")).toMatchObject({
+      status: "fill",
+      value: "Test C",
+    });
+    expect(entry("_systemfield_email")).toMatchObject({
+      status: "fill",
+      value: "test@example.com",
+    });
+    expect(entry("_systemfield_resume")).toMatchObject({
+      status: "fill",
+      type: "file",
+    });
+    const queue = await call("/queue");
+    expect(
+      queue.json.data.find((q: any) => q.jobId === "ashby")?.target,
+    ).toMatchObject({
+      ats: "ashby",
+      status: "matched",
+      postingUrl: URL,
     });
   });
 });

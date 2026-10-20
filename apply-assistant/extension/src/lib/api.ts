@@ -1,4 +1,5 @@
 import type { CaptureReport } from "../capture/tracker";
+import type { Ats } from "./boards/types";
 import type { LookupResult, PendingLookup, ResultOutcome } from "./lookups";
 
 /** Client for the apply-assistant server (same envelope as Job Ops: {ok, data, error}). */
@@ -19,7 +20,11 @@ export interface QueueItem {
   readonly title: string;
   readonly employer: string;
   readonly score: number | null;
-  readonly greenhouse: { status: string; ghUrl?: string | null };
+  readonly target: {
+    status: string;
+    ats?: Ats;
+    postingUrl?: string | null;
+  };
   readonly plan: { summary: Record<string, number>; builtAt: string } | null;
 }
 

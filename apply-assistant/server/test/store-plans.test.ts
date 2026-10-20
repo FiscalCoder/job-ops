@@ -23,25 +23,45 @@ describe("form schemas repo", () => {
   it("stores the raw Greenhouse payload per posting and reads it back while fresh", () => {
     const db = openStore(":memory:");
     const schemas = createFormSchemasRepo(db);
-    expect(schemas.getFresh("acme", "11")).toBeNull();
-    schemas.save("acme", "11", { id: 11, title: "Engineer" }, "hash-a");
-    expect(schemas.getFresh("acme", "11")).toMatchObject({
+    expect(schemas.getFresh("greenhouse", "acme", "11")).toBeNull();
+    schemas.save(
+      "greenhouse",
+      "acme",
+      "11",
+      { id: 11, title: "Engineer" },
+      "hash-a",
+    );
+    expect(schemas.getFresh("greenhouse", "acme", "11")).toMatchObject({
       payload: { id: 11, title: "Engineer" },
       hash: "hash-a",
     });
-    schemas.save("acme", "11", { id: 11, title: "Engineer II" }, "hash-b");
-    expect(schemas.getFresh("acme", "11")?.hash).toBe("hash-b");
+    schemas.save(
+      "greenhouse",
+      "acme",
+      "11",
+      { id: 11, title: "Engineer II" },
+      "hash-b",
+    );
+    expect(schemas.getFresh("greenhouse", "acme", "11")?.hash).toBe("hash-b");
+  });
+
+  it("keeps each system's forms apart", () => {
+    const schemas = createFormSchemasRepo(openStore(":memory:"));
+    schemas.save("greenhouse", "acme", "11", { gh: true }, "g");
+    schemas.save("ashby", "acme", "11", { ashby: true }, "a");
+    expect(schemas.getAny("greenhouse", "acme", "11")?.hash).toBe("g");
+    expect(schemas.getAny("ashby", "acme", "11")?.hash).toBe("a");
   });
 
   it("treats a schema older than the freshness window as missing", () => {
     const db = openStore(":memory:");
     const schemas = createFormSchemasRepo(db);
-    schemas.save("acme", "11", {}, "h");
+    schemas.save("greenhouse", "acme", "11", {}, "h");
     db.prepare(
       "update form_schemas set fetched_at = datetime('now', '-10 days')",
     ).run();
-    expect(schemas.getFresh("acme", "11")).toBeNull();
-    expect(schemas.getAny("acme", "11")?.hash).toBe("h");
+    expect(schemas.getFresh("greenhouse", "acme", "11")).toBeNull();
+    expect(schemas.getAny("greenhouse", "acme", "11")?.hash).toBe("h");
   });
 });
 

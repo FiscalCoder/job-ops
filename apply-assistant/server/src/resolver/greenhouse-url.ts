@@ -1,18 +1,29 @@
+import type { Ats } from "../ats.js";
+
 /** Classifies a job's apply link so the resolver knows which lookup (if any) it needs. */
 
 export type ApplyUrlKind =
   | {
       kind: "greenhouse-job";
       token: string;
-      ghJobId: string;
+      postingId: string;
       region: "us" | "eu";
     }
-  | { kind: "greenhouse-embedded"; ghJobId: string; pageUrl: string }
+  | { kind: "greenhouse-embedded"; postingId: string; pageUrl: string }
   | { kind: "greenhouse-short"; url: string }
+  /** A posting on another supported system (Ashby…): verified like a Greenhouse one. */
+  | {
+      kind: "posting";
+      ats: Exclude<Ats, "greenhouse">;
+      token: string;
+      postingId: string;
+    }
   | { kind: "board"; board: string }
   | { kind: "other" };
 
 const GREENHOUSE_JOB_PATH = /^\/([a-z0-9_-]+)\/jobs\/(\d+)/i;
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const ASHBY_JOB_PATH = new RegExp(`^/([^/]+)/(${UUID})(?:/|$)`, "i");
 const BOARDS: readonly [RegExp, string][] = [
   [/(^|\.)linkedin\.com$/, "linkedin"],
   [/(^|\.)naukri\.com$/, "naukri"],
@@ -42,15 +53,26 @@ export function classifyApplyUrl(raw: string): ApplyUrlKind {
       return {
         kind: "greenhouse-job",
         token: match[1].toLowerCase(),
-        ghJobId: match[2],
+        postingId: match[2],
         region: host.includes(".eu.") ? "eu" : "us",
       };
     }
   }
 
+  if (host === "jobs.ashbyhq.com") {
+    const match = ASHBY_JOB_PATH.exec(url.pathname);
+    if (match?.[1] && match[2])
+      return {
+        kind: "posting",
+        ats: "ashby",
+        token: decodeURIComponent(match[1]),
+        postingId: match[2].toLowerCase(),
+      };
+  }
+
   const embeddedId = url.searchParams.get("gh_jid");
   if (embeddedId && /^\d+$/.test(embeddedId))
-    return { kind: "greenhouse-embedded", ghJobId: embeddedId, pageUrl: raw };
+    return { kind: "greenhouse-embedded", postingId: embeddedId, pageUrl: raw };
 
   const board = BOARDS.find(([pattern]) => pattern.test(host));
   return board ? { kind: "board", board: board[1] } : { kind: "other" };

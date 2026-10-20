@@ -260,13 +260,23 @@ $("allow-sites").addEventListener("click", async () => {
   $("sites").hidden = granted;
 });
 
-const GH: Record<string, [string, string]> = {
-  matched: ["ok", "On Greenhouse"],
-  possible: ["warn", "Possible match"],
-  none: ["", "Not on Greenhouse"],
-  closed: ["bad", "Closed"],
-  pending: ["", "Not checked yet"],
+const ATS_NAMES: Record<string, string> = {
+  greenhouse: "Greenhouse",
+  ashby: "Ashby",
 };
+
+/** Badge for a job's posting: "On Ashby", "Not found", … */
+function targetBadge(target: QueueItem["target"]): [string, string] {
+  const system = ATS_NAMES[target.ats ?? ""] ?? "a supported system";
+  const badges: Record<string, [string, string]> = {
+    matched: ["ok", `On ${system}`],
+    possible: ["warn", `Possible match on ${system}`],
+    none: ["", "Not found"],
+    closed: ["bad", "Closed"],
+    pending: ["", "Not checked yet"],
+  };
+  return badges[target.status] ?? ["", target.status];
+}
 
 async function loadQueue() {
   if (!client) return;
@@ -286,10 +296,7 @@ async function loadQueue() {
   }
   list.replaceChildren(
     ...items.map((item) => {
-      const [tone, label] = GH[item.greenhouse.status] ?? [
-        "",
-        item.greenhouse.status,
-      ];
+      const [tone, label] = targetBadge(item.target);
       const needs = item.plan?.summary.needsYou ?? 0;
       const li = el(
         "li",
@@ -352,15 +359,15 @@ async function showPlan(item: QueueItem) {
         "div",
         { class: "row" },
         el("strong", {}, item.title),
-        item.greenhouse.ghUrl
+        item.target.postingUrl
           ? el(
               "a",
-              { href: item.greenhouse.ghUrl, target: "_blank" },
+              { href: item.target.postingUrl, target: "_blank" },
               "Open posting ↗",
             )
           : null,
       ),
-      ...(item.greenhouse.status === "matched"
+      ...(item.target.status === "matched"
         ? [
             el(
               "div",

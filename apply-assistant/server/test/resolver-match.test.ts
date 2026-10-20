@@ -37,7 +37,7 @@ describe("matchOnBoard", () => {
       board,
       {},
     );
-    expect(result).toEqual({ status: "need-details", ghJobIds: ["1", "2"] });
+    expect(result).toEqual({ status: "need-details", postingIds: ["1", "2"] });
   });
 
   it("matches on description and prefers the location that fits", () => {

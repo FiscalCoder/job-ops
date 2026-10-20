@@ -4,7 +4,7 @@ import {
   ExtensionTransport,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import type { ApplyClient, QueueItem } from "../lib/api";
-import { GreenhouseDriver, type ResumeFile } from "./driver";
+import { attachDriver, formUrlFor } from "./drivers";
 import {
   maskValue,
   type NextAction,
@@ -16,6 +16,7 @@ import {
   type Step,
   startRun,
 } from "./supervisor";
+import type { FormDriver, ResumeFile } from "./trusted";
 
 /**
  * Runs one supervised application from the side panel: opens the posting, drives the
@@ -77,7 +78,7 @@ export class RunController {
     private readonly job: QueueItem,
     private readonly runId: string,
     private readonly browser: Browser,
-    private readonly driver: GreenhouseDriver,
+    private readonly driver: FormDriver,
     private readonly startHost: string,
     entries: readonly PlanEntry[],
     countdownSeconds: number,
@@ -93,8 +94,10 @@ export class RunController {
     onChange: (view: RunView) => void;
   }): Promise<RunController> {
     const { client, job } = options;
-    const url = job.greenhouse.ghUrl;
-    if (!url) throw new Error("This job has no Greenhouse posting");
+    const posting = job.target.postingUrl;
+    const ats = job.target.ats ?? "greenhouse";
+    if (!posting) throw new Error("This job has no posting to apply on");
+    const url = formUrlFor(ats, posting);
     const plan = (await client.plan(job.jobId)) as { entries: PlanEntry[] };
     const tab = await chrome.tabs.create({ url, active: true });
     if (tab.id === undefined) throw new Error("Couldn't open the posting");
@@ -104,7 +107,7 @@ export class RunController {
       defaultViewport: null,
     });
     const [page] = await browser.pages();
-    const driver = page ? await GreenhouseDriver.attach(page) : null;
+    const driver = page ? await attachDriver(ats, page) : null;
     if (!page || !driver) {
       await browser.disconnect();
       throw new Error(

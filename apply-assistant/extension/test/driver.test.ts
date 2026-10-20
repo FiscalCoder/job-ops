@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ashbyFormUrl } from "../src/fill/ashby-driver";
 import {
   bestOption,
   rankOption,
@@ -34,5 +35,16 @@ describe("driver helpers", () => {
     expect(selectionMatches("India", "India")).toBe(true);
     expect(selectionMatches("+246", "India +91")).toBe(false);
     expect(selectionMatches("", "India")).toBe(false);
+  });
+});
+
+describe("ashbyFormUrl", () => {
+  it("opens the posting's application tab", () => {
+    expect(
+      ashbyFormUrl("https://jobs.ashbyhq.com/elevenlabs/c7d5?utm_source=x"),
+    ).toBe("https://jobs.ashbyhq.com/elevenlabs/c7d5/application?utm_source=x");
+    expect(
+      ashbyFormUrl("https://jobs.ashbyhq.com/elevenlabs/c7d5/application"),
+    ).toBe("https://jobs.ashbyhq.com/elevenlabs/c7d5/application");
   });
 });

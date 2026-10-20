@@ -10,7 +10,7 @@ const byRef = (schema: ReturnType<typeof parseGreenhouseSchema>, ref: string) =>
 describe("parseGreenhouseSchema (real ?questions=true payloads)", () => {
   it("reads the main questions with their type, requiredness and options", () => {
     const schema = parseGreenhouseSchema(newrelic);
-    expect(schema.ghJobId).toBe("5453390008");
+    expect(schema.postingId).toBe("5453390008");
     expect(byRef(schema, "first_name")).toMatchObject({
       label: "First Name",
       type: "text",

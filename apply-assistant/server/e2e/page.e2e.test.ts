@@ -83,7 +83,7 @@ beforeAll(async () => {
     type: "job",
     jobId: "job-1",
     token: "acme",
-    ghJobId: "11",
+    postingId: "11",
     url: "https://job-boards.greenhouse.io/acme/jobs/11",
     live: true,
   });
@@ -91,7 +91,7 @@ beforeAll(async () => {
     type: "schema",
     jobId: "job-1",
     token: "acme",
-    ghJobId: "11",
+    postingId: "11",
     payload: {
       ...structuredClone(newrelic),
       id: 11,
