@@ -1,4 +1,4 @@
-import { isProtectedKey } from "../bank/catalogue.js";
+import { bankKeyDef, isProtectedKey } from "../bank/catalogue.js";
 import type { FormField } from "./gh-schema.js";
 
 /**
@@ -27,6 +27,8 @@ export type FieldRule =
   | { kind: "education"; part: "school" | "degree" | "discipline" }
   | { kind: "consent" }
   | { kind: "eeo"; key: string }
+  /** A Yes/No "Are you located in <place>?": answered from your saved location. */
+  | { kind: "located-in"; place: string }
   | { kind: "hidden" }
   | { kind: "question" };
 
@@ -86,9 +88,21 @@ const LABEL_RULES: readonly [RegExp, FieldRule][] = [
     { kind: "work-auth", ask: "authorized" },
   ],
   [/(date of birth|\bdob\b|birth ?date)/, bank("identity.date_of_birth")],
+  [
+    /(preferred (first )?name|name (you'?d|you would) (prefer|like)|prefer(red)? to be called|what should we call you)/,
+    {
+      kind: "bank",
+      key: "identity.preferred_name",
+      fallbackKey: "identity.first_name",
+    },
+  ],
   [/linked\s?in/, profile("linkedin")],
   [/github/, profile("github")],
-  [/(website|portfolio|personal site|blog)/, profile("website")],
+  // Only labels asking for the link itself: "Do you have publications (blog posts…)?" isn't.
+  [
+    /^(personal )?(website|portfolio|blog)\b|(website|portfolio|blog) (url|link)|link to (your )?(personal )?(website|portfolio|blog)|personal (site|website)/,
+    profile("website"),
+  ],
   [
     /(cities|locations).{0,40}(available|willing|open|work)|available to work in/,
     bank("work.preferred_cities"),
@@ -142,6 +156,30 @@ const LABEL_RULES: readonly [RegExp, FieldRule][] = [
   [/(sexual orientation|lgbt|transgender)/, { kind: "eeo", key: "eeo.other" }],
 ];
 
+/** A choice of Yes / No (optionally "Yes, …"), and nothing else. */
+const isYesNo = (field: FormField): boolean =>
+  (field.type === "select" || field.type === "multiselect") &&
+  field.options.length >= 2 &&
+  field.options.length <= 3 &&
+  field.options.every((o) => /^(yes|no)\b/i.test(o.label.trim()));
+
+const LOCATED_IN =
+  /^(are|do) you (currently )?(located|based|living|live|residing|reside) (in|within) (the )?(.+?)\s*\??$/;
+
+/** Rules that can answer a Yes/No question; the rest give a value (a city, a company name). */
+function answersYesNo(rule: FieldRule): boolean {
+  switch (rule.kind) {
+    case "work-auth":
+    case "consent":
+    case "eeo":
+      return true;
+    case "bank":
+      return bankKeyDef(rule.key)?.kind === "yesno";
+    default:
+      return false;
+  }
+}
+
 function ruleFor(field: FormField): FieldRule {
   if (field.type === "hidden") return { kind: "hidden" };
   const byRef = BY_REF[field.canonical ?? field.ref];
@@ -151,6 +189,12 @@ function ruleFor(field: FormField): FieldRule {
   const isChoice = field.type === "select" || field.type === "multiselect";
   if (isChoice && CONSENT_VERB.test(label) && CONSENT_OBJECT.test(label))
     return { kind: "consent" };
+  if (isYesNo(field)) {
+    const place = LOCATED_IN.exec(label)?.[6];
+    if (place) return { kind: "located-in", place };
+    const rule = LABEL_RULES.find(([pattern]) => pattern.test(label))?.[1];
+    return rule && answersYesNo(rule) ? rule : { kind: "question" };
+  }
   return (
     LABEL_RULES.find(([pattern]) => pattern.test(label))?.[1] ?? {
       kind: "question",
@@ -167,6 +211,7 @@ function actionClassFor(rule: FieldRule): ActionClass {
     case "consent":
     case "eeo":
     case "question":
+    case "located-in":
     case "cover-letter":
       return "confirm";
     case "education":

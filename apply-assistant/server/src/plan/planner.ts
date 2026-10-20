@@ -185,6 +185,56 @@ function resolveWorkAuth(
   };
 }
 
+/** Country names (or US / UK / UAE), not cities: "Bengaluru" names a city, not India. */
+const COUNTRY_SHORT = new Set([
+  "us",
+  "usa",
+  "uk",
+  "uae",
+  "united states of america",
+]);
+const placeName = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/^the /, "")
+    .replace(/[^a-z ]/g, "")
+    .trim();
+
+function asCountry(place: string): string | null {
+  const country = countryOf(place);
+  return country &&
+    (placeName(place) === placeName(country) ||
+      COUNTRY_SHORT.has(placeName(place)))
+    ? country
+    : null;
+}
+
+/**
+ * "Are you located in <place>?": Yes when it's your saved country, city or state; No only when
+ * it's clearly another country. Anything else (a region, another city) goes to Claude.
+ */
+function resolveLocatedIn(
+  place: string,
+  field: FormField,
+  input: PlanInput,
+  jobCountry: string | null,
+): Resolved {
+  const key = "location.current_country";
+  const country = input.bank.get(key)?.trim() ?? "";
+  const city = input.bank.get("location.current_city")?.trim() ?? "";
+  const state = input.bank.get("location.state")?.trim() ?? "";
+  if (!country && !city)
+    return missing(`bank:${key}`, "Add your current country and city", key);
+  const source = `bank:location (asked about ${place})`;
+  const asked = asCountry(place);
+  const mine = country ? countryOf(country) : null;
+  if (asked && mine)
+    return { value: asked === mine ? "Yes" : "No", source, bankKey: key };
+  if ([city, state].some((v) => v && placeName(v) === placeName(place)))
+    return { value: "Yes", source, bankKey: "location.current_city" };
+  return resolveClaude(field, input, jobCountry);
+}
+
 function resolveEducation(
   part: "school" | "degree" | "discipline",
   resume: ResumeFacts,
@@ -272,6 +322,8 @@ function resolveRule(
             rule.key,
           );
     }
+    case "located-in":
+      return resolveLocatedIn(rule.place, field, input, jobCountry);
     case "question":
       return resolveClaude(field, input, jobCountry);
   }

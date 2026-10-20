@@ -197,6 +197,19 @@ describe("runs", () => {
     expect(log.notes).toEqual([]);
   });
 
+  it("a new run closes the job's run left open earlier (panel closed mid-run)", async () => {
+    const { json } = await start();
+    const left = (await json("/runs", { jobId: "job-1" })).body.data.id;
+    const next = (await json("/runs", { jobId: "job-1" })).body.data.id;
+    expect((await json(`/runs/${left}`)).body.data).toMatchObject({
+      outcome: "aborted",
+    });
+    expect((await json(`/runs/${next}`)).body.data.outcome).toBeNull();
+    expect(
+      (await json(`/runs/${left}/complete`, { outcome: "submitted" })).status,
+    ).toBe(409);
+  });
+
   it("refuses to log to a finished run, unknown runs, and duplicate steps", async () => {
     const { json } = await start();
     const runId = (await json("/runs", { jobId: "job-1" })).body.data.id;

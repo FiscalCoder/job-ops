@@ -63,7 +63,9 @@ export function createPlans(deps: PlansDeps) {
   }> {
     const questions = schema.fields
       .filter(
-        (f) => isAnswerable(f) && classifyField(f).rule.kind === "question",
+        (f) =>
+          isAnswerable(f) &&
+          ["question", "located-in"].includes(classifyField(f).rule.kind),
       )
       .map(toQuestion);
     if (questions.length === 0) return {};

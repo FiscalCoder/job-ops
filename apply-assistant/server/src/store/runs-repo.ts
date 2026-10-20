@@ -85,6 +85,9 @@ export function createRunsRepo(db: DatabaseSync) {
   const actionsOf = db.prepare(
     "select * from run_actions where run_id = ? order by seq",
   );
+  const abandonOpen = db.prepare(
+    "update runs set ended_at = datetime('now'), outcome = 'aborted' where job_id = ? and ended_at is null",
+  );
   const finish = db.prepare(
     "update runs set ended_at = datetime('now'), outcome = ?, interventions = ? where id = ? and ended_at is null",
   );
@@ -106,6 +109,8 @@ export function createRunsRepo(db: DatabaseSync) {
   return {
     create(jobId: string): Run {
       const id = randomUUID();
+      // A run left open (the panel closed, the browser quit) can't continue: close it first.
+      abandonOpen.run(jobId);
       insertRun.run(id, jobId);
       return get(id) as Run;
     },

@@ -1,4 +1,5 @@
 import { type Response, Router } from "express";
+import { ATS_LIST, ATS_NAMES } from "../ats.js";
 import { JobOpsError } from "../jobops/client.js";
 import {
   createLookups,
@@ -16,6 +17,9 @@ import { sendError, sendOk } from "./envelope.js";
 /** Resolver endpoints used by the extension, plus the queue the side panel shows. */
 /** One line per lookup result, for the job's trace. */
 function lookupLine(result: LookupResult, outcome: ResultOutcome): string {
+  // "No board" covers every system searched, not just the one the result names.
+  if (result.type === "board" && result.token === null)
+    return `Lookup: ${result.employer} has no board on ${ATS_LIST.map((a) => ATS_NAMES[a]).join(", ")} (${result.method})`;
   const what =
     result.type === "board"
       ? `board ${result.token ?? "none"} (${result.method})`

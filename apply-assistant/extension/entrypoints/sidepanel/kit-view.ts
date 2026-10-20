@@ -218,12 +218,7 @@ export async function showKit(
     }
   });
 
-  const outcomes = outcomeButtons(client, job.jobId, say, (outcome) =>
-    trace.event(
-      "kit-outcome",
-      outcome === "applied" ? "You marked it Applied" : "You skipped it",
-    ),
-  );
+  const outcomes = outcomeButtons(client, job.jobId, say);
 
   box.replaceChildren(
     el("div", { class: "row" }, el("strong", {}, "Apply kit"), back),
@@ -254,7 +249,6 @@ function outcomeButtons(
   client: ApplyClient,
   jobId: string,
   say: (text: string, tone?: "muted" | "ok" | "error") => void,
-  onDone: (outcome: "applied" | "skipped") => void,
 ): HTMLElement {
   const labels = {
     applied: ["I applied ✓", "Click again: mark Applied"],
@@ -285,7 +279,6 @@ function outcomeButtons(
           await client.kitOutcome(jobId, outcome);
           say(done[outcome], "ok");
           b.textContent = labels[outcome][0];
-          onDone(outcome);
         } catch (error) {
           say(errorText(error), "error");
           b.textContent = labels[outcome][0];
