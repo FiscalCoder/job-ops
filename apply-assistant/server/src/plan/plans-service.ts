@@ -1,9 +1,13 @@
+import type { QuestionAnswerer } from "../claude/answerer.js";
+import type { ClaudeAnswer } from "../claude/questions.js";
+import { isAnswerable, toQuestion } from "../claude/questions.js";
 import type { JobOpsApi } from "../jobops/client.js";
 import type { AnswerBankRepo } from "../store/answer-bank-repo.js";
 import type { ApplyTargetsRepo } from "../store/apply-targets-repo.js";
 import type { FillPlansRepo } from "../store/fill-plans-repo.js";
 import type { FormSchemasRepo } from "../store/form-schemas-repo.js";
-import { parseGreenhouseSchema } from "./gh-schema.js";
+import { classifyField } from "./classify.js";
+import { type FormSchema, parseGreenhouseSchema } from "./gh-schema.js";
 import { buildPlan, type FillPlan } from "./planner.js";
 import { type ResumeFacts, resumeFacts } from "./resume-facts.js";
 
@@ -29,6 +33,9 @@ export interface PlansDeps {
   readonly schemas: FormSchemasRepo;
   readonly plans: FillPlansRepo;
   readonly answers: AnswerBankRepo;
+  /** Null without an Anthropic key: unrecognised questions then stay "needs you". */
+  readonly answerer?: QuestionAnswerer | null;
+  readonly log?: (line: string) => void;
 }
 
 export interface RebuildResult {
@@ -38,6 +45,41 @@ export interface RebuildResult {
 
 export function createPlans(deps: PlansDeps) {
   const { jobOps, targets, schemas, plans, answers } = deps;
+  const answerer = deps.answerer ?? null;
+  const log = deps.log ?? (() => {});
+
+  /** Claude's answers for the questions the rules leave open (never throws). */
+  async function askClaude(
+    schema: FormSchema,
+    context: Parameters<QuestionAnswerer["answer"]>[1],
+  ): Promise<{
+    claude?: ReadonlyMap<string, ClaudeAnswer>;
+    claudeProblem?: string;
+  }> {
+    const questions = schema.fields
+      .filter(
+        (f) => isAnswerable(f) && classifyField(f).rule.kind === "question",
+      )
+      .map(toQuestion);
+    if (questions.length === 0) return {};
+    if (!answerer)
+      return {
+        claudeProblem:
+          "No saved answer for this question yet (Claude isn't set up on the server)",
+      };
+    try {
+      return { claude: await answerer.answer(questions, context) };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      log(
+        `[claude] couldn't answer ${questions.length} question(s): ${reason}`,
+      );
+      return {
+        claudeProblem:
+          "Claude couldn't be reached; answer it yourself or rebuild the plan later",
+      };
+    }
+  }
 
   const bankMap = () => new Map(answers.list().map((a) => [a.key, a.value]));
 
@@ -65,11 +107,22 @@ export function createPlans(deps: PlansDeps) {
         "The Greenhouse form hasn't been fetched yet",
       );
     const job = await jobOps.getJob(token, jobId);
+    const schema = parseGreenhouseSchema(stored.payload);
+    const fromClaude = await askClaude(schema, {
+      job: {
+        title: job.title,
+        employer: job.employer,
+        description: job.jobDescription,
+      },
+      resume,
+      bank,
+    });
     const plan = buildPlan({
-      schema: parseGreenhouseSchema(stored.payload),
+      schema,
       resume,
       bank,
       jobLocation: job.location,
+      ...fromClaude,
     });
     plans.save(jobId, plan);
     return plan;

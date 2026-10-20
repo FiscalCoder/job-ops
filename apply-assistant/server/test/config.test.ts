@@ -12,7 +12,30 @@ describe("loadConfig", () => {
       jobOpsBaseUrl: "http://job-ops:3001",
       dataDir: "/data",
       authCacheSeconds: 60,
+      claude: null,
     });
+  });
+
+  it("turns Claude on when a key is set, with the default models", () => {
+    const config = loadConfig({
+      JOBOPS_BASE_URL: "http://job-ops:3001",
+      APPLY_DATA_DIR: "/data",
+      ANTHROPIC_API_KEY: "sk-ant-test",
+    });
+    expect(config.claude).toEqual({
+      apiKey: "sk-ant-test",
+      mapModel: "claude-haiku-5-5",
+      draftModel: "claude-sonnet-5-5",
+    });
+  });
+
+  it("treats a blank key as no key", () => {
+    const config = loadConfig({
+      JOBOPS_BASE_URL: "http://job-ops:3001",
+      APPLY_DATA_DIR: "/data",
+      ANTHROPIC_API_KEY: "  ",
+    });
+    expect(config.claude).toBeNull();
   });
 
   it("strips a trailing slash from the Job Ops URL", () => {

@@ -95,6 +95,13 @@ const MIGRATIONS: readonly string[] = [
      fetched_at text not null default (datetime('now')),
      primary key (gh_token, gh_job_id)
    );`,
+  // M3: Claude's answers to questions the rules don't recognise (cache, see claude-answers-repo).
+  `create table claude_answers (
+     cache_key text primary key,
+     answer_json text not null,
+     model text not null,
+     created_at text not null default (datetime('now'))
+   );`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

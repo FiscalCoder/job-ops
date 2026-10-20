@@ -7,6 +7,13 @@ export const fakeDesignResume = {
     website: { url: "https://example.dev", label: "example.dev" },
   },
   sections: {
+    summary: { hidden: false, content: "<p>Full-stack engineer.</p>" },
+    skills: {
+      items: [
+        { hidden: false, name: "Frontend", keywords: ["React", "TypeScript"] },
+        { hidden: true, name: "Hidden", keywords: ["COBOL"] },
+      ],
+    },
     profiles: {
       items: [
         {

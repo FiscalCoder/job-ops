@@ -10,6 +10,11 @@ services:
       JOBOPS_BASE_URL: http://job-ops:3001
       APPLY_DATA_DIR: /data
       APPLY_PORT: "3006"
+    env_file:
+      # ANTHROPIC_API_KEY lives outside git, beside the data folder (root-only, mode 600). Without it
+      # the server still runs; unrecognised questions then stay "needs you".
+      - path: ../data/apply-assistant.env
+        required: false
     ports:
       # Localhost only; a CloudPanel reverse-proxy site (https://apply.hueint.com) forwards here.
       - "127.0.0.1:3006:3006"

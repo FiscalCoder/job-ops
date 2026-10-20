@@ -52,6 +52,14 @@ export interface ResumeFacts {
   };
   readonly experience: readonly ExperienceFact[];
   readonly education: readonly EducationFact[];
+  /** Context for the question model only; never typed into a form as-is. */
+  readonly summary: string;
+  readonly skills: readonly SkillFact[];
+}
+
+export interface SkillFact {
+  readonly name: string;
+  readonly keywords: readonly string[];
 }
 
 const NO_PERIOD: Period = { start: null, end: null, current: false };
@@ -146,6 +154,17 @@ const designResumeSchema = z.object({
     .optional()
     .default({}),
   sections: z.object({
+    summary: z
+      .object({ hidden, content: text })
+      .optional()
+      .transform((s) => (s && s.hidden !== true ? s.content : "")),
+    skills: items(
+      z.object({
+        hidden,
+        name: text,
+        keywords: z.array(z.string()).nullable().optional(),
+      }),
+    ),
     profiles: items(z.object({ hidden, network: text, website: link })),
     experience: items(
       z.object({
@@ -223,5 +242,10 @@ export function resumeFacts(designResume: unknown): ResumeFacts {
     },
     experience,
     education,
+    summary: htmlToText(resume.sections.summary),
+    skills: visible(resume.sections.skills).map((skill) => ({
+      name: skill.name,
+      keywords: (skill.keywords ?? []).map((k) => k.trim()).filter(Boolean),
+    })),
   };
 }

@@ -1,4 +1,5 @@
-import { bankKeyDef, splitList } from "../bank/catalogue.js";
+import { bankKeyDef, isProtectedKey, splitList } from "../bank/catalogue.js";
+import type { ClaudeAnswer } from "../claude/questions.js";
 import { formatBankValue } from "./bank-format.js";
 import { type ActionClass, classifyField, type FieldRule } from "./classify.js";
 import { countryOf } from "./country.js";
@@ -8,8 +9,9 @@ import type { DegreeLevel, ResumeFacts } from "./resume-facts.js";
 
 /**
  * Builds a fill plan: for every field, the proposed value, where it came from, its action class
- * (how it is gated during the supervised run) and whether it needs you. Plain code only; it
- * never guesses — a missing answer becomes "needs you" with the reason.
+ * (how it is gated during the supervised run) and whether it needs you. Plain code decides
+ * everything it can; questions it doesn't recognise use Claude's checked answers when given
+ * (always gated on your click). Nothing is guessed: a missing answer becomes "needs you".
  */
 
 export type EntryStatus = "fill" | "needs-you" | "skip";
@@ -54,6 +56,10 @@ export interface PlanInput {
   readonly bank: ReadonlyMap<string, string>;
   /** Job Ops' location text, used when the Greenhouse posting's location names no country. */
   readonly jobLocation?: string | null;
+  /** Claude's answers to unrecognised questions, by field ref (see claude/answerer.ts). */
+  readonly claude?: ReadonlyMap<string, ClaudeAnswer>;
+  /** Why there are no Claude answers (no key, or the call failed), shown on those questions. */
+  readonly claudeProblem?: string;
 }
 
 interface Resolved {
@@ -65,6 +71,8 @@ interface Resolved {
   readonly alternatives?: readonly string[];
   /** For selects: an option already chosen by the rule (decline / consent). */
   readonly option?: { label: string; value: string };
+  /** Overrides the field's class (a Claude answer that points to a protected saved answer). */
+  readonly actionClass?: ActionClass;
 }
 
 const DEGREE_LABEL: Record<DegreeLevel, string> = {
@@ -250,7 +258,60 @@ function resolveRule(
           );
     }
     case "question":
-      return missing("question", "No saved answer for this question yet");
+      return resolveClaude(field, input, jobCountry);
+  }
+}
+
+/** Below this, Claude's answer is shown as a suggestion and the field waits for you. */
+const MIN_CONFIDENCE = 0.5;
+const percent = (confidence: number) => `${Math.round(confidence * 100)}%`;
+const shortModel = (model: string) =>
+  model.replace(/^claude-/, "").replace(/-\d.*$/, "");
+
+function resolveClaude(
+  field: FormField,
+  input: PlanInput,
+  jobCountry: string | null,
+): Resolved {
+  const answer = input.claude?.get(field.ref);
+  if (!answer)
+    return missing(
+      "question",
+      input.claudeProblem ?? "No saved answer for this question yet",
+    );
+  const by = `claude:${shortModel(answer.model)}`;
+  switch (answer.kind) {
+    case "unknown":
+      return missing(by, `Claude: ${answer.why}`);
+    case "bank": {
+      const resolved = resolveBank(
+        { key: answer.key },
+        input.bank,
+        field,
+        jobCountry,
+      );
+      return {
+        ...resolved,
+        source: `${by} → bank:${answer.key} (${percent(answer.confidence)})`,
+        actionClass: isProtectedKey(answer.key) ? "protected" : "confirm",
+      };
+    }
+    case "answer": {
+      const shown = Array.isArray(answer.value)
+        ? answer.value.join(", ")
+        : answer.value;
+      return answer.confidence < MIN_CONFIDENCE
+        ? missing(
+            by,
+            `Claude's unsure guess (${percent(answer.confidence)}): ${shown}. ${answer.why}`,
+          )
+        : {
+            value: answer.value,
+            source: `${by} (${percent(answer.confidence)}): ${answer.why}`,
+          };
+    }
+    case "draft":
+      return { value: answer.value, source: `${by} draft` };
   }
 }
 
@@ -355,11 +416,13 @@ function planField(
     };
 
   const typed = fitToField(field, resolved);
+  const finalClass = resolved.actionClass ?? actionClass;
   // An optional field we can't answer is left empty rather than asking you.
   const status =
     typed.status === "needs-you" && !field.required ? "skip" : typed.status;
   return {
     ...base,
+    actionClass: finalClass,
     status,
     value: typed.value,
     optionValues: typed.optionValues,

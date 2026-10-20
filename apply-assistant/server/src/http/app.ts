@@ -2,10 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { z } from "zod";
+import { createClaudeAnswerer, type MessagesApi } from "../claude/answerer.js";
 import type { JobOpsApi } from "../jobops/client.js";
 import { createPlans } from "../plan/plans-service.js";
 import { createAnswerBankRepo } from "../store/answer-bank-repo.js";
 import { createApplyTargetsRepo } from "../store/apply-targets-repo.js";
+import { createClaudeAnswersRepo } from "../store/claude-answers-repo.js";
 import { createFillPlansRepo } from "../store/fill-plans-repo.js";
 import { createFormSchemasRepo } from "../store/form-schemas-repo.js";
 import { createGhBoardsRepo } from "../store/gh-boards-repo.js";
@@ -29,13 +31,26 @@ export interface AppDeps {
   readonly jobOps: JobOpsApi;
   readonly db: DatabaseSync;
   readonly authCacheSeconds: number;
+  /** Claude for unrecognised questions; null or absent without an Anthropic key. */
+  readonly claude?: {
+    readonly messages: MessagesApi;
+    readonly mapModel: string;
+    readonly draftModel: string;
+  } | null;
+  readonly log?: (line: string) => void;
 }
 
 const loginBody = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
 });
-export function createApp({ jobOps, db, authCacheSeconds }: AppDeps) {
+export function createApp({
+  jobOps,
+  db,
+  authCacheSeconds,
+  claude,
+  log,
+}: AppDeps) {
   const app = express();
   const answers = createAnswerBankRepo(db);
   const requireUser = createAuthMiddleware(jobOps, authCacheSeconds);
@@ -79,6 +94,14 @@ export function createApp({ jobOps, db, authCacheSeconds }: AppDeps) {
     schemas,
     plans: planStore,
     answers,
+    answerer: claude
+      ? createClaudeAnswerer({
+          ...claude,
+          cache: createClaudeAnswersRepo(db),
+          ...(log ? { log } : {}),
+        })
+      : null,
+    ...(log ? { log } : {}),
   });
 
   app.use(requireUser, createAnswerBankRoutes(answers));

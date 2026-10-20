@@ -1,5 +1,7 @@
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import type Anthropic from "@anthropic-ai/sdk";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { MessagesApi } from "../src/claude/answerer.js";
 import { createApp } from "../src/http/app.js";
 import type { JobOpsApi, JobOpsJob, JobUpdate } from "../src/jobops/client.js";
 import { JobOpsError } from "../src/jobops/client.js";
@@ -110,7 +112,7 @@ function fakeJobOps(log: {
 let close: (() => void) | undefined;
 afterEach(() => close?.());
 
-async function start() {
+async function start(options: { claude?: MessagesApi["create"] } = {}) {
   const log = {
     updates: [] as [string, JobUpdate][],
     notes: [] as [string, string][],
@@ -119,6 +121,13 @@ async function start() {
     jobOps: fakeJobOps(log),
     db: openStore(":memory:"),
     authCacheSeconds: 60,
+    claude: options.claude
+      ? {
+          messages: { create: options.claude },
+          mapModel: "claude-haiku-5-5",
+          draftModel: "claude-sonnet-5-5",
+        }
+      : null,
   });
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
@@ -474,6 +483,81 @@ describe("lookups", () => {
       ).toBe(needsBefore - 2);
 
       expect((await call("/plans/nope")).status).toBe(409);
+    });
+
+    const planWithClaude = async (create: MessagesApi["create"]) => {
+      const { call } = await start({ claude: create });
+      await matchDirect(call);
+      await call("/lookups/results", {
+        type: "schema",
+        jobId: "direct",
+        token: "acme",
+        ghJobId: "11",
+        payload: formFor11,
+      });
+      const plan = await call("/plans/direct");
+      return (ref: string) =>
+        plan.json.data.entries.find((e: any) => e.ref === ref);
+    };
+
+    it("asks Claude only about required questions the rules don't know, with the job's text", async () => {
+      const create = vi.fn<MessagesApi["create"]>().mockResolvedValue({
+        model: "claude-haiku-5-5",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              answers: [
+                {
+                  ref: "question_18992931008",
+                  kind: "answer",
+                  bank_key: "",
+                  answer: ["Yes"],
+                  confidence: 0.8,
+                  why: "Python on resume",
+                },
+                {
+                  ref: "question_18992930008",
+                  kind: "unknown",
+                  bank_key: "",
+                  answer: [],
+                  confidence: 0,
+                  why: "Meraki isn't on your resume",
+                },
+              ],
+            }),
+          },
+        ],
+      } as unknown as Anthropic.Message);
+      const entry = await planWithClaude(create);
+      expect(create).toHaveBeenCalledTimes(1);
+      const sent = String(create.mock.calls[0]?.[0].messages[0]?.content);
+      expect(sent.match(/<question ref=/g)).toHaveLength(2);
+      expect(sent).toContain("scalable services in Go and Kubernetes");
+      expect(entry("question_18992931008")).toMatchObject({
+        status: "fill",
+        value: "Yes",
+        actionClass: "confirm",
+      });
+      expect(entry("question_18992930008")).toMatchObject({
+        status: "needs-you",
+        reason: "Claude: Meraki isn't on your resume",
+      });
+    });
+
+    it("still plans when Claude fails, and says so on those questions", async () => {
+      const entry = await planWithClaude(
+        vi
+          .fn<MessagesApi["create"]>()
+          .mockRejectedValue(new Error("overloaded")),
+      );
+      expect(entry("question_18992931008")).toMatchObject({
+        status: "needs-you",
+        reason: expect.stringContaining("Claude couldn't be reached"),
+      });
+      expect(entry("email")).toMatchObject({ status: "fill" });
     });
   });
 });

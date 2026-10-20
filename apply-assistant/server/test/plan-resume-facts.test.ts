@@ -88,6 +88,10 @@ describe("resumeFacts", () => {
       area: "Computer Science",
       endYear: 2019,
     });
+    expect(facts.summary).toBe("Full-stack engineer.");
+    expect(facts.skills).toEqual([
+      { name: "Frontend", keywords: ["React", "TypeScript"] },
+    ]);
   });
 
   it("adds https:// to bare links", () => {
@@ -112,6 +116,8 @@ describe("resumeFacts", () => {
       phone: null,
       experience: [],
       education: [],
+      summary: "",
+      skills: [],
       links: { linkedin: null, github: null, website: null },
     });
   });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ClaudeAnswer } from "../src/claude/questions.js";
 import { parseGreenhouseSchema } from "../src/plan/gh-schema.js";
 import { buildPlan, type FillPlan } from "../src/plan/planner.js";
 import { resumeFacts } from "../src/plan/resume-facts.js";
@@ -251,6 +252,151 @@ describe("buildPlan", () => {
       status: "fill",
       value: "India",
       required: false,
+    });
+  });
+});
+
+describe("buildPlan with Claude's answers", () => {
+  const SELECT = "question_18992931008";
+  const TEXT = "question_18992930008";
+  const plan = (claude: Map<string, ClaudeAnswer>, bank = fullBank) =>
+    buildPlan({
+      schema: parseGreenhouseSchema(newrelic),
+      resume,
+      bank,
+      claude,
+    });
+
+  it("fills a checked answer, gated on your click, with its confidence and reason", () => {
+    const built = plan(
+      new Map([
+        [
+          SELECT,
+          {
+            kind: "answer",
+            value: "Yes",
+            confidence: 0.85,
+            why: "Python on resume",
+            model: "claude-haiku-5-5",
+          },
+        ],
+      ]),
+    );
+    expect(entry(built, SELECT)).toMatchObject({
+      status: "fill",
+      actionClass: "confirm",
+      value: "Yes",
+      source: "claude:haiku (85%): Python on resume",
+    });
+  });
+
+  it("shows an unsure guess as a suggestion and waits for you", () => {
+    const built = plan(
+      new Map([
+        [
+          SELECT,
+          {
+            kind: "answer",
+            value: "Yes",
+            confidence: 0.3,
+            why: "Maybe",
+            model: "claude-haiku-5-5",
+          },
+        ],
+      ]),
+    );
+    expect(entry(built, SELECT)).toMatchObject({
+      status: "needs-you",
+      reason: expect.stringContaining("unsure guess (30%): Yes"),
+    });
+  });
+
+  it("uses your saved answer when Claude points to one, keeping protected keys protected", () => {
+    const built = plan(
+      new Map([
+        [
+          TEXT,
+          {
+            kind: "bank",
+            key: "comp.expected",
+            confidence: 0.9,
+            why: "Pay",
+            model: "claude-haiku-5-5",
+          },
+        ],
+      ]),
+    );
+    expect(entry(built, TEXT)).toMatchObject({
+      status: "fill",
+      actionClass: "protected",
+      source: "claude:haiku → bank:comp.expected (90%)",
+      bankKey: "comp.expected",
+    });
+  });
+
+  it("asks you to save an answer when Claude points to an empty one", () => {
+    const built = plan(
+      new Map([
+        [
+          TEXT,
+          {
+            kind: "bank",
+            key: "work.relocation",
+            confidence: 0.9,
+            why: "x",
+            model: "claude-haiku-5-5",
+          },
+        ],
+      ]),
+    );
+    expect(entry(built, TEXT)).toMatchObject({
+      status: "needs-you",
+      bankKey: "work.relocation",
+    });
+  });
+
+  it("fills drafts for your review, and passes on Claude's reason when it can't answer", () => {
+    const built = plan(
+      new Map<string, ClaudeAnswer>([
+        [
+          TEXT,
+          {
+            kind: "draft",
+            value: "Yes, at Acme I ran Meraki.",
+            model: "claude-sonnet-5-5",
+          },
+        ],
+        [
+          SELECT,
+          {
+            kind: "unknown",
+            why: "Not on your resume",
+            model: "claude-haiku-5-5",
+          },
+        ],
+      ]),
+    );
+    expect(entry(built, TEXT)).toMatchObject({
+      status: "fill",
+      actionClass: "confirm",
+      source: "claude:sonnet draft",
+    });
+    expect(entry(built, SELECT)).toMatchObject({
+      status: "needs-you",
+      reason: "Claude: Not on your resume",
+    });
+  });
+
+  it("says why there's no answer when Claude isn't available", () => {
+    const built = buildPlan({
+      schema: parseGreenhouseSchema(newrelic),
+      resume,
+      bank: fullBank,
+      claudeProblem: "Claude couldn't be reached",
+    });
+    expect(entry(built, SELECT)).toMatchObject({
+      status: "needs-you",
+      reason: "Claude couldn't be reached",
     });
   });
 });
