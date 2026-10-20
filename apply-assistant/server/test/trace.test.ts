@@ -1,8 +1,8 @@
-import { mkdtempSync, readdirSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/http/app.js";
 import {
   type JobOpsApi,
@@ -14,7 +14,15 @@ import { createTraceStore } from "../src/store/trace-store.js";
 import { fakeDesignResume } from "./fixtures/fake-resume.js";
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]);
-const tempDir = () => mkdtempSync(path.join(tmpdir(), "trace-test-"));
+const made: string[] = [];
+const tempDir = () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "trace-test-"));
+  made.push(dir);
+  return dir;
+};
+afterAll(() => {
+  for (const dir of made) rmSync(dir, { recursive: true, force: true });
+});
 
 describe("trace store", () => {
   const setup = (now = new Date("2026-10-20T10:00:00Z"), cap?: number) => {

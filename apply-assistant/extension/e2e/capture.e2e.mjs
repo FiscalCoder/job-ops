@@ -3,7 +3,7 @@
 // the redirector, the ATS or apply-assistant: nothing real is read or written.
 //   node e2e/capture.e2e.mjs        (needs openssl on PATH for the throwaway certificate)
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import https from "node:https";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -168,5 +168,11 @@ try {
 } finally {
   await context.close();
   server.close();
+  rmSync(work, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 200,
+  });
 }
 process.exit(ok ? 0 : 1);

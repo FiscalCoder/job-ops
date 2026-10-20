@@ -136,7 +136,6 @@ export function createTraceStore(options: TraceStoreOptions) {
   const now = options.now ?? (() => new Date());
   const maxSnapshotBytes = options.maxSnapshotBytes ?? MAX_SNAPSHOT_BYTES;
   const log = options.log ?? (() => {});
-  mkdirSync(dir, { recursive: true });
 
   const insertEvent = db.prepare(
     `insert into trace_events (job_id, run_id, ts, source, kind, step_seq, message, data_json, snapshot_id)
@@ -222,6 +221,7 @@ export function createTraceStore(options: TraceStoreOptions) {
       const file = `${id}${input.kind === "dom" ? ".html.gz" : ".jpg"}`;
       const body =
         input.kind === "dom" ? gzipSync(input.content) : input.content;
+      mkdirSync(dir, { recursive: true });
       writeFileSync(path.join(dir, file), body);
       const createdAt = input.ts ?? now().toISOString();
       try {

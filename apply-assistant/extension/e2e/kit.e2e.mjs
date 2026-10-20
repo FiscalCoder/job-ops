@@ -6,7 +6,7 @@
 //   (build the extension first; needs openssl on PATH for the throwaway certificate)
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import https from "node:https";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -150,20 +150,19 @@ const server = https.createServer(
 );
 await new Promise((r) => server.listen(443, "127.0.0.1", r));
 
-const context = await chromium.launchPersistentContext(
-  mkdtempSync(path.join(tmpdir(), "kit-profile-")),
-  {
-    channel: "chromium",
-    headless: true,
-    ignoreHTTPSErrors: true,
-    args: [
-      `--disable-extensions-except=${extensionDir}`,
-      `--load-extension=${extensionDir}`,
-      "--host-resolver-rules=MAP * 127.0.0.1",
-      "--ignore-certificate-errors",
-    ],
-  },
-);
+const profile = mkdtempSync(path.join(tmpdir(), "kit-profile-"));
+const downloads = mkdtempSync(path.join(tmpdir(), "kit-downloads-"));
+const context = await chromium.launchPersistentContext(profile, {
+  channel: "chromium",
+  headless: true,
+  ignoreHTTPSErrors: true,
+  args: [
+    `--disable-extensions-except=${extensionDir}`,
+    `--load-extension=${extensionDir}`,
+    "--host-resolver-rules=MAP * 127.0.0.1",
+    "--ignore-certificate-errors",
+  ],
+});
 const failures = [];
 const check = async (name, fn) => {
   try {
@@ -181,7 +180,6 @@ try {
     (await context.waitForEvent("serviceworker"));
   const extensionId = new URL(worker.url()).host;
   // Plain downloads into a temp folder (Playwright would otherwise rename them).
-  const downloads = mkdtempSync(path.join(tmpdir(), "kit-downloads-"));
   const careersPage = await context.newPage();
   await (await context.newCDPSession(careersPage)).send(
     "Browser.setDownloadBehavior",
@@ -436,6 +434,13 @@ try {
 } finally {
   await context.close();
   server.close();
+  for (const dir of [profile, downloads, work])
+    rmSync(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 200,
+    });
 }
 console.log(failures.length ? `\n${failures.length} failed` : "\nall passed");
 process.exit(failures.length ? 1 : 0);

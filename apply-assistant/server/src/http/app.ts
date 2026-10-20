@@ -1,4 +1,3 @@
-import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -46,7 +45,7 @@ export interface AppDeps {
     readonly draftModel: string;
   } | null;
   readonly log?: (line: string) => void;
-  /** The run trace; tests leave it out and get a throwaway one in a temp folder. */
+  /** The run trace; tests leave it out and share one in the temp folder (made on first snapshot). */
   readonly trace?: TraceStore;
 }
 
@@ -62,7 +61,7 @@ export function createApp({
   log,
   trace = createTraceStore({
     db,
-    dir: mkdtempSync(path.join(tmpdir(), "apply-trace-")),
+    dir: path.join(tmpdir(), "apply-assistant-test-trace"),
   }),
 }: AppDeps) {
   const app = express();

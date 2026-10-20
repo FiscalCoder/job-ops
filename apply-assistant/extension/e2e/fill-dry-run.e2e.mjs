@@ -8,7 +8,7 @@
 // STUB_ATS=lever replaces the apply-assistant server with a local stub serving that plan (built
 // from a real form with FAKE details), so the real form is filled and nothing of yours is used.
 //   node e2e/fill-dry-run.e2e.mjs <screenshot-dir> [job title substring]
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,18 +22,16 @@ const jobTitle = process.argv[3] ?? "Senior Full Stack Developer";
 const SERVER_HOST = "apply.hueint.com";
 const mask = (v) => (v.length <= 2 ? v : `${v[0]}***(${v.length})`);
 
-const context = await chromium.launchPersistentContext(
-  mkdtempSync(path.join(tmpdir(), "copilot-")),
-  {
-    channel: "chromium",
-    headless: true,
-    viewport: { width: 1280, height: 900 },
-    args: [
-      `--disable-extensions-except=${extensionDir}`,
-      `--load-extension=${extensionDir}`,
-    ],
-  },
-);
+const profile = mkdtempSync(path.join(tmpdir(), "copilot-"));
+const context = await chromium.launchPersistentContext(profile, {
+  channel: "chromium",
+  headless: true,
+  viewport: { width: 1280, height: 900 },
+  args: [
+    `--disable-extensions-except=${extensionDir}`,
+    `--load-extension=${extensionDir}`,
+  ],
+});
 const blocked = [];
 const allowedPosts = [];
 // Ashby loads the form with GraphQL POSTs named by ?op=; only reads are let through.
@@ -386,3 +384,9 @@ console.log(
   ),
 );
 await context.close();
+rmSync(profile, {
+  recursive: true,
+  force: true,
+  maxRetries: 5,
+  retryDelay: 200,
+});

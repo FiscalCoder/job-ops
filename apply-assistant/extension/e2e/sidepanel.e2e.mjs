@@ -1,6 +1,6 @@
 // Loads the built extension in Chromium and drives its side panel against a real server.
 //   node e2e/sidepanel.e2e.mjs <screenshot-dir>   (needs username/password in the env; build first)
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,17 +10,15 @@ const extensionDir = fileURLToPath(
   new URL("../.output/chrome-mv3", import.meta.url),
 );
 const shots = process.argv[2];
-const context = await chromium.launchPersistentContext(
-  mkdtempSync(path.join(tmpdir(), "copilot-")),
-  {
-    channel: "chromium",
-    headless: true,
-    args: [
-      `--disable-extensions-except=${extensionDir}`,
-      `--load-extension=${extensionDir}`,
-    ],
-  },
-);
+const profile = mkdtempSync(path.join(tmpdir(), "copilot-"));
+const context = await chromium.launchPersistentContext(profile, {
+  channel: "chromium",
+  headless: true,
+  args: [
+    `--disable-extensions-except=${extensionDir}`,
+    `--load-extension=${extensionDir}`,
+  ],
+});
 const worker =
   context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
 const extensionId = new URL(worker.url()).host;
@@ -62,3 +60,9 @@ console.log(
   ),
 );
 await context.close();
+rmSync(profile, {
+  recursive: true,
+  force: true,
+  maxRetries: 5,
+  retryDelay: 200,
+});
