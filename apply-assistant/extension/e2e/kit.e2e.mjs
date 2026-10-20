@@ -93,9 +93,18 @@ const careers = `<!doctype html><html><body>
   <label>Cover letter <input type="file" name="cover"></label>
   <label>Resume / CV <input type="file" name="resume" accept=".pdf"></label>
   <p id="state"></p>
+  <button type="button" id="next">Next</button>
 </form>
 <iframe src="/test/embed" title="questions" style="width:100%;height:120px"></iframe>
 <script>
+  // A two-step application (like Workday): Next swaps in step 2 without leaving the page.
+  document.getElementById("next").addEventListener("click", () => {
+    document.querySelector("h1").textContent = "Work experience";
+    document.getElementById("apply").innerHTML =
+      '<label for="years">Years of experience</label><select id="years" name="years"><option></option><option>3-5</option><option>6-8</option></select>' +
+      '<label for="notice">Notice period</label><input id="notice" name="notice">' +
+      '<button type="button" id="submit-app">Submit application</button>';
+  });
   // Controlled field: the value only survives a blur if an input event carried it.
   const email = document.getElementById("email");
   let state = "";
@@ -343,6 +352,81 @@ try {
       const copied = await clipboard();
       assert.ok(path.isAbsolute(copied), `absolute path: ${copied}`);
       assert.deepEqual(readFileSync(copied), PDF);
+    },
+  );
+
+  await check(
+    "a manual application is recorded: form pages, your answers, step clicks and page snapshots",
+    async () => {
+      // You fill the careers page by hand and click Next to a second step.
+      await careersPage.bringToFront();
+      await careersPage.fill("#full", "Manual Person");
+      await careersPage.click("#next");
+      await careersPage.selectOption("#years", "6-8");
+      await careersPage.fill("#notice", "30 days");
+      await careersPage.locator("#notice").blur();
+      const trail = async () =>
+        panel.evaluate(async (id) => {
+          const { token } = await chrome.storage.local.get("token");
+          const res = await fetch(`https://apply.hueint.com/trace/jobs/${id}`, {
+            headers: { authorization: `Bearer ${token}` },
+          });
+          return (await res.json()).data;
+        }, job.id);
+      let data = await trail();
+      const deadline = Date.now() + 20_000;
+      const ready = (d) =>
+        d.events.filter((e) => e.kind === "manual-page").length >= 2 &&
+        d.events.some((e) => e.kind === "manual-step") &&
+        d.events.some(
+          (e) =>
+            e.kind === "manual-field" &&
+            e.data?.field?.label === "Notice period",
+        );
+      while (!ready(data) && Date.now() < deadline) {
+        await panel.waitForTimeout(1_000);
+        data = await trail();
+      }
+      const kinds = data.events.map((e) => e.kind);
+      const pages = data.events.filter((e) => e.kind === "manual-page");
+      assert.ok(
+        pages.length >= 2,
+        `two form pages recorded (has ${kinds.join(", ")})`,
+      );
+      assert.ok(
+        pages.some((p) => p.data.heading === "Work experience"),
+        "the second step's heading",
+      );
+      const step = data.events.find((e) => e.kind === "manual-step");
+      assert.equal(step?.data.button, "Next");
+      assert.equal(
+        step.data.fields.find((f) => f.label === "Full name")?.value,
+        "Manual Person",
+        "the step click carries your answers",
+      );
+      const answers = data.events
+        .filter((e) => e.kind === "manual-field")
+        .map((e) => [e.data.field.label, e.data.field.value]);
+      assert.ok(
+        answers.some(
+          ([l, v]) => l === "Years of experience" && v.join("") === "6-8",
+        ),
+        `select answer recorded (${JSON.stringify(answers)})`,
+      );
+      assert.ok(
+        answers.some(([l, v]) => l === "Notice period" && v === "30 days"),
+        "text answer recorded",
+      );
+      const shots = data.snapshots.filter((s) =>
+        s.reason.startsWith("manual:"),
+      );
+      assert.ok(
+        shots.some(
+          (s) => s.kind === "dom" && s.reason === 'manual: before "Next"',
+        ),
+        `page snapshot at the step click (has ${shots.map((s) => `${s.kind}:${s.reason}`).join(", ")})`,
+      );
+      // Screenshots need the all-sites permission, which a test browser can't grant.
     },
   );
 

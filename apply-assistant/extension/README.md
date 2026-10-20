@@ -13,6 +13,10 @@ apply-assistant server never contacts Greenhouse or company sites.
   Ops (or press "I submitted it"). Every step is logged on the server. Closing the side panel stops
   the run. Chrome shows "Apply Copilot started debugging this browser" while a run is active: that is
   the trusted input.
+- **Records manual applications**: on a queued job's application pages (not LinkedIn; sites
+  you allowed), each form page's fields and your answers, a page snapshot and a screenshot, every
+  changed answer, and each Next / Submit click with the whole page go to the job's trail, to build
+  and teach future fillers from (Workday first). Passwords and one-time codes are never read.
 - **Recognises the job you're on**: on a queued job's LinkedIn or Naukri page, the company page
   you reach from there, or its application form, the side panel says "You're on …" with **Apply
   kit** (and **Fill this page** where the form can be filled). On a confirmation page ("Thank you

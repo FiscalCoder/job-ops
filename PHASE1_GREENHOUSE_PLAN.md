@@ -421,6 +421,28 @@ Verified on real data (read-only run, `spike/e2e-real.ts`): 24 lookups → 3 mat
 
 Live result: ElevenLabs (a Ready job) is matched on Ashby and planned. Its 2 needs-you are "How did you hear" (empty in the answer bank) and GitHub (not on the resume).
 
+## 12G. Phase 1b: Workday (started 2026-10-21)
+
+**Why it starts differently.** Workday's application forms only appear after you sign in to each company's Workday account, so they can't be fetched ahead of time the way Greenhouse, Ashby and Lever forms are, and I can't open them myself.
+
+**Plan:**
+1. **W0: record manual applications (done 2026-10-21).** On a tab belonging to a queued job (never LinkedIn; sites the extension may read), each new form page records:
+   - its fields: label, name and id, `data-automation-id`, choices, required, your answers;
+   - a page snapshot;
+   - a screenshot when the tab is in front (needs the all-sites permission, now `<all_urls>`);
+   - each changed answer;
+   - every Next / Continue / Submit click, with the whole page.
+
+   Password and one-time-code values are never read. Code: `src/track/inspect.ts`, `manual-capture.ts`. Checked in `e2e/kit.e2e.mjs`.
+2. **W1:** you apply to one or two Workday jobs by hand with recording on (move them to Ready first, so they're in the queue).
+3. **W2: Workday filler, built from those recorded pages.**
+   - **Approach:** a step-by-step supervised fill planned at fill time from each page's fields. It reuses the classifier, answer bank, remembered answers and Claude.
+   - **Fields:** found by Workday's stable `data-automation-id`s, for example `legalNameSection_firstName`, `addressSection_city`, `phone-number`, `bottom-navigation-next-button`. Other autofill projects use the same ids.
+   - **Who clicks what:** you sign in, click "Save and Continue", and submit.
+4. **W3:** Workday lookups (posting liveness) from the public job-board API, and dry runs on the recorded pages.
+
+Your Job Ops has 10 Workday jobs: FactSet and Hitachi (applied); Capital One, LPL, Visa, Genpact, ModMed, Candescent and insightsoftware (Discovered). FactSet's manual application predates W0, so only its kit actions were recorded.
+
 ## 12F. Phase 1 status (2026-10-21)
 
 Everything planned for Phase 1 is built and live:

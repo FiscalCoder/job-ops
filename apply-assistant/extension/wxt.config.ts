@@ -42,8 +42,9 @@ export default defineConfig({
       "https://jobs.lever.co/*",
       "https://autocomplete.clearbit.com/*",
     ],
-    // Company careers pages (embedded Greenhouse boards): asked for once, from the side panel.
-    optional_host_permissions: ["https://*/*"],
+    // All sites, asked for once from the side panel: company careers pages (embedded Greenhouse
+    // boards), filling by click, and recording manual applications with screenshots.
+    optional_host_permissions: ["<all_urls>"],
     action: { default_title: "Apply Copilot" },
     side_panel: { default_path: "sidepanel.html" },
   },

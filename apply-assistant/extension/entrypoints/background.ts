@@ -8,6 +8,7 @@ import {
 } from "../src/lib/settings";
 import { type RunSummary, runLookups } from "../src/lib/worker";
 import { listenForApplicationTabs } from "../src/track/listen";
+import { listenForManualApplications } from "../src/track/manual-capture";
 
 /** Lookups every 30 minutes while Chrome is open, and on demand from the side panel. */
 
@@ -44,6 +45,7 @@ function runNow(): Promise<RunSummary | null> {
 export default defineBackground(() => {
   listenForLinkedInApplies();
   listenForApplicationTabs();
+  listenForManualApplications();
   chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch(() => {});

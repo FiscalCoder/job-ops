@@ -20,6 +20,8 @@ export interface TabRecord {
   readonly from?: number;
   /** Set once the tab is known to be for this job. */
   readonly jobId?: string;
+  /** A supervised fill is running here (it records everything itself). */
+  readonly supervised?: boolean;
   readonly seen: number;
 }
 
@@ -74,6 +76,22 @@ export function trackTab(tabId: number, jobId: string): Promise<void> {
       [tabId]: { ...book[tabId], jobId, seen: Date.now() },
     });
   });
+}
+
+/** Marks a supervised fill starting or ending on this tab. */
+export function setSupervised(tabId: number, on: boolean): Promise<void> {
+  return serial(async () => {
+    const book = await load();
+    await save({
+      ...book,
+      [tabId]: { ...book[tabId], supervised: on, seen: Date.now() },
+    });
+  });
+}
+
+/** The tab's record, if it has one. */
+export async function tabRecord(tabId: number): Promise<TabRecord | null> {
+  return (await load())[tabId] ?? null;
 }
 
 export function forgetTab(tabId: number): Promise<void> {

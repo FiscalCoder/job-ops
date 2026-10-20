@@ -7,7 +7,7 @@ import {
 import type { ApplyClient, QueueItem } from "../lib/api";
 import { pageKey } from "../lib/tab-match";
 import { errorText, TraceRecorder } from "../trace/recorder";
-import { trackTab } from "../track/tabs";
+import { setSupervised, trackTab } from "../track/tabs";
 import { attachDriver, formUrlFor, resumeFirst } from "./drivers";
 import { decisionEvent, pageCapture, watchPage } from "./run-trace";
 import {
@@ -87,6 +87,7 @@ async function openForm(url: string, tabId?: number): Promise<chrome.tabs.Tab> {
  * on a tab you already closed it logged "No tab with given id"; Chrome detaches by itself then.
  */
 async function release(browser: Browser, tabId: number): Promise<void> {
+  await setSupervised(tabId, false);
   const open = await chrome.tabs.get(tabId).then(
     () => true,
     () => false,
@@ -178,6 +179,8 @@ export class RunController {
     }
     if (tab.id === undefined) throw await fail("Couldn't open the posting");
     await trackTab(tab.id, job.jobId);
+    // The run records this tab itself; manual-application recording stays out of it.
+    await setSupervised(tab.id, true);
     const browser = await connect({
       transport: await ExtensionTransport.connectTab(tab.id),
       defaultViewport: null,

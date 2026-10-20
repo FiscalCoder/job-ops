@@ -1,5 +1,5 @@
 import { RunController } from "../../src/fill/controller";
-import { activeTab } from "../../src/kit/page-fill";
+import { ALL_SITES, activeTab } from "../../src/kit/page-fill";
 import { ApiError, ApplyClient, type QueueItem } from "../../src/lib/api";
 import {
   type CaptureEntry,
@@ -208,7 +208,7 @@ async function showMain() {
   renderRun(await loadLastRun());
   renderCaptures(await loadCaptures());
   $("sites").hidden = await chrome.permissions.contains({
-    origins: ["https://*/*"],
+    origins: [ALL_SITES],
   });
   await loadQueue();
 }
@@ -327,7 +327,7 @@ $("run").addEventListener("click", async () => {
 
 $("allow-sites").addEventListener("click", async () => {
   const granted = await chrome.permissions.request({
-    origins: ["https://*/*"],
+    origins: [ALL_SITES],
   });
   $("sites").hidden = granted;
 });

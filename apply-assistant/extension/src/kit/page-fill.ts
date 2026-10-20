@@ -153,7 +153,8 @@ export type PageFillOutcome =
     }
   | { readonly ok: false; readonly reason: string };
 
-export const ALL_SITES = "https://*/*";
+/** All sites: filling by click, recording manual applications and their screenshots. */
+export const ALL_SITES = "<all_urls>";
 
 /** Why the kit can't touch this tab, or null when it may. */
 export async function pageBlock(
