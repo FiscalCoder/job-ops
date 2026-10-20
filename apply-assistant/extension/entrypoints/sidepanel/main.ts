@@ -74,6 +74,9 @@ async function startFill(item: QueueItem) {
     activeRun = null;
     box.hidden = true;
     $("main").hidden = false;
+    // The plan shown before the run is stale (the job may now be applied): reopen it from the queue.
+    $("plan").hidden = true;
+    $("plan").replaceChildren();
     void loadQueue();
   };
   try {

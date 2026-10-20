@@ -25,6 +25,7 @@ function fakeJobOps(log: {
   updates: [string, JobUpdate][];
   notes: [string, string, string][];
 }): JobOpsApi {
+  let status = job.status;
   return {
     login: async () => ({ token: "good", expiresIn: 3600 }),
     me: async (t) => {
@@ -35,10 +36,11 @@ function fakeJobOps(log: {
     getJob: async (_t, id) => {
       if (id !== job.id)
         throw new JobOpsError(404, "NOT_FOUND", "Job not found");
-      return { ...job, location: "Bengaluru", jobDescription: "x" };
+      return { ...job, status, location: "Bengaluru", jobDescription: "x" };
     },
     updateJob: async (_t, id, update) => {
       log.updates.push([id, update]);
+      status = update.status ?? status;
     },
     addNote: async (_t, id, note) => {
       log.notes.push([id, note.title, note.content]);
@@ -172,6 +174,14 @@ describe("runs", () => {
       "phone",
       "question_9",
     ]);
+
+    // A job already applied to can't start another run (no second application).
+    const again = await json("/runs", { jobId: "job-1" });
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatchObject({
+      code: "NOT_APPLICABLE",
+      message: "You've already applied to this job (Job Ops says Applied)",
+    });
   });
 
   it("an aborted run leaves the job alone", async () => {

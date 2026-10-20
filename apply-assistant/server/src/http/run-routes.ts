@@ -1,6 +1,7 @@
 import { type Response, Router } from "express";
 import { z } from "zod";
 import { type JobOpsApi, JobOpsError } from "../jobops/client.js";
+import { LOOKUP_STATUSES } from "../resolver/lookups.js";
 import type { AnswerBankRepo } from "../store/answer-bank-repo.js";
 import { RunConflictError, type RunsRepo } from "../store/runs-repo.js";
 import { type AuthedRequest, sendJobOpsFailure } from "./auth.js";
@@ -91,10 +92,23 @@ export function createRunRoutes({ jobOps, runs, answers }: RunRoutesDeps) {
       sendError(res, 400, "INVALID_REQUEST", "jobId is required");
       return;
     }
+    let status: string;
     try {
-      await jobOps.getJob(tokenOf(req), body.data.jobId);
+      ({ status } = await jobOps.getJob(tokenOf(req), body.data.jobId));
     } catch (error) {
       failJobOps(res, error);
+      return;
+    }
+    // Only jobs still in the queue; anything else would risk a second application.
+    if (!LOOKUP_STATUSES.includes(status as (typeof LOOKUP_STATUSES)[number])) {
+      sendError(
+        res,
+        409,
+        "NOT_APPLICABLE",
+        status === "applied"
+          ? "You've already applied to this job (Job Ops says Applied)"
+          : `This job is "${status}" in Job Ops, not Ready`,
+      );
       return;
     }
     sendOk(res, runs.create(body.data.jobId));

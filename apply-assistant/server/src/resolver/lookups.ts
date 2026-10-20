@@ -26,7 +26,7 @@ export const QUEUE_STATUSES = ["ready"] as const;
  * Lookups run before tailoring too, so you know which high scorers are on Greenhouse before
  * spending effort on a resume. Ready jobs are always looked up; Discovered ones only at 70+.
  */
-const LOOKUP_STATUSES = ["ready", "discovered"] as const;
+export const LOOKUP_STATUSES = ["ready", "discovered"] as const;
 const LOOKUP_MIN_DISCOVERED_SCORE = 70;
 
 const worthLookingUp = (job: JobOpsJob) =>
