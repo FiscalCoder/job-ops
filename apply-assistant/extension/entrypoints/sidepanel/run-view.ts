@@ -1,5 +1,9 @@
 import type { RunView } from "../../src/fill/controller";
-import type { RunEvent, Step } from "../../src/fill/supervisor";
+import {
+  MAX_ATTEMPTS,
+  type RunEvent,
+  type Step,
+} from "../../src/fill/supervisor";
 
 /** Renders a supervised run: the current step, your controls, and the timeline. */
 
@@ -104,9 +108,16 @@ function currentCard(view: RunView, send: Send): HTMLElement | null {
   const needsValue = step.entry.status === "needs-you" || step.value === null;
   const total = view.state.steps.length;
   const controls: (HTMLElement | null)[] = [];
+  // After two failed tries, retrying the same value is pointless: Edit it, do it, or skip.
+  const exhausted = (step.attempts ?? 0) >= MAX_ATTEMPTS;
   if (action.kind === "wait-for-you" && !needsValue)
     controls.push(
-      button("Approve", () => send({ type: "approve" }), true, busy),
+      button(
+        "Approve",
+        () => send({ type: "approve" }),
+        true,
+        busy || exhausted,
+      ),
     );
   if (action.kind === "countdown")
     controls.push(

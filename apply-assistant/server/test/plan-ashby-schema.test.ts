@@ -32,10 +32,15 @@ describe("parseAshbySchema (real ElevenLabs and Ciroos forms)", () => {
       canonical: "resume",
       type: "file",
     });
+    // ElevenLabs' Location only accepts countries; Ciroos' accepts cities too.
     expect(field(schema, "Location")).toMatchObject({
-      canonical: "location",
+      canonical: "country",
       type: "text",
       section: "location",
+    });
+    expect(field(parseAshbySchema(ciroos), "Location")).toMatchObject({
+      ref: "_systemfield_location",
+      canonical: "location",
     });
   });
 

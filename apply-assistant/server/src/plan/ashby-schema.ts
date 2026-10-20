@@ -39,9 +39,14 @@ const CANONICAL_BY_PATH: Record<string, string> = {
   cover_letter: "cover_letter",
 };
 const CANONICAL_BY_TYPE: Record<string, string> = {
-  Location: "location",
   Phone: "phone",
 };
+
+/** A Location field answers with your city, or your country when it only accepts countries. */
+const locationCanonical = (types: readonly string[] | null | undefined) =>
+  !types || types.length === 0 || types.includes("City")
+    ? "location"
+    : "country";
 
 const YES_NO = [
   { label: "Yes", value: "true" },
@@ -53,6 +58,7 @@ const entrySchema = z.object({
     path: z.string(),
     title: z.string(),
     type: z.string(),
+    locationTypes: z.array(z.string()).nullable().optional(),
     selectableValues: z
       .array(
         z.object({
@@ -84,7 +90,9 @@ type Entry = z.infer<typeof entrySchema>;
 function toField(entry: Entry): FormField {
   const { field } = entry;
   const canonical =
-    CANONICAL_BY_PATH[field.path] ?? CANONICAL_BY_TYPE[field.type];
+    field.type === "Location"
+      ? locationCanonical(field.locationTypes)
+      : (CANONICAL_BY_PATH[field.path] ?? CANONICAL_BY_TYPE[field.type]);
   const options =
     field.type === "Boolean"
       ? YES_NO
@@ -98,7 +106,7 @@ function toField(entry: Entry): FormField {
     type: entry.isHidden ? "hidden" : (TYPE_MAP[field.type] ?? "unknown"),
     required: entry.isRequired === true,
     options,
-    section: canonical === "location" ? "location" : "main",
+    section: field.type === "Location" ? "location" : "main",
   };
 }
 

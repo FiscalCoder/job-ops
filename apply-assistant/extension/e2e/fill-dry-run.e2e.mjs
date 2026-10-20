@@ -1,6 +1,8 @@
-// Dry run of a supervised fill on a REAL Greenhouse form, driven through the built extension.
-// Every non-GET request except to the apply-assistant server is blocked, so nothing is uploaded
-// to Greenhouse and nothing can be submitted. The run is aborted at review.
+// Dry run of a supervised fill on a REAL application form (Greenhouse or Ashby), driven through
+// the built extension. Every non-GET request is blocked except to the apply-assistant server and
+// Ashby's read-only form queries (anything that submits, uploads or creates stays blocked), so
+// nothing is uploaded and nothing can be submitted. Steps that need you are skipped; the run is
+// aborted at review.
 //   node e2e/fill-dry-run.e2e.mjs <screenshot-dir> [job title substring]
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,11 +31,26 @@ const context = await chromium.launchPersistentContext(
   },
 );
 const blocked = [];
+const allowedPosts = [];
+// Ashby loads the form with GraphQL POSTs named by ?op=; only reads are let through.
+const READ_ONLY_ASHBY = (url) =>
+  url.host === "jobs.ashbyhq.com" &&
+  url.pathname === "/api/non-user-graphql" &&
+  !/submit|upload|create|apply|mutat|file|update|delete|save|set/i.test(
+    url.searchParams.get("op") ?? "submit",
+  );
 await context.route("**/*", (route) => {
   const req = route.request();
-  if (req.method() === "GET" || new URL(req.url()).host === SERVER_HOST)
+  const url = new URL(req.url());
+  if (req.method() === "GET" || url.host === SERVER_HOST)
     return route.continue();
-  blocked.push(`${req.method()} ${new URL(req.url()).host}`);
+  if (READ_ONLY_ASHBY(url)) {
+    allowedPosts.push(url.searchParams.get("op"));
+    return route.continue();
+  }
+  blocked.push(
+    `${req.method()} ${url.host}${url.pathname}${url.search.slice(0, 40)}`,
+  );
   return route.abort();
 });
 
@@ -59,6 +76,7 @@ await panel.getByRole("button", { name: "Start supervised fill" }).click();
 const posting = await postingPromise;
 
 const clicks = [];
+const skipped = [];
 // Optional trace of one field while the run works (WATCH=candidate-location).
 const watchId = process.env.WATCH;
 let lastSeen = "";
@@ -100,11 +118,41 @@ while (Date.now() < deadline) {
     break;
   }
   const approve = panel.getByRole("button", { name: "Approve", exact: true });
-  if (await approve.isVisible().catch(() => false)) {
-    const label =
-      (await panel.locator(".step-card strong").first().textContent()) ?? "";
-    clicks.push(label);
+  const skip = panel.getByRole("button", { name: "Skip", exact: true });
+  const label = async () =>
+    (await panel
+      .locator(".step-card strong")
+      .first()
+      .textContent()
+      .catch(() => "")) ?? "";
+  if (
+    (await approve.isVisible().catch(() => false)) &&
+    (await approve.isEnabled().catch(() => false))
+  ) {
+    clicks.push(await label());
     await approve.click().catch(() => {});
+  } else if (
+    // Steps with no answer to approve (the card shows no value) need you; so does a step whose
+    // Approve is greyed out after two failed tries. Both are skipped and reported.
+    (await skip.isVisible().catch(() => false)) &&
+    !(await panel
+      .getByRole("button", { name: "Approve now" })
+      .isVisible()
+      .catch(() => false)) &&
+    ((await panel.locator(".step-card .value").count()) === 0 ||
+      ((await approve.isVisible().catch(() => false)) &&
+        !(await approve.isEnabled().catch(() => true))))
+  ) {
+    skipped.push(
+      `${await label()}: ${
+        (await panel
+          .locator(".step-card .error, .step-card .muted")
+          .first()
+          .textContent()
+          .catch(() => "")) ?? ""
+      }`,
+    );
+    await skip.click().catch(() => {});
   }
   await watch();
   await panel.waitForTimeout(150);
@@ -128,6 +176,35 @@ const form =
   posting.frames().find((f) => f.url().includes("greenhouse")) ??
   posting.mainFrame();
 const readBack = await form.evaluate(() => {
+  // Ashby: every field container carries its path.
+  const entries = [...document.querySelectorAll("[data-field-path]")];
+  if (entries.length)
+    return Object.fromEntries(
+      entries.map((entry) => {
+        const label =
+          entry.querySelector("label")?.textContent?.trim().slice(0, 40) ??
+          entry.dataset.fieldPath;
+        const file = entry.querySelector("input[type=file]");
+        const checked = [...entry.querySelectorAll("input:checked")]
+          .map((i) =>
+            document
+              .querySelector(`label[for="${CSS.escape(i.id)}"]`)
+              ?.textContent?.trim(),
+          )
+          .join(", ");
+        const text = entry.querySelector(
+          "input:not([type=file]):not([type=radio]):not([type=checkbox]), textarea",
+        );
+        return [
+          label,
+          file
+            ? (file.files?.[0]?.name ??
+              entry.textContent?.trim().slice(0, 60) ??
+              null)
+            : checked || text?.value || null,
+        ];
+      }),
+    );
   const val = (sel) => document.querySelector(sel)?.value ?? null;
   const shown = (sel) =>
     document
@@ -168,6 +245,7 @@ console.log(
     {
       reachedReview: runText.includes("click Submit yourself"),
       approvalsClicked: clicks.length,
+      skippedNeedsYou: skipped,
       timeline,
       readBack: Object.fromEntries(
         Object.entries(readBack).map(([k, v]) => [
@@ -184,6 +262,7 @@ console.log(
       ),
       afterAbort: endText.slice(0, 160),
       blockedRequests: [...new Set(blocked)],
+      allowedAshbyQueries: [...new Set(allowedPosts)],
       errors,
     },
     null,
