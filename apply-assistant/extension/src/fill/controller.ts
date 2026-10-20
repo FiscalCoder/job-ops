@@ -2,9 +2,12 @@ import {
   type Browser,
   connect,
   ExtensionTransport,
+  type Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import type { ApplyClient, QueueItem } from "../lib/api";
+import { errorText, TraceRecorder } from "../trace/recorder";
 import { attachDriver, formUrlFor, resumeFirst } from "./drivers";
+import { decisionEvent, pageCapture, watchPage } from "./run-trace";
 import {
   maskValue,
   type NextAction,
@@ -34,6 +37,8 @@ export interface RunView {
 }
 
 const REVIEW_POLL_MS = 2_000;
+/** A fill still busy after this long is a stall: the trace gets a snapshot. */
+const STALL_MS = 20_000;
 const TAB_LOAD_TIMEOUT_MS = 30_000;
 const DONE_STATES = new Set(["done", "skipped", "you-did-it"]);
 
@@ -72,6 +77,8 @@ export class RunController {
   private logged = new Set<number>();
   private resume: ResumeFile | null = null;
   private closed = false;
+  private reviewTraced = false;
+  private readonly stopWatching: () => void;
 
   private constructor(
     private readonly client: ApplyClient,
@@ -83,8 +90,15 @@ export class RunController {
     entries: readonly PlanEntry[],
     runOptions: { countdownSeconds: number; resumeFirst: boolean },
     private readonly onChange: (view: RunView) => void,
+    private readonly trace: TraceRecorder,
+    private readonly page: Page,
   ) {
     this.state = startRun(entries, runOptions);
+    this.stopWatching = watchPage(page, trace);
+  }
+
+  private snapshot(reason: string): Promise<void> {
+    return this.trace.snapshot(reason, pageCapture(this.page, this.driver));
   }
 
   static async start(options: {
@@ -98,10 +112,32 @@ export class RunController {
     const ats = job.target.ats ?? "greenhouse";
     if (!posting) throw new Error("This job has no posting to apply on");
     const url = formUrlFor(ats, posting);
-    const plan = (await client.plan(job.jobId)) as { entries: PlanEntry[] };
+    const trace = new TraceRecorder(client, job.jobId);
+    /** Records why the run couldn't start (with a snapshot when a page is open). */
+    const fail = async (message: string, page?: Page): Promise<Error> => {
+      trace.event("error", message, { data: { url, ats } });
+      if (page) await trace.snapshot("couldn't start", pageCapture(page, null));
+      await trace.close();
+      return new Error(message);
+    };
+    trace.event("run-starting", `Opening the ${ats} form: ${url}`, {
+      data: { ats, url },
+    });
+    let entries: PlanEntry[];
+    try {
+      ({ entries } = (await client.plan(job.jobId)) as {
+        entries: PlanEntry[];
+      });
+    } catch (error) {
+      throw await fail(`Couldn't load the plan: ${errorText(error)}`);
+    }
     const tab = await chrome.tabs.create({ url, active: true });
-    if (tab.id === undefined) throw new Error("Couldn't open the posting");
-    await waitForTabLoad(tab.id);
+    if (tab.id === undefined) throw await fail("Couldn't open the posting");
+    try {
+      await waitForTabLoad(tab.id);
+    } catch (error) {
+      throw await fail(errorText(error));
+    }
     const browser = await connect({
       transport: await ExtensionTransport.connectTab(tab.id),
       defaultViewport: null,
@@ -109,12 +145,36 @@ export class RunController {
     const [page] = await browser.pages();
     const driver = page ? await attachDriver(ats, page) : null;
     if (!page || !driver) {
-      await browser.disconnect();
-      throw new Error(
+      const error = await fail(
         "No application form on the posting (it may have closed)",
+        page,
       );
+      await browser.disconnect();
+      throw error;
     }
-    const run = await client.startRun(job.jobId);
+    let run: { id: string };
+    try {
+      run = await client.startRun(job.jobId);
+    } catch (error) {
+      const refused = await fail(
+        `The server refused the run: ${errorText(error)}`,
+        page,
+      );
+      await browser.disconnect();
+      throw refused;
+    }
+    trace.setRun(run.id);
+    trace.event(
+      "run-started",
+      `Run started on ${page.url()} with ${entries.length} plan entries`,
+      {
+        data: {
+          url: page.url(),
+          entries: entries.length,
+          countdownSeconds: options.countdownSeconds,
+        },
+      },
+    );
     const controller = new RunController(
       client,
       job,
@@ -122,13 +182,16 @@ export class RunController {
       browser,
       driver,
       new URL(page.url()).host,
-      plan.entries,
+      entries,
       {
         countdownSeconds: options.countdownSeconds,
         resumeFirst: resumeFirst(ats),
       },
       options.onChange,
+      trace,
+      page,
     );
+    void controller.snapshot("start");
     void controller.loop();
     return controller;
   }
@@ -147,6 +210,17 @@ export class RunController {
   /** Your controls from the side panel. */
   dispatch(event: RunEvent): void {
     if (this.busy && event.type !== "pause" && event.type !== "abort") return;
+    const decision = decisionEvent(
+      event,
+      this.state.phase === "filling"
+        ? this.state.steps[this.state.cursor]
+        : undefined,
+    );
+    if (decision)
+      this.trace.event("decision", decision.message, {
+        data: decision.data,
+        ...(decision.stepSeq ? { stepSeq: decision.stepSeq } : {}),
+      });
     this.apply(event);
     void this.loop();
   }
@@ -162,10 +236,17 @@ export class RunController {
     );
     for (const step of finished) {
       this.logged.add(step.seq);
-      await this.client.logAction(this.runId, toLogEntry(step)).catch(() => {
-        this.notice =
-          "Couldn't save a step to the run log (the fill continues)";
-      });
+      await this.client
+        .logAction(this.runId, toLogEntry(step))
+        .catch((error: unknown) => {
+          this.notice =
+            "Couldn't save a step to the run log (the fill continues)";
+          this.trace.event(
+            "error",
+            `Couldn't log step ${step.seq}: ${errorText(error)}`,
+            { stepSeq: step.seq },
+          );
+        });
     }
   }
 
@@ -217,6 +298,17 @@ export class RunController {
           ...(await this.driver.problems()),
           ...(await this.emptiedFields()),
         ];
+        if (!this.reviewTraced) {
+          this.reviewTraced = true;
+          this.trace.event(
+            "review",
+            this.problems.length
+              ? `At review with ${this.problems.length} problem(s)`
+              : "At review: waiting for you to click Submit",
+            { data: { problems: this.problems } },
+          );
+          void this.snapshot("review");
+        }
         this.emit();
         this.timer = setTimeout(
           () => void this.checkSubmitted(),
@@ -259,17 +351,51 @@ export class RunController {
     return allowedHost(host, this.startHost);
   }
 
+  /** A failed step: what the field shows now, and a snapshot of the page. */
+  private async traceFailure(step: Step, reason: string) {
+    const shown = await this.driver.readBack(step.entry).catch(() => null);
+    this.trace.event("step-failed", `${step.entry.label}: ${reason}`, {
+      stepSeq: step.seq,
+      data: { reason, shown, wanted: step.value, problems: this.problems },
+    });
+    void this.snapshot(`step ${step.seq} failed: ${step.entry.label}`);
+  }
+
   private async fill(step: Step) {
+    let stall: ReturnType<typeof setTimeout> | null = null;
     this.busy = true;
     this.emit();
     try {
       if (!(await this.onAllowedSite())) {
         this.notice = "The tab left the job's site, so the run is paused.";
+        this.trace.event(
+          "error",
+          `The tab left the job's site (now ${this.page.url()}); run paused`,
+          { stepSeq: step.seq },
+        );
         this.apply({ type: "fill-failed", reason: "Tab left the job's site" });
         this.apply({ type: "pause" });
         return;
       }
       await this.mark(step, "filling");
+      this.trace.event("step-start", `Filling ${step.entry.label}`, {
+        stepSeq: step.seq,
+        data: {
+          ref: step.entry.ref,
+          type: step.entry.type,
+          source: step.entry.source,
+          value: step.value,
+          attempt: (step.attempts ?? 0) + 1,
+        },
+      });
+      stall = setTimeout(() => {
+        this.trace.event(
+          "stall",
+          `Still filling ${step.entry.label} after ${STALL_MS / 1000}s`,
+          { stepSeq: step.seq },
+        );
+        void this.snapshot(`stall at step ${step.seq}`);
+      }, STALL_MS);
       if (step.entry.type === "file" && !this.resume)
         this.resume = await this.client.resumePdf(this.job.jobId);
       const outcome = await this.driver.fill(
@@ -278,17 +404,28 @@ export class RunController {
         this.resume ?? undefined,
       );
       this.problems = await this.driver.problems();
+      if (outcome.ok)
+        this.trace.event(
+          "step-filled",
+          `${step.entry.label}: ${outcome.result}`,
+          {
+            stepSeq: step.seq,
+            ...(this.problems.length
+              ? { data: { problems: this.problems } }
+              : {}),
+          },
+        );
+      else await this.traceFailure(step, outcome.reason);
       this.apply(
         outcome.ok
           ? { type: "filled", result: outcome.result }
           : { type: "fill-failed", reason: outcome.reason },
       );
     } catch (error) {
-      this.apply({
-        type: "fill-failed",
-        reason: error instanceof Error ? error.message : String(error),
-      });
+      await this.traceFailure(step, errorText(error));
+      this.apply({ type: "fill-failed", reason: errorText(error) });
     } finally {
+      if (stall) clearTimeout(stall);
       this.busy = false;
     }
     void this.loop();
@@ -309,6 +446,14 @@ export class RunController {
     this.closed = true;
     this.clearTimer();
     const outcome = this.state.outcome ?? "aborted";
+    this.trace.event(
+      "run-ended",
+      outcome === "submitted"
+        ? "You submitted the application"
+        : "Run stopped; nothing was submitted",
+      { data: { outcome } },
+    );
+    await this.snapshot(outcome === "submitted" ? "submitted" : "stopped");
     try {
       await this.logFinishedSteps();
       await this.client.completeRun(this.runId, outcome);
@@ -317,8 +462,11 @@ export class RunController {
           ? "Marked as applied in Job Ops."
           : "Run stopped. Nothing was submitted.";
     } catch (error) {
-      this.notice = `Couldn't record the end of the run: ${error instanceof Error ? error.message : String(error)}`;
+      this.notice = `Couldn't record the end of the run: ${errorText(error)}`;
+      this.trace.event("error", this.notice);
     }
+    this.stopWatching();
+    await this.trace.close();
     await this.driver
       .highlight(
         null,

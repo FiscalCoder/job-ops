@@ -5,10 +5,31 @@ import { loadConfig } from "./config.js";
 import { createApp } from "./http/app.js";
 import { JobOpsClient } from "./jobops/client.js";
 import { openStore } from "./store/db.js";
+import { createTraceStore } from "./store/trace-store.js";
 
 const config = loadConfig(process.env);
 mkdirSync(config.dataDir, { recursive: true });
 const db = openStore(path.join(config.dataDir, "apply.db"));
+const log = (line: string) => console.log(line);
+const trace = createTraceStore({
+  db,
+  dir: path.join(config.dataDir, "traces"),
+  log,
+});
+const PRUNE_EVERY_MS = 6 * 60 * 60 * 1000;
+const prune = () => {
+  try {
+    const dropped = trace.prune();
+    if (dropped.events || dropped.snapshots)
+      log(
+        `[trace] pruned ${dropped.events} events, ${dropped.snapshots} snapshots`,
+      );
+  } catch (error) {
+    log(`[trace] prune failed: ${String(error)}`);
+  }
+};
+prune();
+setInterval(prune, PRUNE_EVERY_MS).unref();
 const app = createApp({
   jobOps: new JobOpsClient(config.jobOpsBaseUrl),
   db,
@@ -20,7 +41,8 @@ const app = createApp({
         draftModel: config.claude.draftModel,
       }
     : null,
-  log: (line) => console.log(line),
+  log,
+  trace,
 });
 
 const server = app.listen(config.port, () => {

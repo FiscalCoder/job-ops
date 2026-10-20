@@ -13,6 +13,7 @@
       <nav id="tabs" hidden>
         <button type="button" data-tab="queue" class="tab">Queue</button>
         <button type="button" data-tab="bank" class="tab">Answer bank</button>
+        <button type="button" data-tab="timeline" class="tab">Timeline</button>
         <button type="button" id="signout" class="link">Sign out</button>
       </nav>
     </header>
@@ -41,6 +42,16 @@
         </div>
         <div id="queue-list" class="card"></div>
         <div id="plan" class="card" hidden></div>
+      </section>
+
+      <section id="timeline" hidden>
+        <div class="section-head">
+          <div>
+            <h2>Timeline</h2>
+            <p class="muted">Everything recorded per job: what the server, the extension and the page did, with page snapshots. Kept 60 days.</p>
+          </div>
+        </div>
+        <div id="timeline-box" class="card"></div>
       </section>
 
       <section id="bank" hidden>

@@ -122,6 +122,33 @@ export const MIGRATIONS: readonly string[] = [
    alter table form_schemas_v2 rename to form_schemas;`,
   // Which systems a "no board" answer covered: adding a system makes those answers stale.
   "alter table ats_boards add column searched text;",
+  // Run trace: what the server, the extension and the page did, per job (APPLY_TRACE_AND_KIT_PLAN.md).
+  `create table trace_events (
+     id integer primary key autoincrement,
+     job_id text not null,
+     run_id text,
+     ts text not null,
+     source text not null,
+     kind text not null,
+     step_seq integer,
+     message text not null,
+     data_json text,
+     snapshot_id text
+   );
+   create index trace_events_job on trace_events (job_id, id);
+   create index trace_events_run on trace_events (run_id, id);
+   create table trace_snapshots (
+     id text primary key,
+     job_id text not null,
+     run_id text,
+     kind text not null check (kind in ('dom','screenshot')),
+     reason text not null,
+     url text,
+     bytes integer not null,
+     file text not null,
+     created_at text not null
+   );
+   create index trace_snapshots_job on trace_snapshots (job_id, created_at);`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

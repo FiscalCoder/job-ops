@@ -16,12 +16,18 @@ export default defineConfig({
       "Job-board lookups (Greenhouse, Ashby, Lever), LinkedIn apply-link capture and supervised applying for your Job Ops queue.",
     // debugger: trusted typing/clicking on the form (React forms ignore synthetic input).
     // webNavigation: tab addresses only, to follow the tab LinkedIn's Apply button opens.
+    // scripting: the apply kit fills the field you selected (allowed sites only, never LinkedIn).
+    // downloads: the kit saves the tailored resume to Downloads/JobOps/... for upload dialogs.
+    // clipboardWrite: the kit copies answers and the resume's path.
     permissions: [
       "storage",
       "alarms",
       "sidePanel",
       "debugger",
       "webNavigation",
+      "scripting",
+      "downloads",
+      "clipboardWrite",
     ],
     host_permissions: [
       "https://apply.hueint.com/*",

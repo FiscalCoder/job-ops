@@ -34,6 +34,8 @@ export interface JobOpsJob {
 export interface JobOpsJobDetail extends JobOpsJob {
   readonly location: string | null;
   readonly jobDescription: string | null;
+  /** The summary Job Ops wrote for this job's tailored resume (absent in older fakes). */
+  readonly tailoredSummary?: string | null;
 }
 
 export interface JobUpdate {
@@ -94,6 +96,7 @@ const jobsData = z.object({
 const jobDetailData = jobShape.extend({
   location: z.string().nullable().optional(),
   jobDescription: z.string().nullable().optional(),
+  tailoredSummary: z.string().nullable().optional(),
 });
 
 const toJob = (job: z.infer<typeof jobShape>): JobOpsJob => ({
@@ -147,6 +150,7 @@ export class JobOpsClient implements JobOpsApi {
       ...toJob(job),
       location: job.location ?? null,
       jobDescription: job.jobDescription ?? null,
+      tailoredSummary: job.tailoredSummary ?? null,
     };
   }
 

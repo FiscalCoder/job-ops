@@ -8,6 +8,7 @@ import {
   saveSettings,
 } from "../../src/lib/settings";
 import type { RunSummary } from "../../src/lib/worker";
+import { showKit } from "./kit-view";
 import { renderRun as renderRunView } from "./run-view";
 
 // Side panel: sign in, run lookups, see the queue and each job's plan.
@@ -104,8 +105,39 @@ async function startFill(item: QueueItem) {
   }
 }
 
+let closeKit: (() => Promise<void>) | null = null;
+
+/** The apply kit for any queued job: answers to copy or fill by hand. */
+async function openKit(item: QueueItem) {
+  if (!client || activeRun || closeKit) return;
+  const box = $("kit-box");
+  box.hidden = false;
+  $("main").hidden = true;
+  closeKit = await showKit(box, {
+    client,
+    job: { jobId: item.jobId, title: item.title, employer: item.employer },
+    onBack: () => {
+      closeKit = null;
+      box.hidden = true;
+      $("main").hidden = false;
+    },
+  });
+}
+
+function kitButton(item: QueueItem): HTMLElement {
+  const b = el("button", { type: "button" }, "Apply kit");
+  b.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void openKit(item);
+  });
+  return b;
+}
+
 // Closing the panel ends supervision; the run stops without submitting anything.
-window.addEventListener("pagehide", () => void activeRun?.stop());
+window.addEventListener("pagehide", () => {
+  void activeRun?.stop();
+  void closeKit?.();
+});
 
 const loginForm = () => $<HTMLFormElement>("login-form");
 const field = (name: string) =>
@@ -306,16 +338,21 @@ async function loadQueue() {
         el("div", { class: "muted" }, item.employer),
         el(
           "div",
-          {},
-          el("span", { class: `badge ${tone}` }, label),
-          " ",
-          item.plan
-            ? el(
-                "span",
-                { class: `badge ${needs ? "warn" : "ok"}` },
-                needs ? `${needs} need you` : "plan ready",
-              )
-            : null,
+          { class: "row" },
+          el(
+            "div",
+            {},
+            el("span", { class: `badge ${tone}` }, label),
+            " ",
+            item.plan
+              ? el(
+                  "span",
+                  { class: `badge ${needs ? "warn" : "ok"}` },
+                  needs ? `${needs} need you` : "plan ready",
+                )
+              : null,
+          ),
+          kitButton(item),
         ),
       );
       if (item.plan) li.addEventListener("click", () => void showPlan(item));
@@ -375,9 +412,10 @@ async function showPlan(item: QueueItem) {
               { class: "controls" },
               countdownPicker(await countdownSetting()),
               startButton(item),
+              kitButton(item),
             ),
           ]
-        : []),
+        : [el("div", { class: "controls" }, kitButton(item))]),
       ...entries.map((e) =>
         el(
           "div",

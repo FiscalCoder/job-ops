@@ -421,6 +421,14 @@ Verified on real data (read-only run, `spike/e2e-real.ts`): 24 lookups → 3 mat
 
 Live result: ElevenLabs (a Ready job) is matched on Ashby and planned. Its 2 needs-you are "How did you hear" (empty in the answer bank) and GitHub (not on the resume).
 
+## 12D. Run trace and apply kit
+
+Planned in its own file: [APPLY_TRACE_AND_KIT_PLAN.md](APPLY_TRACE_AND_KIT_PLAN.md). It covers:
+- a per-job record of what the server, the extension and the page did, with snapshots, to debug from data;
+- an apply kit for sites without a filler: one-click copy or fill, the resume saved to a known path, and Ask Claude;
+- tracked application tabs;
+- learning from manual applications.
+
 ## 12A. M0 spike results (2026-10-19, dry run, fake data, nothing submitted)
 
 Forms tested:

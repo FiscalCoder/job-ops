@@ -204,6 +204,91 @@ describe("web page", () => {
     await shot("6-bank-formats");
   });
 
+  it("shows a job's trace on the Timeline, with sandboxed snapshots and an export", async () => {
+    const cspErrors: string[] = [];
+    page.on("console", (m) => {
+      if (/Content Security Policy/i.test(m.text())) cspErrors.push(m.text());
+    });
+    const jpeg = (
+      await page.screenshot({ type: "jpeg", quality: 40 })
+    ).toString("base64");
+    await post("/trace/events", {
+      events: [
+        {
+          jobId: "job-1",
+          source: "extension",
+          kind: "step-start",
+          stepSeq: 1,
+          message: "Filling First Name",
+          data: { value: "Test" },
+        },
+        {
+          jobId: "job-1",
+          source: "extension",
+          kind: "step-failed",
+          stepSeq: 2,
+          message: 'Location: No place matching "Chennai" appeared',
+        },
+      ],
+    });
+    await post("/trace/snapshots", {
+      jobId: "job-1",
+      kind: "dom",
+      reason: "step 2 failed: Location",
+      url: "https://job-boards.greenhouse.io/acme/jobs/11",
+      content: `<form><label>Location <input value="Chennai"></label><img src="x" onerror="parent.document.title='pwned'"></form>`,
+    });
+    await post("/trace/snapshots", {
+      jobId: "job-1",
+      kind: "screenshot",
+      reason: "step 2 failed: Location",
+      content: jpeg,
+    });
+
+    await page.getByRole("button", { name: "Timeline" }).click();
+    const row = page.locator("#timeline-box tr", {
+      hasText: "Senior Backend Engineer",
+    });
+    await row.waitFor();
+    expect(await row.textContent()).toContain("1 problem");
+    await row.click();
+    await page.getByText("Location: No place matching").waitFor();
+
+    await page.getByRole("button", { name: "View page" }).click();
+    const frame = page.frameLocator("iframe.snapshot");
+    await expect
+      .poll(() => frame.locator("input").inputValue())
+      .toBe("Chennai");
+    expect(await page.title()).not.toBe("pwned");
+
+    await page.getByRole("button", { name: "View screenshot" }).click();
+    await expect
+      .poll(() =>
+        page
+          .locator("img.snapshot")
+          .evaluate((img) => (img as HTMLImageElement).naturalWidth),
+      )
+      .toBeGreaterThan(0);
+    await shot("7-timeline");
+
+    await page.getByLabel("Only problems and snapshots").check();
+    expect(await page.getByText("Filling First Name").count()).toBe(0);
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "Export trail (JSON)" }).click(),
+    ]);
+    const bundle = JSON.parse(
+      await new Response(
+        (await download.createReadStream()) as unknown as ReadableStream,
+      ).text(),
+    );
+    expect(bundle.data.events.length).toBeGreaterThanOrEqual(4);
+    expect(bundle.data.snapshots[0].html).toContain("Chennai");
+    expect(cspErrors).toEqual([]);
+    await page.getByRole("button", { name: "All jobs" }).click();
+  });
+
   it("keeps working at phone width", async () => {
     await page.setViewportSize({ width: 380, height: 800 });
     const wide = await page.evaluate(() =>

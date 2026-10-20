@@ -1,4 +1,5 @@
 import type { CaptureReport } from "../capture/tracker";
+import type { TraceApi, TraceEvent, TraceSnapshot } from "../trace/recorder";
 import type { Ats } from "./boards/types";
 import type { LookupResult, PendingLookup, ResultOutcome } from "./lookups";
 
@@ -40,7 +41,36 @@ export type CaptureOutcome =
   | { readonly status: "unknown-job" }
   | { readonly status: "rejected"; readonly reason: string };
 
-export class ApplyClient {
+export interface KitItem {
+  readonly key: string;
+  readonly label: string;
+  readonly value: string;
+  readonly sensitive?: boolean;
+}
+
+/** GET /kit/:jobId: every answer for filling an application by hand. */
+export interface Kit {
+  readonly job: {
+    readonly jobId: string;
+    readonly title: string;
+    readonly employer: string;
+    readonly location: string | null;
+    readonly applyUrl: string;
+    readonly tailoredSummary: string | null;
+  };
+  readonly groups: readonly {
+    readonly name: string;
+    readonly items: readonly KitItem[];
+  }[];
+}
+
+export interface KitAnswer {
+  readonly value: string;
+  /** Where the answer came from, in words ("your saved answer (…)", "Claude's draft…"). */
+  readonly how: string;
+}
+
+export class ApplyClient implements TraceApi {
   constructor(
     readonly baseUrl: string,
     private readonly token: string | null,
@@ -94,6 +124,25 @@ export class ApplyClient {
     return this.request(`/runs/${encodeURIComponent(runId)}/complete`, {
       outcome,
     });
+  }
+
+  traceEvents(events: readonly TraceEvent[]): Promise<unknown> {
+    return this.request("/trace/events", { events });
+  }
+
+  traceSnapshot(snapshot: TraceSnapshot): Promise<unknown> {
+    return this.request("/trace/snapshots", snapshot);
+  }
+
+  kit(jobId: string): Promise<Kit> {
+    return this.request(`/kit/${encodeURIComponent(jobId)}`);
+  }
+
+  kitAnswer(
+    jobId: string,
+    question: { question: string; options?: string[]; long?: boolean },
+  ): Promise<KitAnswer> {
+    return this.request(`/kit/${encodeURIComponent(jobId)}/answer`, question);
   }
 
   /** The job's tailored PDF, as base64 plus the file name the server chose. */

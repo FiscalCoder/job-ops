@@ -3,6 +3,7 @@ import type {
   Frame,
   Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
+import { captureDom, type DomCapture, MAX_DOM_CHARS } from "../trace/dom";
 import type { PlanEntry } from "./supervisor";
 
 /**
@@ -35,6 +36,8 @@ export interface FormDriver {
   problems(): Promise<string[]>;
   /** True once the system shows its confirmation (you clicked Submit). */
   submitted(): Promise<boolean>;
+  /** The form's frame as markup with current values, for the run trace. */
+  dom(): Promise<DomCapture>;
 }
 
 export const OPTION_WAIT_MS = 5_000;
@@ -234,6 +237,10 @@ export abstract class TrustedDriver implements FormDriver {
           : errors;
       }, this.errorSelector)
       .catch(() => []);
+  }
+
+  dom(): Promise<DomCapture> {
+    return this.frame.evaluate(captureDom, MAX_DOM_CHARS);
   }
 
   async submitted(): Promise<boolean> {

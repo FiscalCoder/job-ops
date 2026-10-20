@@ -319,3 +319,78 @@ button.link {
     display: none;
   }
 }
+
+.events {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.events .run-head {
+  margin-top: 10px;
+  font-weight: 600;
+}
+
+.event {
+  border-left: 3px solid var(--border);
+  padding: 4px 0 4px 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.event.failure {
+  border-left-color: var(--danger);
+}
+
+.event-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.event pre {
+  margin: 4px 0 0;
+  padding: 8px;
+  background: var(--bg);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.event button {
+  justify-self: start;
+}
+
+.snapshot {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+iframe.snapshot {
+  height: 480px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+label.inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 400;
+}
+
+label.inline input {
+  width: auto;
+}

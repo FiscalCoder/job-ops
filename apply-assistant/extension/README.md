@@ -13,6 +13,17 @@ apply-assistant server never contacts Greenhouse or company sites.
   Ops (or press "I submitted it"). Every step is logged on the server. Closing the side panel stops
   the run. Chrome shows "Apply Copilot started debugging this browser" while a run is active: that is
   the trusted input.
+- **Run trace**: every run sends its steps, your decisions, the page's navigations, console errors
+  and failed requests, plus snapshots (form DOM + screenshot) at start, on a failed step, on a stall,
+  at review and at the end. See them under **Timeline** on apply.hueint.com, or export one job's
+  whole trail as JSON.
+- **Apply kit** (the "Apply kit" button on any queued job): every answer for the job (you, links,
+  work, education, this job's plan answers, sensitive answers folded away), one click each. A click
+  types the answer into the field you selected on the page (allowed sites only, never LinkedIn),
+  otherwise copies it. "Save resume, copy path" saves the tailored PDF to
+  `Downloads/JobOps/<Employer> - <Title>/` and copies its full path: in the upload dialog press
+  Ctrl+V, Enter. "Attach resume to page" puts it straight into the page's resume field. "Ask Claude"
+  answers a question you paste. Every fill and copy is recorded in the job's trace.
 
 ## Install (unpacked)
 
@@ -38,4 +49,7 @@ npm test                                   # lookup logic (fake network)
 npm run build && node e2e/sidepanel.e2e.mjs <screenshot-dir>     # real Chromium + real server; needs username/password env
 npm run build && node e2e/fill-dry-run.e2e.mjs <screenshot-dir>  # supervised fill on a REAL Greenhouse form; every
                                                                  # non-GET outside apply-assistant is blocked, aborted at review
+npm run build && (cd .. && node --import tsx extension/e2e/kit.e2e.mjs [screenshot-dir])
+                    # apply kit in real Chromium against a local apply-assistant (fake Job Ops);
+                    # every hostname resolves to a local HTTPS stub (needs openssl)
 ```

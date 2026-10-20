@@ -7,6 +7,7 @@ import type { AnswerBankRepo } from "../store/answer-bank-repo.js";
 import type { ApplyTargetsRepo } from "../store/apply-targets-repo.js";
 import type { FillPlansRepo } from "../store/fill-plans-repo.js";
 import type { FormSchemasRepo } from "../store/form-schemas-repo.js";
+import type { TraceRecord } from "../store/trace-store.js";
 import { classifyField } from "./classify.js";
 import type { FormSchema } from "./form-schema.js";
 import { buildPlan, type FillPlan } from "./planner.js";
@@ -38,6 +39,7 @@ export interface PlansDeps {
   /** Null without an Anthropic key: unrecognised questions then stay "needs you". */
   readonly answerer?: QuestionAnswerer | null;
   readonly log?: (line: string) => void;
+  readonly trace?: TraceRecord;
 }
 
 export interface RebuildResult {
@@ -49,6 +51,7 @@ export function createPlans(deps: PlansDeps) {
   const { jobOps, targets, schemas, plans, answers } = deps;
   const answerer = deps.answerer ?? null;
   const log = deps.log ?? (() => {});
+  const trace = deps.trace ?? (() => {});
 
   /** Claude's answers for the questions the rules leave open (never throws). */
   async function askClaude(
@@ -130,7 +133,26 @@ export function createPlans(deps: PlansDeps) {
       jobLocation: job.location,
       ...fromClaude,
     });
+    const previous = plans.get(jobId)?.plan;
     plans.save(jobId, plan);
+    // Plans are rebuilt on every view and answer-bank save: trace only real changes.
+    if (previous && JSON.stringify(previous) === JSON.stringify(plan))
+      return plan;
+    const { summary } = plan;
+    trace({
+      jobId,
+      kind: "plan",
+      message: `${previous ? "Plan changed" : "Plan built"} for ${ATS_NAMES[target.ats]}: ${summary.fill} to fill, ${summary.needsYou} need you`,
+      data: {
+        ats: target.ats,
+        postingId: target.postingId,
+        summary,
+        ...(fromClaude.claudeProblem
+          ? { claudeProblem: fromClaude.claudeProblem }
+          : {}),
+        claudeAnswers: fromClaude.claude?.size ?? 0,
+      },
+    });
     return plan;
   }
 

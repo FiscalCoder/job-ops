@@ -1,6 +1,8 @@
-// Apply Assistant page: answer bank editor + queue with fill plans.
+// Apply Assistant page: answer bank editor, queue with fill plans, and the run timeline.
 // Talks only to this server's API with your Job Ops session token. Every value is rendered with
 // textContent, never as HTML.
+
+import { createTimeline } from "./timeline.js";
 
 const TOKEN_KEY = "apply-assistant.token";
 
@@ -90,9 +92,22 @@ async function api(path, { method = "GET", body } = {}) {
   return payload.data;
 }
 
+/** Authenticated fetch for non-JSON responses (snapshots, the export bundle). */
+async function raw(path) {
+  const res = await fetch(path, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+  if (res.status === 401) {
+    signOut("Your session expired. Sign in again.");
+    throw new ApiError(401, "UNAUTHORIZED", "Signed out");
+  }
+  return res;
+}
+
 // ---- views & routing -------------------------------------------------------------------
 
-const VIEWS = ["login", "queue", "bank"];
+const VIEWS = ["login", "queue", "bank", "timeline"];
+const timeline = createTimeline({ api, raw, el, go });
 
 function show(view) {
   for (const name of VIEWS) $(name).hidden = name !== view;
@@ -112,7 +127,11 @@ async function route() {
     .split("/")
     .map(decodeURIComponent);
   try {
-    if (view === "bank") {
+    if (view === "timeline") {
+      show("timeline");
+      if (arg) await timeline.loadJob($("timeline-box"), arg);
+      else await timeline.loadList($("timeline-box"));
+    } else if (view === "bank") {
       show("bank");
       await loadBank();
       if (arg) focusBankKey(arg);

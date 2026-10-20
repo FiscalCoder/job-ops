@@ -3,17 +3,42 @@ import { JobOpsError } from "../jobops/client.js";
 import {
   createLookups,
   InvalidLookupError,
+  type LookupResult,
   type LookupsDeps,
   lookupResultSchema,
+  type ResultOutcome,
 } from "../resolver/lookups.js";
+import type { TraceRecord } from "../store/trace-store.js";
 import type { AuthedRequest } from "./auth.js";
 import { sendJobOpsFailure } from "./auth.js";
 import { sendError, sendOk } from "./envelope.js";
 
 /** Resolver endpoints used by the extension, plus the queue the side panel shows. */
-export function createLookupRoutes(deps: LookupsDeps) {
+/** One line per lookup result, for the job's trace. */
+function lookupLine(result: LookupResult, outcome: ResultOutcome): string {
+  const what =
+    result.type === "board"
+      ? `board ${result.token ?? "none"} (${result.method})`
+      : result.type === "job"
+        ? `posting ${result.postingId}${result.live ? "" : " (closed)"}`
+        : `form for posting ${result.postingId}`;
+  const status =
+    outcome.status === "need-details"
+      ? `needs details for ${outcome.postingIds.length} posting(s)`
+      : outcome.status === "planned"
+        ? `planned (${outcome.summary.fill} to fill, ${outcome.summary.needsYou} need you)`
+        : "reason" in outcome
+          ? `${outcome.status}: ${outcome.reason}`
+          : outcome.status;
+  return `Lookup on ${result.ats}: ${what} → ${status}`;
+}
+
+export function createLookupRoutes(
+  deps: LookupsDeps & { readonly trace?: TraceRecord },
+) {
   const router = Router();
   const lookups = createLookups(deps);
+  const trace = deps.trace ?? (() => {});
 
   const tokenOf = (req: AuthedRequest) => req.jobOpsToken ?? "";
 
@@ -38,7 +63,14 @@ export function createLookupRoutes(deps: LookupsDeps) {
       return;
     }
     try {
-      sendOk(res, await lookups.apply(tokenOf(req), parsed.data));
+      const outcome = await lookups.apply(tokenOf(req), parsed.data);
+      trace({
+        jobId: parsed.data.jobId,
+        kind: "lookup",
+        message: lookupLine(parsed.data, outcome),
+        data: { type: parsed.data.type, ats: parsed.data.ats, outcome },
+      });
+      sendOk(res, outcome);
     } catch (error) {
       if (error instanceof InvalidLookupError) {
         sendError(res, 400, "INVALID_LOOKUP", error.message);

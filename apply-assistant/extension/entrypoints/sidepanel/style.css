@@ -227,3 +227,86 @@ select {
   border-radius: 6px;
   padding: 4px 6px;
 }
+
+.kit-group {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.kit-group h2,
+.kit-group summary {
+  font-size: 13px;
+  margin: 0;
+  color: var(--muted);
+  cursor: default;
+}
+
+.kit-group summary {
+  cursor: pointer;
+}
+
+.kit-item {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+}
+
+.kit-item:hover {
+  border-color: var(--accent);
+}
+
+.kit-item .muted {
+  font-size: 12px;
+}
+
+.kit-item .value {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  width: 100%;
+  resize: vertical;
+}
+
+label.inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 400;
+}
+
+label.inline input {
+  width: auto;
+}
+
+/* .card and friends set display, which would otherwise beat the hidden attribute. */
+[hidden] {
+  /* biome-ignore lint/complexity/noImportantStyles: hidden must win over any display rule */
+  display: none !important;
+}
+
+/* Fill/copy feedback stays in view while you scroll the kit. */
+.kit-status {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  padding: 4px 0;
+}
+
+.kit-status:empty {
+  display: none;
+}

@@ -4,6 +4,7 @@ import { type JobOpsApi, JobOpsError } from "../jobops/client.js";
 import { LOOKUP_STATUSES } from "../resolver/lookups.js";
 import type { AnswerBankRepo } from "../store/answer-bank-repo.js";
 import { RunConflictError, type RunsRepo } from "../store/runs-repo.js";
+import type { TraceRecord } from "../store/trace-store.js";
 import { type AuthedRequest, sendJobOpsFailure } from "./auth.js";
 import { sendError, sendOk } from "./envelope.js";
 
@@ -35,9 +36,15 @@ export interface RunRoutesDeps {
   readonly jobOps: JobOpsApi;
   readonly runs: RunsRepo;
   readonly answers: AnswerBankRepo;
+  readonly trace?: TraceRecord;
 }
 
-export function createRunRoutes({ jobOps, runs, answers }: RunRoutesDeps) {
+export function createRunRoutes({
+  jobOps,
+  runs,
+  answers,
+  trace = () => {},
+}: RunRoutesDeps) {
   const router = Router();
   const tokenOf = (req: AuthedRequest) => req.jobOpsToken ?? "";
 
@@ -101,17 +108,26 @@ export function createRunRoutes({ jobOps, runs, answers }: RunRoutesDeps) {
     }
     // Only jobs still in the queue; anything else would risk a second application.
     if (!LOOKUP_STATUSES.includes(status as (typeof LOOKUP_STATUSES)[number])) {
-      sendError(
-        res,
-        409,
-        "NOT_APPLICABLE",
+      const reason =
         status === "applied"
           ? "You've already applied to this job (Job Ops says Applied)"
-          : `This job is "${status}" in Job Ops, not Ready`,
-      );
+          : `This job is "${status}" in Job Ops, not Ready`;
+      trace({
+        jobId: body.data.jobId,
+        kind: "run-refused",
+        message: `Run refused: ${reason}`,
+      });
+      sendError(res, 409, "NOT_APPLICABLE", reason);
       return;
     }
-    sendOk(res, runs.create(body.data.jobId));
+    const run = runs.create(body.data.jobId);
+    trace({
+      jobId: run.jobId,
+      runId: run.id,
+      kind: "run-created",
+      message: "Run created on the server",
+    });
+    sendOk(res, run);
   });
 
   router.get("/runs", (req, res) => {
@@ -185,6 +201,12 @@ export function createRunRoutes({ jobOps, runs, answers }: RunRoutesDeps) {
         return;
       }
       const { run, actions } = finished;
+      trace({
+        jobId: run.jobId,
+        runId: run.id,
+        kind: "run-finished",
+        message: `Run finished: ${run.outcome} (${actions.length} steps, ${run.interventions} by you)`,
+      });
       if (run.outcome === "submitted") {
         try {
           await jobOps.updateJob(tokenOf(req), run.jobId, {
@@ -192,9 +214,21 @@ export function createRunRoutes({ jobOps, runs, answers }: RunRoutesDeps) {
           });
           await jobOps.addNote(tokenOf(req), run.jobId, {
             title: "Applied via Apply Copilot",
-            content: `Greenhouse application filled with Apply Copilot and submitted by you: ${actions.length} steps, ${run.interventions} by you. Run ${run.id}.`,
+            content: `Application filled with Apply Copilot and submitted by you: ${actions.length} steps, ${run.interventions} by you. Run ${run.id}.`,
+          });
+          trace({
+            jobId: run.jobId,
+            runId: run.id,
+            kind: "marked-applied",
+            message: "Marked Applied in Job Ops",
           });
         } catch (error) {
+          trace({
+            jobId: run.jobId,
+            runId: run.id,
+            kind: "error",
+            message: `Couldn't mark Applied in Job Ops: ${error instanceof Error ? error.message : String(error)}`,
+          });
           sendJobOpsFailure(res, error);
           return;
         }

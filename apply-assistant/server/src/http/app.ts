@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -13,10 +16,12 @@ import { createClaudeAnswersRepo } from "../store/claude-answers-repo.js";
 import { createFillPlansRepo } from "../store/fill-plans-repo.js";
 import { createFormSchemasRepo } from "../store/form-schemas-repo.js";
 import { createRunsRepo } from "../store/runs-repo.js";
+import { createTraceStore, type TraceStore } from "../store/trace-store.js";
 import { createAnswerBankRoutes } from "./answer-bank-routes.js";
 import { createAuthMiddleware, sendJobOpsFailure } from "./auth.js";
 import { createCaptureRoutes } from "./capture-routes.js";
 import { sendError, sendOk } from "./envelope.js";
+import { createKitRoutes } from "./kit-routes.js";
 import { createLookupRoutes } from "./lookup-routes.js";
 import { createPlanRoutes } from "./plan-routes.js";
 import { createRunRoutes } from "./run-routes.js";
@@ -25,6 +30,7 @@ import {
   createLoginLimiter,
   securityHeaders,
 } from "./security.js";
+import { createTraceRoutes } from "./trace-routes.js";
 
 /** The web page (answer bank + queue), served from the same origin as the API. */
 const PUBLIC_DIR = fileURLToPath(new URL("../../public", import.meta.url));
@@ -40,6 +46,8 @@ export interface AppDeps {
     readonly draftModel: string;
   } | null;
   readonly log?: (line: string) => void;
+  /** The run trace; tests leave it out and get a throwaway one in a temp folder. */
+  readonly trace?: TraceStore;
 }
 
 const loginBody = z.object({
@@ -52,8 +60,13 @@ export function createApp({
   authCacheSeconds,
   claude,
   log,
+  trace = createTraceStore({
+    db,
+    dir: mkdtempSync(path.join(tmpdir(), "apply-trace-")),
+  }),
 }: AppDeps) {
   const app = express();
+  const record = trace.record;
   const answers = createAnswerBankRepo(db);
   const requireUser = createAuthMiddleware(jobOps, authCacheSeconds);
 
@@ -90,27 +103,42 @@ export function createApp({
   const targets = createApplyTargetsRepo(db);
   const schemas = createFormSchemasRepo(db);
   const planStore = createFillPlansRepo(db);
+  const answerer = claude
+    ? createClaudeAnswerer({
+        ...claude,
+        cache: createClaudeAnswersRepo(db),
+        ...(log ? { log } : {}),
+      })
+    : null;
   const plans = createPlans({
     jobOps,
     targets,
     schemas,
     plans: planStore,
     answers,
-    answerer: claude
-      ? createClaudeAnswerer({
-          ...claude,
-          cache: createClaudeAnswersRepo(db),
-          ...(log ? { log } : {}),
-        })
-      : null,
+    answerer,
     ...(log ? { log } : {}),
+    trace: record,
   });
 
   app.use(requireUser, createAnswerBankRoutes(answers));
   app.use(requireUser, createPlanRoutes(plans));
+  const runs = createRunsRepo(db);
   app.use(
     requireUser,
-    createRunRoutes({ jobOps, runs: createRunsRepo(db), answers }),
+    createRunRoutes({ jobOps, runs, answers, trace: record }),
+  );
+  app.use(requireUser, createTraceRoutes({ jobOps, runs, trace }));
+  app.use(
+    requireUser,
+    createKitRoutes({
+      jobOps,
+      targets,
+      answers,
+      planStore,
+      answerer,
+      trace: record,
+    }),
   );
   app.use(
     requireUser,
@@ -121,6 +149,7 @@ export function createApp({
       schemas,
       plans,
       planStore,
+      trace: record,
     }),
   );
 
@@ -130,6 +159,7 @@ export function createApp({
       jobOps,
       targets,
       links: createCapturedLinksRepo(db),
+      trace: record,
     }),
   );
 
