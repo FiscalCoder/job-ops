@@ -71,6 +71,19 @@ describe("classifyApplyUrl", () => {
     });
   });
 
+  it("recognises Lever postings and their apply pages", () => {
+    expect(
+      classifyApplyUrl(
+        "https://jobs.lever.co/valiantys/38eed682-f5e3-4369-b871-cc1efcb36135/apply?lever-source=LinkedIn",
+      ),
+    ).toEqual({
+      kind: "posting",
+      ats: "lever",
+      token: "valiantys",
+      postingId: "38eed682-f5e3-4369-b871-cc1efcb36135",
+    });
+  });
+
   it("labels job boards and anything else", () => {
     expect(classifyApplyUrl("https://in.linkedin.com/jobs/view/123")).toEqual({
       kind: "board",

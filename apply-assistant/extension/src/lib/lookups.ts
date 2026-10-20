@@ -5,6 +5,7 @@ import {
 } from "@career-boards/greenhouse";
 import { ashby } from "./boards/ashby";
 import { greenhouse } from "./boards/greenhouse";
+import { lever } from "./boards/lever";
 import type { Ats, BoardApi, BoardJob, BoardListing } from "./boards/types";
 
 /**
@@ -80,9 +81,13 @@ export interface LookupDeps {
   readonly submit: (result: LookupResult) => Promise<ResultOutcome>;
 }
 
-export const BOARDS: Readonly<Record<Ats, BoardApi>> = { greenhouse, ashby };
+export const BOARDS: Readonly<Record<Ats, BoardApi>> = {
+  greenhouse,
+  ashby,
+  lever,
+};
 /** Systems in the order a company's board is searched for. */
-const SEARCH_ORDER: readonly BoardApi[] = [greenhouse, ashby];
+const SEARCH_ORDER: readonly BoardApi[] = [greenhouse, ashby, lever];
 
 /** Company name → likely board tokens: "Platform Science Inc." → platformscience, platform-science, platform. */
 export function slugGuesses(employer: string): string[] {

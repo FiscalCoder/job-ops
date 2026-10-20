@@ -48,6 +48,8 @@ export interface FormSchema {
   readonly education: "required" | "optional" | null;
   readonly fields: readonly FormField[];
   readonly hash: string;
+  /** Greenhouse: the phone input has its own country dropdown, set right before the number. */
+  readonly phoneCountry?: boolean;
 }
 
 /** Short content hash: changes when the form's fields change. */

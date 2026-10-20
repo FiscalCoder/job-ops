@@ -263,6 +263,7 @@ $("allow-sites").addEventListener("click", async () => {
 const ATS_NAMES: Record<string, string> = {
   greenhouse: "Greenhouse",
   ashby: "Ashby",
+  lever: "Lever",
 };
 
 /** Badge for a job's posting: "On Ashby", "Not found", … */

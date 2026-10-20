@@ -149,5 +149,6 @@ export function parseGreenhouseSchema(payload: unknown): FormSchema {
     education,
     fields,
     hash,
+    phoneCountry: true,
   };
 }

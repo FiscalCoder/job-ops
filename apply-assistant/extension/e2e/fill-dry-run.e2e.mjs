@@ -3,8 +3,12 @@
 // Ashby's read-only form queries (anything that submits, uploads or creates stays blocked), so
 // nothing is uploaded and nothing can be submitted. Steps that need you are skipped; the run is
 // aborted at review.
+//
+// Stub mode (a system none of your jobs is on yet): STUB_PLAN=<plan.json> STUB_URL=<posting url>
+// STUB_ATS=lever replaces the apply-assistant server with a local stub serving that plan (built
+// from a real form with FAKE details), so the real form is filled and nothing of yours is used.
 //   node e2e/fill-dry-run.e2e.mjs <screenshot-dir> [job title substring]
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,9 +43,53 @@ const READ_ONLY_ASHBY = (url) =>
   !/submit|upload|create|apply|mutat|file|update|delete|save|set/i.test(
     url.searchParams.get("op") ?? "submit",
   );
+const STUB = process.env.STUB_PLAN
+  ? {
+      plan: JSON.parse(readFileSync(process.env.STUB_PLAN, "utf8")),
+      url: process.env.STUB_URL,
+      ats: process.env.STUB_ATS ?? "greenhouse",
+    }
+  : null;
+const stubServer = (route, url) => {
+  const ok = (data) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, data }),
+    });
+  if (url.pathname === "/queue")
+    return ok([
+      {
+        jobId: "stub",
+        title: jobTitle,
+        employer: "Stub",
+        score: 80,
+        target: { ats: STUB.ats, status: "matched", postingUrl: STUB.url },
+        plan: { summary: STUB.plan.summary, builtAt: "now" },
+      },
+    ]);
+  if (url.pathname === "/plans/stub") return ok(STUB.plan);
+  if (url.pathname === "/runs" && route.request().method() === "POST")
+    return ok({ id: "stub-run" });
+  if (url.pathname.startsWith("/runs/")) return ok({});
+  if (url.pathname === "/jobs/stub/resume.pdf")
+    return route.fulfill({
+      status: 200,
+      contentType: "application/pdf",
+      headers: {
+        "content-disposition":
+          'attachment; filename="Test_Candidate_Resume.pdf"',
+      },
+      body: Buffer.from(
+        ["%PDF-1.4", "% fake resume for a dry run", "%%EOF", ""].join("\n"),
+      ),
+    });
+  return ok([]);
+};
 await context.route("**/*", (route) => {
   const req = route.request();
   const url = new URL(req.url());
+  if (STUB && url.host === SERVER_HOST) return stubServer(route, url);
   if (req.method() === "GET" || url.host === SERVER_HOST)
     return route.continue();
   if (READ_ONLY_ASHBY(url)) {
@@ -62,9 +110,19 @@ panel.on("pageerror", (e) => errors.push(e.message));
 await panel.goto(
   `chrome-extension://${new URL(worker.url()).host}/sidepanel.html`,
 );
-await panel.getByLabel("Username").fill(process.env.username ?? "");
-await panel.getByLabel("Password").fill(process.env.password ?? "");
-await panel.getByRole("button", { name: "Sign in" }).click();
+if (STUB) {
+  await worker.evaluate(() =>
+    chrome.storage.local.set({
+      serverUrl: "https://apply.hueint.com",
+      token: "stub",
+    }),
+  );
+  await panel.reload();
+} else {
+  await panel.getByLabel("Username").fill(process.env.username ?? "");
+  await panel.getByLabel("Password").fill(process.env.password ?? "");
+  await panel.getByRole("button", { name: "Sign in" }).click();
+}
 await panel
   .locator("#queue li.clickable", { hasText: jobTitle })
   .first()
@@ -241,6 +299,23 @@ const readBack = await form.evaluate(() => {
         ];
       }),
     );
+  // Lever: fields by name, choices by their checked value.
+  const lever = document.querySelector("form#application-form");
+  if (lever) {
+    const out = {};
+    for (const el of lever.querySelectorAll("input, textarea, select")) {
+      if (!el.name || el.type === "hidden" || el.type === "file") continue;
+      if ((el.type === "radio" || el.type === "checkbox") && !el.checked)
+        continue;
+      if (el.value)
+        out[el.name.replace(/^cards\[([0-9a-f]{8})[^\]]*\]/, "card-$1")] =
+          el.value;
+    }
+    out.selectedLocation = lever.querySelector("#selected-location")?.value
+      ? "set"
+      : null;
+    return out;
+  }
   const val = (sel) => document.querySelector(sel)?.value ?? null;
   const shown = (sel) =>
     document

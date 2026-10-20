@@ -6,6 +6,7 @@ import {
   selectionMatches,
   selectorFor,
 } from "../src/fill/driver";
+import { leverFormUrl } from "../src/fill/lever-driver";
 
 describe("driver helpers", () => {
   it("maps plan refs to Greenhouse DOM ids", () => {
@@ -46,5 +47,16 @@ describe("ashbyFormUrl", () => {
     expect(
       ashbyFormUrl("https://jobs.ashbyhq.com/elevenlabs/c7d5/application"),
     ).toBe("https://jobs.ashbyhq.com/elevenlabs/c7d5/application");
+  });
+});
+
+describe("leverFormUrl", () => {
+  it("opens the posting's apply page", () => {
+    expect(
+      leverFormUrl("https://jobs.lever.co/valiantys/38ee?lever-source=x"),
+    ).toBe("https://jobs.lever.co/valiantys/38ee/apply?lever-source=x");
+    expect(leverFormUrl("https://jobs.lever.co/valiantys/38ee/apply")).toBe(
+      "https://jobs.lever.co/valiantys/38ee/apply",
+    );
   });
 });

@@ -495,9 +495,10 @@ const withPhoneCountry = (fields: readonly FormField[]): FormField[] =>
 export function buildPlan(input: PlanInput): FillPlan {
   const jobCountry =
     countryOf(input.schema.location) ?? countryOf(input.jobLocation ?? "");
-  const entries = withPhoneCountry(input.schema.fields).map((field) =>
-    planField(field, input, jobCountry),
-  );
+  const fields = input.schema.phoneCountry
+    ? withPhoneCountry(input.schema.fields)
+    : input.schema.fields;
+  const entries = fields.map((field) => planField(field, input, jobCountry));
   return {
     schemaHash: input.schema.hash,
     jobCountry,

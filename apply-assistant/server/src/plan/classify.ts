@@ -63,6 +63,14 @@ const BY_REF: Record<string, FieldRule> = {
   "degree--0": { kind: "education", part: "degree" },
   "discipline--0": { kind: "education", part: "discipline" },
   location: bank("location.current_city"),
+  // Shared names other systems' parsers give their standard fields (Ashby, Lever).
+  linkedin: profile("linkedin"),
+  github: profile("github"),
+  website: profile("website"),
+  current_company: profile("recent_employer"),
+  // Extra links (Lever): never filled with your website again; required ones go to Claude/you.
+  other_link: { kind: "question" },
+  twitter: { kind: "question" },
 };
 
 const CONSENT_VERB =

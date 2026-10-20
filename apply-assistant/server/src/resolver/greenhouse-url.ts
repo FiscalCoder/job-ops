@@ -24,6 +24,8 @@ export type ApplyUrlKind =
 const GREENHOUSE_JOB_PATH = /^\/([a-z0-9_-]+)\/jobs\/(\d+)/i;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const ASHBY_JOB_PATH = new RegExp(`^/([^/]+)/(${UUID})(?:/|$)`, "i");
+// Lever's job URLs have the same shape: /<site>/<posting uuid>[/apply].
+const LEVER_JOB_PATH = ASHBY_JOB_PATH;
 const BOARDS: readonly [RegExp, string][] = [
   [/(^|\.)linkedin\.com$/, "linkedin"],
   [/(^|\.)naukri\.com$/, "naukri"],
@@ -65,6 +67,17 @@ export function classifyApplyUrl(raw: string): ApplyUrlKind {
       return {
         kind: "posting",
         ats: "ashby",
+        token: decodeURIComponent(match[1]),
+        postingId: match[2].toLowerCase(),
+      };
+  }
+
+  if (host === "jobs.lever.co") {
+    const match = LEVER_JOB_PATH.exec(url.pathname);
+    if (match?.[1] && match[2])
+      return {
+        kind: "posting",
+        ats: "lever",
         token: decodeURIComponent(match[1]),
         postingId: match[2].toLowerCase(),
       };

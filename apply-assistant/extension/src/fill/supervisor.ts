@@ -91,13 +91,16 @@ const isFile = (entry: PlanEntry) => entry.type === "file";
 
 export function startRun(
   entries: readonly PlanEntry[],
-  options: { countdownSeconds: number },
+  options: { countdownSeconds: number; resumeFirst?: boolean },
 ): RunState {
   const active = entries.filter((e) => e.status !== "skip");
-  const ordered = [
-    ...active.filter((e) => !isFile(e)),
-    ...active.filter(isFile),
-  ];
+  const files = active.filter(isFile);
+  const others = active.filter((e) => !isFile(e));
+  // The resume goes last, unless the system fills fields from it (then first, so it can't
+  // overwrite what was typed).
+  const ordered = options.resumeFirst
+    ? [...files, ...others]
+    : [...others, ...files];
   const steps = ordered.map((entry, index) => ({
     seq: index + 1,
     entry,

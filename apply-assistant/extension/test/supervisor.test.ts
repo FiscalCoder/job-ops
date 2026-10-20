@@ -44,6 +44,18 @@ describe("startRun", () => {
     expect(state.steps.map((s) => s.seq)).toEqual([1, 2, 3]);
   });
 
+  it("puts the resume first when the system fills fields from it (Lever)", () => {
+    const state = startRun(
+      [entry("first_name"), entry("resume", { type: "file" }), entry("email")],
+      { countdownSeconds: 3, resumeFirst: true },
+    );
+    expect(state.steps.map((s) => s.entry.ref)).toEqual([
+      "resume",
+      "first_name",
+      "email",
+    ]);
+  });
+
   it("goes straight to review when there is nothing to fill", () => {
     expect(nextAction(run([]))).toEqual({ kind: "review" });
   });

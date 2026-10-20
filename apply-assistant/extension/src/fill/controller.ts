@@ -4,7 +4,7 @@ import {
   ExtensionTransport,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import type { ApplyClient, QueueItem } from "../lib/api";
-import { attachDriver, formUrlFor } from "./drivers";
+import { attachDriver, formUrlFor, resumeFirst } from "./drivers";
 import {
   maskValue,
   type NextAction,
@@ -81,10 +81,10 @@ export class RunController {
     private readonly driver: FormDriver,
     private readonly startHost: string,
     entries: readonly PlanEntry[],
-    countdownSeconds: number,
+    runOptions: { countdownSeconds: number; resumeFirst: boolean },
     private readonly onChange: (view: RunView) => void,
   ) {
-    this.state = startRun(entries, { countdownSeconds });
+    this.state = startRun(entries, runOptions);
   }
 
   static async start(options: {
@@ -123,7 +123,10 @@ export class RunController {
       driver,
       new URL(page.url()).host,
       plan.entries,
-      options.countdownSeconds,
+      {
+        countdownSeconds: options.countdownSeconds,
+        resumeFirst: resumeFirst(ats),
+      },
       options.onChange,
     );
     void controller.loop();

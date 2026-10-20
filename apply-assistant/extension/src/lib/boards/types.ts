@@ -61,3 +61,16 @@ export async function getJson(
     return null;
   }
 }
+
+export async function getText(
+  deps: BoardDeps,
+  url: string,
+): Promise<string | null> {
+  await deps.pause();
+  try {
+    const res = await deps.fetch(url, { headers: { accept: "text/html" } });
+    return res.ok ? await res.text() : null;
+  } catch {
+    return null;
+  }
+}

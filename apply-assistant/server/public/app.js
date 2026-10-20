@@ -170,7 +170,7 @@ for (const tab of document.querySelectorAll(".tab"))
 
 // ---- queue & plans ---------------------------------------------------------------------
 
-const ATS_NAMES = { greenhouse: "Greenhouse", ashby: "Ashby" };
+const ATS_NAMES = { greenhouse: "Greenhouse", ashby: "Ashby", lever: "Lever" };
 
 /** Badge for a job's posting: "On Ashby", "Not found", … */
 function targetBadge(target) {

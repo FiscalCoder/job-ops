@@ -13,7 +13,7 @@ export default defineConfig({
   manifest: {
     name: "Apply Copilot",
     description:
-      "Job-board lookups (Greenhouse, Ashby), LinkedIn apply-link capture and supervised applying for your Job Ops queue.",
+      "Job-board lookups (Greenhouse, Ashby, Lever), LinkedIn apply-link capture and supervised applying for your Job Ops queue.",
     // debugger: trusted typing/clicking on the form (React forms ignore synthetic input).
     // webNavigation: tab addresses only, to follow the tab LinkedIn's Apply button opens.
     permissions: [
@@ -32,6 +32,8 @@ export default defineConfig({
       "https://grnh.se/*",
       "https://api.ashbyhq.com/*",
       "https://jobs.ashbyhq.com/*",
+      "https://api.lever.co/*",
+      "https://jobs.lever.co/*",
       "https://autocomplete.clearbit.com/*",
     ],
     // Company careers pages (embedded Greenhouse boards): asked for once, from the side panel.

@@ -302,6 +302,71 @@ describe("runTask", () => {
     });
   });
 
+  describe("Lever", () => {
+    const LEVER = "https://api.lever.co/v0/postings";
+    const POSTING = "38eed682-f5e3-4369-b871-cc1efcb36135";
+    const posting = {
+      id: POSTING,
+      text: "Atlassian Consultant",
+      hostedUrl: `https://jobs.lever.co/valiantys/${POSTING}`,
+      descriptionPlain: "Jira and Confluence.",
+      categories: { location: "Dakar" },
+    };
+    const web = {
+      [`${LEVER}/valiantys?mode=json&limit=1`]: () => json([posting]),
+      [`${LEVER}/valiantys?mode=json`]: () => json([posting]),
+      [`${LEVER}/valiantys/${POSTING}?mode=json`]: () => json(posting),
+      [`https://jobs.lever.co/valiantys/${POSTING}/apply`]: () =>
+        new Response(
+          '<html><script>big</script><form id="application-form" method="POST"><input name="name"></form><footer/></html>',
+        ),
+    };
+
+    it("finds the board after Greenhouse and Ashby, with descriptions from the listing", async () => {
+      const { deps: d, submitted } = deps(fakeWeb(web).fetchImpl, (r) =>
+        r.type === "board" && !r.details
+          ? { status: "need-details", postingIds: [POSTING] }
+          : { status: "matched" },
+      );
+      expect(
+        await runTask(
+          d,
+          pending({ type: "find-board", employer: "Valiantys" }, "Valiantys"),
+        ),
+      ).toBe("lever board valiantys: matched");
+      expect(submitted[1]).toMatchObject({
+        ats: "lever",
+        details: { [POSTING]: "Jira and Confluence." },
+      });
+    });
+
+    it("sends only the application form section of the apply page", async () => {
+      const { deps: d, submitted } = deps(fakeWeb(web).fetchImpl, () => ({
+        status: "planned",
+      }));
+      await runTask(
+        d,
+        pending({
+          type: "fetch-schema",
+          ats: "lever",
+          token: "valiantys",
+          postingId: POSTING,
+        }),
+      );
+      expect(submitted[0]).toMatchObject({
+        type: "schema",
+        ats: "lever",
+        payload: {
+          id: POSTING,
+          title: "Atlassian Consultant",
+          location: "Dakar",
+          formHtml:
+            '<form id="application-form" method="POST"><input name="name"></form>',
+        },
+      });
+    });
+  });
+
   it("verify-job: live posting, and a closed one", async () => {
     const live = deps(fakeWeb(board).fetchImpl);
     await runTask(
