@@ -289,7 +289,26 @@ describe("POST /plans/:jobId/page", () => {
     expect(prompt).toContain("18 or older");
     expect(prompt).not.toContain("FINRA");
 
-    expect((await call("/plans/job-1/page", { step: "x" })).status).toBe(400);
+    const bad = await call("/plans/job-1/page", { step: "x" });
+    expect(bad.status).toBe(400);
+    // The trail says which part was off.
+    expect(bad.body.error.message).toContain("(fields)");
+    // Workday's Country dropdown lists ~250 countries (Guidehouse, 2026-10-21).
+    const countries = Array.from({ length: 250 }, (_, i) => `Country ${i}`);
+    const myInformation: WorkdayPage = {
+      step: "My Information",
+      fields: [
+        {
+          ref: "country--country",
+          key: "country",
+          label: "Country",
+          kind: "dropdown",
+          required: true,
+          options: countries,
+        },
+      ],
+    };
+    expect((await call("/plans/job-1/page", myInformation)).status).toBe(200);
     expect((await call("/plans/nope/page", page)).status).toBe(404);
 
     const trail = await (

@@ -263,7 +263,14 @@ export function renderRun(
       { class: "muted" },
       "Paused. Nothing happens on the page until you resume.",
     );
-  if (action.kind === "review" && view.page && !view.page.last)
+  // Workday: the next page is still loading, being read and planned.
+  if (action.kind === "review" && view.page && view.busy)
+    body = el(
+      "p",
+      { class: "muted" },
+      `Reading "${view.page.step || "the next page"}" and planning it…`,
+    );
+  else if (action.kind === "review" && view.page && !view.page.last)
     body = el(
       "div",
       { class: "step-card" },

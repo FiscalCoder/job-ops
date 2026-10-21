@@ -56,11 +56,34 @@ const myInformation = '<h2>My Information</h2>' +
   '<input id="name--legalName--firstName" aria-required="true"></div>' +
   '<div class="field" data-automation-id="formField-acceptTermsAndAgreements" data-fkit-id="termsAndConditions--acceptTermsAndAgreements"><label for="terms">I consent to the terms<abbr>*</abbr></label>' +
   '<input type="checkbox" id="terms"></div>';
+// My Experience's own Resume/CV upload (its container's data-automation-id is just "formField-"),
+// as on Guidehouse; Workday shows "Successfully Uploaded!" once a file is attached.
+const myExperience = '<h2>My Experience</h2>' +
+  '<div class="field" data-automation-id="formField-jobTitle" data-fkit-id="workExperience-1--jobTitle"><label><span>Job Title<abbr>*</abbr></span></label><input id="workExperience-1--jobTitle"></div>' +
+  '<div class="field" data-automation-id="formField-" data-fkit-id="resumeAttachments--attachments"><label><span>Upload a file (5MB max)<abbr>*</abbr></span></label>' +
+  '<div data-automation-id="file-upload-drop-zone"><button type="button" data-automation-id="select-files" id="resumeAttachments--attachments">Select files</button>' +
+  '<input data-automation-id="file-upload-input-ref" type="file" style="display:none"></div><div id="uploaded"></div></div>';
 const review = '<h2>Review</h2><p>Check your application.</p><button id="submit">Submit</button>';
-function show(step) {
-  $("#step").textContent = "current step " + (step === "Review" ? 3 : 2) + " of 3 " + step;
-  $("#page").innerHTML = step === "Review" ? review : myInformation;
+const STEPS = ["My Information", "My Experience", "Review"];
+const PAGES = { "My Information": () => myInformation, "My Experience": () => myExperience, Review: () => review };
+// Workday shows the next step's name first and swaps the fields in a moment later.
+const SWAP_MS = 3000;
+function show(step, swapMs = 0) {
+  $("#step").textContent = "current step " + (STEPS.indexOf(step) + 1) + " of 3 " + step;
+  if (swapMs) return setTimeout(() => fill(step), swapMs);
+  fill(step);
+}
+function fill(step) {
+  $("#page").innerHTML = PAGES[step]();
   $("#next").hidden = step === "Review";
+  if (step === "My Experience") {
+    const input = $("[data-automation-id=file-upload-input-ref]");
+    input.addEventListener("change", () => {
+      window.uploaded = [...input.files].map((f) => f.name + ":" + f.size);
+      $("#uploaded").innerHTML = '<div data-automation-id="file-upload-successful">Successfully Uploaded!</div>';
+    });
+    return;
+  }
   if (step === "Review") {
     $("#submit").addEventListener("click", () => { document.body.innerHTML = "<h1>Application Submitted</h1><p>Your application has been submitted.</p>"; });
     return;
@@ -68,7 +91,9 @@ function show(step) {
   const country = $("#country--country");
   country.addEventListener("click", () => {
     window.opened.push("country");
-    openList(country, ["Select One", "India", "United States of America"], (label) => { country.textContent = label; });
+    // Workday's Country list is ~250 long.
+    const others = Array.from({ length: 248 }, (_, i) => "Country " + i);
+    openList(country, ["Select One", "India", "United States of America", ...others], (label) => { country.textContent = label; });
   });
   const search = $("#source--source");
   search.addEventListener("keydown", (e) => {
@@ -84,7 +109,10 @@ function show(step) {
     });
   });
 }
-$("#next").addEventListener("click", () => show("Review"));
+$("#next").addEventListener("click", () => {
+  const at = STEPS.indexOf($("#step").textContent.replace(/^current step \d+ of \d+ /, ""));
+  show(STEPS[at + 1], STEPS[at + 1] === "Review" ? 0 : SWAP_MS);
+});
 show("My Information");
 </script></body></html>`;
 
@@ -119,6 +147,13 @@ function stubServer(route, url) {
         plan: null,
       },
     ]);
+  if (url.pathname === "/jobs/stub/resume.pdf")
+    return route.fulfill({
+      status: 200,
+      contentType: "application/pdf",
+      headers: { "content-disposition": 'attachment; filename="Resume.pdf"' },
+      body: Buffer.from("%PDF-1.4 stub"),
+    });
   if (url.pathname === "/plans/stub/page") {
     const page = req.postDataJSON();
     posted.push(page);
@@ -126,18 +161,33 @@ function stubServer(route, url) {
       schemaHash: "x",
       jobCountry: null,
       summary: {},
-      entries: page.fields.map((f) => ({
-        ref: f.ref,
-        label: f.label,
-        section: "main",
-        type: f.kind === "text" ? "text" : "select",
-        required: f.required,
-        actionClass: "auto",
-        status: VALUES[f.key] ? "fill" : "skip",
-        value: VALUES[f.key] ?? null,
-        optionValues: null,
-        source: "bank:stub",
-      })),
+      entries: page.fields.map((f) =>
+        f.kind === "file"
+          ? {
+              ref: f.ref,
+              label: f.label,
+              section: "main",
+              type: "file",
+              required: true,
+              actionClass: "auto",
+              status: "fill",
+              value: "Tailored resume (PDF from Job Ops)",
+              optionValues: null,
+              source: "jobops:tailored-pdf",
+            }
+          : {
+              ref: f.ref,
+              label: f.label,
+              section: "main",
+              type: f.kind === "text" ? "text" : "select",
+              required: f.required,
+              actionClass: "auto",
+              status: VALUES[f.key] ? "fill" : "skip",
+              value: VALUES[f.key] ?? null,
+              optionValues: null,
+              source: "bank:stub",
+            },
+      ),
     });
   }
   if (url.pathname === "/runs" && req.method() === "POST")
@@ -209,10 +259,11 @@ try {
   check("page 1 planned", first?.step === "My Information", first?.step);
   const country = first?.fields.find((f) => f.key === "country");
   check(
-    "dropdown choices read by opening it",
-    JSON.stringify(country?.options) ===
-      JSON.stringify(["India", "United States of America"]),
-    JSON.stringify(country?.options),
+    "all 250 dropdown choices read by opening it",
+    country?.options.length === 250 &&
+      country.options[0] === "India" &&
+      !country.options.includes("Select One"),
+    `${country?.options.length} choices`,
   );
   check(
     "header menu not read as a field",
@@ -235,14 +286,37 @@ try {
   check("terms ticked", shown.terms === true);
   check("no list left open", shown.listsOpen === 0);
 
-  // You check the page and continue; the run follows to the next page.
+  // You check the page and continue; the run follows to the next page, which Workday swaps in
+  // a few seconds after showing its name.
+  await form.locator("#next").click();
+  await panel
+    .getByText('Reading "My Experience" and planning it', { exact: false })
+    .waitFor({ timeout: 10_000 });
+  check("you're told the next page is being read", true);
+  await panel
+    .getByText('Check "My Experience" on the page', { exact: false })
+    .waitFor({ timeout: 60_000 });
+  const second = posted[1];
+  check(
+    "next page read only once its fields were swapped in",
+    second?.step === "My Experience" &&
+      second.fields.some((f) => f.ref === "resumeAttachments--attachments") &&
+      !second.fields.some((f) => f.key === "legalName--firstName"),
+    JSON.stringify(second?.fields.map((f) => f.ref)),
+  );
+  const uploaded = await form.evaluate(() => window.uploaded);
+  check(
+    "resume attached to the page's own upload field",
+    uploaded?.[0]?.startsWith("Resume.pdf:"),
+    JSON.stringify(uploaded),
+  );
   await form.locator("#next").click();
   await panel
     .getByText("Review the form on the page, then click Submit yourself")
     .waitFor({ timeout: 30_000 });
   check(
     "Review page not planned (nothing to fill)",
-    posted.length === 1,
+    posted.length === 2,
     `${posted.length} plans`,
   );
 
@@ -256,7 +330,7 @@ try {
     runCalls.join(" | "),
   );
   const steps = runCalls.filter((c) => c.includes("/actions")).length;
-  check("every filled step logged", steps === 5, `${steps} logged`);
+  check("every filled step logged", steps === 6, `${steps} logged`);
   check("no side panel errors", errors.length === 0, errors.join(" | "));
 } catch (error) {
   failures.push(String(error));

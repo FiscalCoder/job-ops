@@ -465,6 +465,12 @@ Live result: ElevenLabs (a Ready job) is matched on Ashby and planned. Its 2 nee
      - the page planner runs on the LPL field sets;
      - `e2e/workday.e2e.mjs` runs a supervised fill on a fake Workday wizard through the built extension.
    - Workday's domains are now in the extension's own site list, so its pages are recognised without the all-sites permission.
+   - **First live run (Guidehouse, 2026-10-21), and the fixes it led to:**
+     - *My Information* was rejected by the server: Country lists ~250 choices and the server took 200. It now takes 500, and its error names the part that was off.
+     - *My Experience*: the resume box is a field of its own (`formField-` with an empty key) and was read as text, and the resume was re-attached although already uploaded. Now it's a file field filled through its own input, and skipped once Workday shows it uploaded.
+     - *Application Questions* was read before Workday swapped the fields in (the step name changes first). The page is now read once its fields differ from the last page's and are the same on two reads; the side panel says it's reading meanwhile.
+     - Classifier: "available to work in shifts", "how much notice … current employer" and "What are your total years of … experience" were matched wrongly or not at all.
+     - Guidehouse's pages are fixtures (`guidehouse-*.html`, personal details replaced).
 4. **W3:** Workday lookups (posting liveness) from the public job-board API.
 
 Your Job Ops has 10 Workday jobs: FactSet and Hitachi (applied); Capital One, LPL, Visa, Genpact, ModMed, Candescent and insightsoftware (Discovered). FactSet's manual application predates W0, so only its kit actions were recorded.

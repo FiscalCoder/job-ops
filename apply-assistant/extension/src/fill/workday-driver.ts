@@ -57,6 +57,10 @@ export interface WorkdayPage {
 export const RESUME_REF = "file-upload-input-ref";
 const UPLOAD = `input[type=file][data-automation-id="${RESUME_REF}"]`;
 const UPLOAD_WAIT_MS = 15_000;
+/** As many choices as a dropdown can have (Country lists ~250); the server takes up to this. */
+const MAX_OPTIONS = 500;
+/** How long a new page gets to replace the last one's fields (Workday swaps them in place). */
+const NEW_PAGE_WAIT_MS = 10_000;
 /** Workday's placeholder choice in every dropdown. */
 const PLACEHOLDER = /^select one$/i;
 
@@ -123,7 +127,12 @@ export function readWorkdayPage(): WorkdayPage {
       options = [...new Set(checks.map(optionLabel))];
     } else if (box.querySelector("[data-automation-id^='dateSection']"))
       kind = "date";
-    else if (box.querySelector("input[type=file]")) kind = "file";
+    else if (box.querySelector("input[type=file]")) {
+      // Already attached (Autofill with Resume uploads it): nothing to do.
+      if (box.querySelector("[data-automation-id='file-upload-successful']"))
+        continue;
+      kind = "file";
+    }
     else if (box.querySelector("textarea")) kind = "textarea";
     else if (box.querySelector("input")) kind = "text";
     else continue;
@@ -137,7 +146,7 @@ export function readWorkdayPage(): WorkdayPage {
         Boolean(box.querySelector("[aria-required='true']")),
       options: options
         .map((o) => o.replace(/\*$/, "").trim().slice(0, 300))
-        .slice(0, 200),
+        .slice(0, 500),
     });
   }
   // "Autofill with Resume": the upload sits outside the field containers, and once a file is
@@ -164,7 +173,8 @@ export function readWorkdayPage(): WorkdayPage {
 /** What kind of control a field container holds; runs inside the page. */
 function controlKind(box: Element | null): WorkdayFieldKind | null {
   if (!box) return null;
-  if (box.matches("input[type=file]")) return "file";
+  if (box.matches("input[type=file]") || box.querySelector("input[type=file]"))
+    return "file";
   if (box.querySelector("button[aria-haspopup='listbox']")) return "dropdown";
   if (box.querySelector("[data-automation-id='multiSelectContainer']"))
     return "search";
@@ -238,9 +248,33 @@ export class WorkdayDriver extends TrustedDriver {
     return this.frame.evaluate(workdayStep).catch(() => "");
   }
 
+  /** The fields of the page read last, so a new page isn't mistaken for it while it loads. */
+  private lastRefs: string | null = null;
+
+  /**
+   * The page's fields once they've settled: the same on two reads in a row, and not the last
+   * page's (Workday shows the new step's name before it swaps the fields in).
+   */
+  private async settledPage(): Promise<WorkdayPage> {
+    const deadline = Date.now() + NEW_PAGE_WAIT_MS;
+    let previous: string | null = null;
+    for (;;) {
+      const page = await this.frame.evaluate(readWorkdayPage);
+      const refs = page.fields.map((f) => f.ref).join("|");
+      const settled =
+        refs === previous && refs !== this.lastRefs && page.fields.length > 0;
+      if (settled || Date.now() > deadline) {
+        this.lastRefs = refs;
+        return page;
+      }
+      previous = refs;
+      await sleep(POLL_MS * 4);
+    }
+  }
+
   /** The page's fields, with each dropdown's choices (read by opening it and closing it again). */
   async readPage(): Promise<WorkdayPage> {
-    const page = await this.frame.evaluate(readWorkdayPage);
+    const page = await this.settledPage();
     const fields: WorkdayField[] = [];
     for (const field of page.fields) {
       if (field.kind !== "dropdown") {
@@ -255,7 +289,10 @@ export class WorkdayDriver extends TrustedDriver {
       await sleep(POLL_MS);
       fields.push({
         ...field,
-        options: options.filter((o) => !PLACEHOLDER.test(o)),
+        options: options
+          .filter((o) => !PLACEHOLDER.test(o))
+          .map((o) => o.slice(0, 300))
+          .slice(0, MAX_OPTIONS),
       });
     }
     return { step: page.step, fields };
@@ -331,7 +368,7 @@ export class WorkdayDriver extends TrustedDriver {
       switch (kind) {
         case "file":
           return resume
-            ? await this.upload(resume)
+            ? await this.upload(entry.ref, resume)
             : { ok: false, reason: "Tailored PDF not loaded" };
         case "dropdown":
           return await this.dropdown(entry.ref, first);
@@ -468,14 +505,18 @@ export class WorkdayDriver extends TrustedDriver {
         };
   }
 
-  /** Attaches the tailored resume and waits for Workday to show it as uploaded. */
-  private async upload(resume: ResumeFile): Promise<FillOutcome> {
-    const attached = await this.attachFile(UPLOAD, resume);
+  /**
+   * Attaches the tailored resume to the upload (the one on Autofill with Resume, or a field's
+   * own, e.g. My Experience's Resume/CV) and waits for Workday to show it as uploaded.
+   */
+  private async upload(ref: string, resume: ResumeFile): Promise<FillOutcome> {
+    const box = ref === RESUME_REF ? "body" : `:is(${boxOf(ref)})`;
+    const attached = await this.attachFile(`${box} ${UPLOAD}`, resume);
     if (!attached.ok) return attached;
     const deadline = Date.now() + UPLOAD_WAIT_MS;
     while (Date.now() < deadline) {
       const done = await this.frame
-        .$("[data-automation-id='file-upload-successful']")
+        .$(`${box} [data-automation-id='file-upload-successful']`)
         .catch(() => null);
       if (done) return attached;
       await sleep(POLL_MS * 4);

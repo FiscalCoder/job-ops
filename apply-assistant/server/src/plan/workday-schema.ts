@@ -33,7 +33,8 @@ export const workdayPageSchema = z.object({
           "file",
         ]),
         required: z.boolean(),
-        options: z.array(z.string().max(300)).max(200),
+        // Country dropdowns list ~250 choices.
+        options: z.array(z.string().max(300)).max(500),
       }),
     )
     .max(200),

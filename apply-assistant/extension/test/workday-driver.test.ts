@@ -100,6 +100,38 @@ describe("readWorkdayPage", () => {
     ]);
   });
 
+  it("Guidehouse My Experience: a resume already uploaded is left alone, else it's a file field", () => {
+    load("guidehouse-my-experience");
+    expect(readWorkdayPage().fields.some((f) => f.kind === "file")).toBe(false);
+    // The same page before anything was uploaded: My Experience's own Resume/CV field
+    // (its container's data-automation-id is just "formField-").
+    for (const done of document.querySelectorAll(
+      "[data-automation-id='file-upload-successful']",
+    ))
+      done.remove();
+    expect(
+      readWorkdayPage().fields.find((f) => f.kind === "file"),
+    ).toMatchObject({
+      ref: "resumeAttachments--attachments",
+      label: "Upload a file (5MB max)",
+      required: true,
+    });
+  });
+
+  it("Guidehouse Application Questions: each question by its questionnaire id", () => {
+    load("guidehouse-application-questions");
+    const page = readWorkdayPage();
+    expect(page.step).toBe("Application Questions");
+    expect(page.fields).toHaveLength(15);
+    for (const f of page.fields) expect(f.ref).toMatch(/^primaryQuestionnaire--/);
+    expect(
+      page.fields.find((f) => f.label === "What are your salary expectations?"),
+    ).toMatchObject({ kind: "textarea", required: true });
+    expect(
+      page.fields.find((f) => f.label === "Are you willing to relocate?"),
+    ).toMatchObject({ kind: "dropdown", required: true });
+  });
+
   it("Review: nothing to fill", () => {
     load("review");
     expect(readWorkdayPage()).toMatchObject({ step: "Review", fields: [] });

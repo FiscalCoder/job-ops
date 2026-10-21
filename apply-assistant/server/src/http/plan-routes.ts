@@ -79,11 +79,13 @@ export function createPlanRoutes(plans: PlansService) {
     async (req: AuthedRequest, res: Response) => {
       const page = workdayPageSchema.safeParse(req.body);
       if (!page.success) {
+        // Which part was off (e.g. "fields.2.options"), so the run's trail shows it.
+        const where = page.error.issues[0]?.path.join(".") ?? "";
         sendError(
           res,
           400,
           "INVALID_REQUEST",
-          "The page's fields couldn't be read; reload the page and try again",
+          `The page's fields couldn't be read (${where}); reload the page and try again`,
         );
         return;
       }

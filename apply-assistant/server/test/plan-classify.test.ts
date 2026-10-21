@@ -82,6 +82,16 @@ describe("classifyField on real Greenhouse forms", () => {
 
   it.each([
     ["What is your notice period?", bank("work.notice_period")],
+    // Guidehouse's Workday questions (2026-10-21).
+    [
+      "How much notice do you need to give your current employer?",
+      bank("work.notice_period"),
+    ],
+    [
+      "What are your total years of relevant experience?",
+      bank("profile.years_experience"),
+    ],
+    ["Are you available to work in shifts?", { kind: "question" }],
     ["Current CTC (INR)", bank("comp.current")],
     ["Expected CTC", bank("comp.expected")],
     ["Are you willing to relocate?", bank("work.relocation")],

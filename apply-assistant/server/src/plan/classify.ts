@@ -109,7 +109,8 @@ const LABEL_RULES: readonly [RegExp, FieldRule][] = [
     profile("website"),
   ],
   [
-    /(cities|locations).{0,40}(available|willing|open|work)|available to work in/,
+    // Not "available to work in shifts".
+    /(cities|locations).{0,40}(available|willing|open|work)|available to work in(?! (shifts?|nights?|weekends?))/,
     bank("work.preferred_cities"),
   ],
   [/country/, bank("location.current_country")],
@@ -118,7 +119,8 @@ const LABEL_RULES: readonly [RegExp, FieldRule][] = [
     /(\bcity\b|where .{0,20}(based|located|live|reside)|current location|^location\b)/,
     bank("location.current_city"),
   ],
-  [/notice period/, bank("work.notice_period")],
+  // Before "current employer": "How much notice do you need to give your current employer?"
+  [/notice period|how much notice/, bank("work.notice_period")],
   [
     /(current|present).{0,20}(salary|ctc|compensation|pay)/,
     bank("comp.current"),
@@ -146,7 +148,7 @@ const LABEL_RULES: readonly [RegExp, FieldRule][] = [
     bank("misc.heard_about"),
   ],
   [
-    /^(how many )?(total )?years of (professional |relevant |work |industry )?experience( do you have)?\??$/,
+    /^(how many |what (are|is) your )?(total )?years of (professional |relevant |work |industry )?experience( do you have)?\??$/,
     bank("profile.years_experience"),
   ],
   [
