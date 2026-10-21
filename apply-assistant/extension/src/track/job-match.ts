@@ -36,10 +36,14 @@ export function jobForAddress(
 
   const here = pageKey(url);
   if (!here) return null;
+  // Workday's application sits under its job page (".../job/<place>/<title>/apply/...").
+  const keys = [here, pageKey(workdayJobPage(url) ?? "")];
+  const matches = (address: string | null | undefined) => {
+    const key = address ? pageKey(address) : null;
+    return key !== null && keys.includes(key);
+  };
   const item = items.find(
-    (i) =>
-      (i.jobUrl && pageKey(i.jobUrl) === here) ||
-      (i.applicationLink && pageKey(i.applicationLink) === here),
+    (i) => matches(i.jobUrl) || matches(i.applicationLink),
   );
   return item ? { item, how: "listing" } : null;
 }
@@ -58,6 +62,28 @@ export function isJobPage(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** A Workday application in progress (".../apply/applyManually", ".../apply/autofillWithResume"). */
+export function isWorkdayApply(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (
+      u.protocol === "https:" &&
+      /(^|\.)(myworkdayjobs|myworkdaysite)\.com$/i.test(u.hostname) &&
+      /\/apply(\/|$)/i.test(u.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** The job page a Workday application belongs to, or null for any other address. */
+function workdayJobPage(url: string): string | null {
+  if (!isWorkdayApply(url)) return null;
+  const u = new URL(url);
+  u.pathname = u.pathname.replace(/\/apply(\/.*)?$/i, "");
+  return u.toString();
 }
 
 /** A confirmation page after you submitted (URL or page text). */

@@ -1,4 +1,4 @@
-import { RunController } from "../../src/fill/controller";
+import { RunController, type RunView } from "../../src/fill/controller";
 import { ALL_SITES, activeTab } from "../../src/kit/page-fill";
 import { ApiError, ApplyClient, type QueueItem } from "../../src/lib/api";
 import {
@@ -10,6 +10,7 @@ import {
 } from "../../src/lib/settings";
 import type { RunSummary } from "../../src/lib/worker";
 import { looksSubmitted } from "../../src/track/confirm";
+import { isWorkdayApply } from "../../src/track/job-match";
 import { resolveTab } from "../../src/track/tabs";
 import { renderHere } from "./here-view";
 import { showKit } from "./kit-view";
@@ -69,8 +70,11 @@ function countdownPicker(current: number): HTMLElement {
   return select;
 }
 
-/** `tabId`: fill that open tab (you're on the application already) instead of a new one. */
-async function startFill(item: QueueItem, tabId?: number) {
+/**
+ * `tabId`: fill that open tab (you're on the application already) instead of a new one;
+ * `workday`: that tab is a Workday application, filled page by page.
+ */
+async function startFill(item: QueueItem, tabId?: number, workday = false) {
   if (!client || activeRun) return;
   const box = $("run-box");
   box.hidden = false;
@@ -88,12 +92,11 @@ async function startFill(item: QueueItem, tabId?: number) {
     void loadQueue();
   };
   try {
-    activeRun = await RunController.start({
+    const options = {
       client,
       job: item,
       countdownSeconds: await countdownSetting(),
-      ...(tabId === undefined ? {} : { tabId }),
-      onChange: (view) =>
+      onChange: (view: RunView) =>
         renderRunView(
           box,
           view,
@@ -102,7 +105,14 @@ async function startFill(item: QueueItem, tabId?: number) {
           (ref, instruction) =>
             (client as ApplyClient).tellAgent(item.jobId, { ref, instruction }),
         ),
-    });
+    };
+    activeRun =
+      workday && tabId !== undefined
+        ? await RunController.startWorkday({ ...options, tabId })
+        : await RunController.start({
+            ...options,
+            ...(tabId === undefined ? {} : { tabId }),
+          });
   } catch (error) {
     activeRun = null;
     box.replaceChildren(
@@ -521,11 +531,16 @@ async function checkTab() {
   const submitted =
     !dismissed.has(seenKey) && (await looksSubmitted(tab)) === true;
   if (turn !== checking) return;
-  renderHere(box, match, submitted, {
+  const workday = isWorkdayApply(tab.url ?? "");
+  renderHere(
+    box,
+    match,
+    submitted,
+    {
     kitButton,
     fill: () => {
       box.hidden = true;
-      void startFill(match.item, tabId);
+      void startFill(match.item, tabId, workday);
     },
     markApplied: async () => {
       await (client as ApplyClient).kitOutcome(match.item.jobId, "applied");
@@ -539,7 +554,9 @@ async function checkTab() {
       dismissed.add(seenKey);
       void checkTab();
     },
-  });
+    },
+    workday,
+  );
 }
 
 chrome.tabs.onActivated.addListener(() => void checkTab());

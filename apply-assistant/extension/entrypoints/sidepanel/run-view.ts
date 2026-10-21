@@ -263,7 +263,22 @@ export function renderRun(
       { class: "muted" },
       "Paused. Nothing happens on the page until you resume.",
     );
-  if (action.kind === "review")
+  if (action.kind === "review" && view.page && !view.page.last)
+    body = el(
+      "div",
+      { class: "step-card" },
+      el(
+        "strong",
+        {},
+        `Check "${view.page.step || "this page"}" on the page, then click Save and Continue there.`,
+      ),
+      el(
+        "p",
+        { class: "muted" },
+        "The next page is read and filled when it opens. On Review, you submit.",
+      ),
+    );
+  else if (action.kind === "review")
     body = el(
       "div",
       { class: "step-card" },

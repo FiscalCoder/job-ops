@@ -21,7 +21,8 @@ import {
   type Step,
   startRun,
 } from "./supervisor";
-import type { FormDriver, ResumeFile } from "./trusted";
+import { type FormDriver, type ResumeFile, sleep } from "./trusted";
+import { WorkdayDriver } from "./workday-driver";
 
 /**
  * Runs one supervised application from the side panel: opens the posting, drives the
@@ -36,6 +37,8 @@ export interface RunView {
   readonly busy: boolean;
   readonly notice: string | null;
   readonly problems: readonly string[];
+  /** Workday: the wizard page being filled, and whether it's the last (Review). */
+  readonly page: { readonly step: string; readonly last: boolean } | null;
 }
 
 const REVIEW_POLL_MS = 2_000;
@@ -95,6 +98,45 @@ async function release(browser: Browser, tabId: number): Promise<void> {
   if (open) await browser.disconnect().catch(() => {});
 }
 
+interface StartOptions {
+  readonly client: ApplyClient;
+  readonly job: QueueItem;
+  readonly countdownSeconds: number;
+  readonly onChange: (view: RunView) => void;
+}
+
+/** Records why the run couldn't start (with a snapshot when a page is open). */
+async function failStart(
+  trace: TraceRecorder,
+  message: string,
+  context: Record<string, string>,
+  page?: Page,
+): Promise<Error> {
+  trace.event("error", message, { data: context });
+  if (page) await trace.snapshot("couldn't start", pageCapture(page, null));
+  await trace.close();
+  return new Error(message);
+}
+
+/** Workday's last page: nothing to fill, you check everything and submit. */
+const FINAL_STEP = /^review$/i;
+/** Workday swaps a page's content in place: give the new one a moment to finish. */
+const PAGE_SETTLE_MS = 1_500;
+
+/** The server's plan for the Workday page on screen (none on the final Review page). */
+async function planWorkdayPage(
+  client: ApplyClient,
+  jobId: string,
+  driver: WorkdayDriver,
+): Promise<PlanEntry[]> {
+  if (FINAL_STEP.test(await driver.step())) return [];
+  const page = await driver.readPage();
+  const { entries } = (await client.planPage(jobId, page)) as {
+    entries: PlanEntry[];
+  };
+  return entries;
+}
+
 /** Only the job's own site and Greenhouse; anything else pauses the run. */
 export function allowedHost(host: string, startHost: string): boolean {
   return (
@@ -114,6 +156,8 @@ export class RunController {
   private resume: ResumeFile | null = null;
   private closed = false;
   private reviewTraced = false;
+  /** Workday: the wizard step the current steps belong to. */
+  private pageStep = "";
   private readonly stopWatching: () => void;
 
   private constructor(
@@ -139,29 +183,21 @@ export class RunController {
     return this.trace.snapshot(reason, pageCapture(this.page, this.driver));
   }
 
-  static async start(options: {
-    client: ApplyClient;
-    job: QueueItem;
-    countdownSeconds: number;
-    onChange: (view: RunView) => void;
-    /** Fill this already-open tab (moved to the form first if needed) instead of a new one. */
-    tabId?: number;
-  }): Promise<RunController> {
+  static async start(
+    options: StartOptions & {
+      /** Fill this already-open tab (moved to the form first if needed) instead of a new one. */
+      tabId?: number;
+    },
+  ): Promise<RunController> {
     const { client, job } = options;
     const posting = job.target.postingUrl;
     const ats = job.target.ats ?? "greenhouse";
     if (!posting) throw new Error("This job has no posting to apply on");
     const url = formUrlFor(ats, posting);
     const trace = new TraceRecorder(client, job.jobId);
-    /** Records why the run couldn't start (with a snapshot when a page is open). */
-    const fail = async (message: string, page?: Page): Promise<Error> => {
-      trace.event("error", message, { data: { url, ats } });
-      if (page) await trace.snapshot("couldn't start", pageCapture(page, null));
-      await trace.close();
-      return new Error(message);
-    };
+    const context = { url, ats };
     trace.event("run-starting", `Opening the ${ats} form: ${url}`, {
-      data: { ats, url },
+      data: context,
     });
     let entries: PlanEntry[];
     try {
@@ -169,41 +205,104 @@ export class RunController {
         entries: PlanEntry[];
       });
     } catch (error) {
-      throw await fail(`Couldn't load the plan: ${errorText(error)}`);
+      throw await failStart(
+        trace,
+        `Couldn't load the plan: ${errorText(error)}`,
+        context,
+      );
     }
     let tab: chrome.tabs.Tab;
     try {
       tab = await openForm(url, options.tabId);
     } catch (error) {
-      throw await fail(errorText(error));
+      throw await failStart(trace, errorText(error), context);
     }
-    if (tab.id === undefined) throw await fail("Couldn't open the posting");
-    await trackTab(tab.id, job.jobId);
+    if (tab.id === undefined)
+      throw await failStart(trace, "Couldn't open the posting", context);
+    return RunController.launch({
+      ...options,
+      trace,
+      context,
+      tabId: tab.id,
+      attach: (page) => attachDriver(ats, page),
+      plan: async () => entries,
+      resumeFirst: resumeFirst(ats),
+    });
+  }
+
+  /**
+   * Workday: fills the application in the tab you're on (you've signed in and opened it), one
+   * page at a time: each page is planned when it opens, and you click Save and Continue.
+   */
+  static async startWorkday(
+    options: StartOptions & { tabId: number },
+  ): Promise<RunController> {
+    const { client, job, tabId } = options;
+    const url = (await chrome.tabs.get(tabId)).url ?? "";
+    const trace = new TraceRecorder(client, job.jobId);
+    const context = { url, ats: "workday" };
+    trace.event("run-starting", `Filling the Workday application: ${url}`, {
+      data: context,
+    });
+    await chrome.tabs.update(tabId, { active: true });
+    return RunController.launch({
+      ...options,
+      trace,
+      context,
+      attach: (page) => WorkdayDriver.attach(page),
+      plan: (driver) =>
+        planWorkdayPage(client, job.jobId, driver as WorkdayDriver),
+      // Workday fills My Experience from the resume, so it goes before anything typed.
+      resumeFirst: true,
+    });
+  }
+
+  /** Attaches to the form's tab, plans, starts the run on the server, and begins filling. */
+  private static async launch(options: {
+    client: ApplyClient;
+    job: QueueItem;
+    countdownSeconds: number;
+    onChange: (view: RunView) => void;
+    trace: TraceRecorder;
+    context: Record<string, string>;
+    tabId: number;
+    attach: (page: Page) => Promise<FormDriver | null>;
+    plan: (driver: FormDriver) => Promise<PlanEntry[]>;
+    resumeFirst: boolean;
+  }): Promise<RunController> {
+    const { client, job, trace, context, tabId } = options;
+    await trackTab(tabId, job.jobId);
     // The run records this tab itself; manual-application recording stays out of it.
-    await setSupervised(tab.id, true);
+    await setSupervised(tabId, true);
     const browser = await connect({
-      transport: await ExtensionTransport.connectTab(tab.id),
+      transport: await ExtensionTransport.connectTab(tabId),
       defaultViewport: null,
     });
     const [page] = await browser.pages();
-    const driver = page ? await attachDriver(ats, page) : null;
+    const driver = page ? await options.attach(page) : null;
     if (!page || !driver) {
-      const error = await fail(
-        "No application form on the posting (it may have closed)",
+      const error = await failStart(
+        trace,
+        "No application form on the page (it may have closed)",
+        context,
         page,
       );
-      await release(browser, tab.id);
+      await release(browser, tabId);
       throw error;
     }
+    let entries: PlanEntry[];
     let run: { id: string };
     try {
+      entries = await options.plan(driver);
       run = await client.startRun(job.jobId);
     } catch (error) {
-      const refused = await fail(
-        `The server refused the run: ${errorText(error)}`,
+      const refused = await failStart(
+        trace,
+        `Couldn't start the run: ${errorText(error)}`,
+        context,
         page,
       );
-      await release(browser, tab.id);
+      await release(browser, tabId);
       throw refused;
     }
     trace.setRun(run.id);
@@ -225,16 +324,18 @@ export class RunController {
       browser,
       driver,
       new URL(page.url()).host,
-      tab.id,
+      tabId,
       entries,
       {
         countdownSeconds: options.countdownSeconds,
-        resumeFirst: resumeFirst(ats),
+        resumeFirst: options.resumeFirst,
       },
       options.onChange,
       trace,
       page,
     );
+    if (driver instanceof WorkdayDriver)
+      controller.pageStep = await driver.step();
     void controller.snapshot("start");
     void controller.loop();
     return controller;
@@ -248,7 +349,14 @@ export class RunController {
       busy: this.busy,
       notice: this.notice,
       problems: this.problems,
+      page: this.wizard
+        ? { step: this.pageStep, last: FINAL_STEP.test(this.pageStep) }
+        : null,
     };
+  }
+
+  private get wizard(): WorkdayDriver | null {
+    return this.driver instanceof WorkdayDriver ? this.driver : null;
   }
 
   /** Your controls from the side panel. */
@@ -355,13 +463,16 @@ export class RunController {
           action.step,
           action.step.note ? "needs you" : "waiting for your click",
         );
+        if (this.wizard) this.timer = setTimeout(() => void this.watchPage(), REVIEW_POLL_MS);
         return;
       case "fill":
         return this.fill(action.step);
       case "review":
         await this.driver.highlight(
           null,
-          "Apply Copilot: review the form, then click Submit yourself",
+          this.morePages()
+            ? "Apply Copilot: check this page, then click Save and Continue"
+            : "Apply Copilot: review the form, then click Submit yourself",
         );
         this.problems = [
           ...(await this.driver.problems()),
@@ -373,8 +484,10 @@ export class RunController {
             "review",
             this.problems.length
               ? `At review with ${this.problems.length} problem(s)`
-              : "At review: waiting for you to click Submit",
-            { data: { problems: this.problems } },
+              : this.morePages()
+                ? `Page "${this.pageStep}" done: waiting for you to click Save and Continue`
+                : "At review: waiting for you to click Submit",
+            { data: { problems: this.problems, page: this.pageStep } },
           );
           void this.snapshot("review");
         }
@@ -403,14 +516,80 @@ export class RunController {
     return empty;
   }
 
+  /** Workday, before its final page: you continue to the next page yourself. */
+  private morePages(): boolean {
+    return this.wizard !== null && !FINAL_STEP.test(this.pageStep);
+  }
+
+  /** Workday moved to another page: the step you're on now, when it changed. */
+  private async movedTo(): Promise<string | null> {
+    const step = (await this.wizard?.step()) ?? "";
+    return step && step !== this.pageStep ? step : null;
+  }
+
+  /** While a step waits for you on Workday: you may have filled the rest and moved on. */
+  private async watchPage(): Promise<void> {
+    if (this.tabClosed || this.busy || nextAction(this.state).kind !== "wait-for-you")
+      return;
+    const moved = await this.movedTo();
+    if (moved) return this.nextPage(moved);
+    this.timer = setTimeout(() => void this.watchPage(), REVIEW_POLL_MS);
+  }
+
+  /** You clicked Save and Continue (or Back): plan the page now on screen and fill it. */
+  private async nextPage(step: string): Promise<void> {
+    const wizard = this.wizard;
+    if (!wizard || this.closed) return;
+    this.clearTimer();
+    this.busy = true;
+    this.notice = null;
+    this.problems = [];
+    this.pageStep = step;
+    this.reviewTraced = false;
+    this.emit();
+    await this.logFinishedSteps();
+    const firstSeq = Math.max(0, ...this.state.steps.map((s) => s.seq)) + 1;
+    const begin = (entries: readonly PlanEntry[]) => ({
+      ...startRun(entries, {
+        countdownSeconds: this.state.countdownSeconds,
+        resumeFirst: true,
+        firstSeq,
+      }),
+      autoApproved: this.state.autoApproved,
+    });
+    try {
+      await sleep(PAGE_SETTLE_MS);
+      const entries = await planWorkdayPage(
+        this.client,
+        this.job.jobId,
+        wizard,
+      );
+      this.state = begin(entries);
+      this.trace.event(
+        "page",
+        `On Workday page "${step}" with ${entries.length} plan entries`,
+        { data: { step, entries: entries.length } },
+      );
+      void this.snapshot(`page: ${step}`);
+    } catch (error) {
+      this.notice = `Couldn't plan the "${step}" page (${errorText(error)}): fill it yourself, then continue.`;
+      this.trace.event("error", this.notice, { data: { step } });
+      this.state = begin([]);
+    } finally {
+      this.busy = false;
+    }
+    void this.loop();
+  }
+
   private currentSeq() {
     return this.state.steps[this.state.cursor]?.seq;
   }
 
   private async mark(step: Step, what: string) {
+    const position = this.state.steps.indexOf(step) + 1;
     await this.driver.highlight(
       step.entry.ref,
-      `Apply Copilot ${step.seq}/${this.state.steps.length} · ${what}`,
+      `Apply Copilot ${position}/${this.state.steps.length} · ${what}`,
     );
   }
 
@@ -445,6 +624,9 @@ export class RunController {
 
   private async fill(step: Step) {
     if (this.tabClosed) return;
+    // You moved on before this page was finished: work on the page you're on.
+    const moved = await this.movedTo();
+    if (moved) return this.nextPage(moved);
     let stall: ReturnType<typeof setTimeout> | null = null;
     this.busy = true;
     this.emit();
@@ -516,6 +698,8 @@ export class RunController {
 
   private async checkSubmitted() {
     if (this.tabClosed || nextAction(this.state).kind !== "review") return;
+    const moved = await this.movedTo();
+    if (moved) return this.nextPage(moved);
     if (await this.driver.submitted()) {
       this.apply({ type: "submitted" });
       void this.loop();

@@ -91,7 +91,12 @@ const isFile = (entry: PlanEntry) => entry.type === "file";
 
 export function startRun(
   entries: readonly PlanEntry[],
-  options: { countdownSeconds: number; resumeFirst?: boolean },
+  options: {
+    countdownSeconds: number;
+    resumeFirst?: boolean;
+    /** Workday: a later page's steps continue the run's numbering. */
+    firstSeq?: number;
+  },
 ): RunState {
   const active = entries.filter((e) => e.status !== "skip");
   const files = active.filter(isFile);
@@ -102,7 +107,7 @@ export function startRun(
     ? [...files, ...others]
     : [...others, ...files];
   const steps = ordered.map((entry, index) => ({
-    seq: index + 1,
+    seq: (options.firstSeq ?? 1) + index,
     entry,
     state: "pending" as const,
     value: entry.value,

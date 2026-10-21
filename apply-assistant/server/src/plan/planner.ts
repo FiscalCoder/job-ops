@@ -338,6 +338,8 @@ function resolveRule(
             rule.key,
           );
     }
+    case "fixed":
+      return { value: rule.value, source: "rule:fixed" };
     case "located-in":
       return resolveLocatedIn(rule.place, field, input, jobCountry);
     case "question":

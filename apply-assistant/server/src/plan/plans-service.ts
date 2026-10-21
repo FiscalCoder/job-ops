@@ -23,6 +23,7 @@ import {
 import { normalizeQuestion } from "./question-norm.js";
 import { type ResumeFacts, resumeFacts } from "./resume-facts.js";
 import { parseFormSchema } from "./schemas.js";
+import { parseWorkdayPage, type WorkdayPage } from "./workday-schema.js";
 
 /**
  * Builds and stores fill plans. Inputs: the matched Greenhouse posting's stored form, your Job
@@ -142,15 +143,14 @@ export function createPlans(deps: PlansDeps) {
     return { target, stored };
   }
 
-  async function buildWith(
-    token: string,
+  /** Your remembered answers, Claude for what's left, then the plan. */
+  async function planSchema(
     jobId: string,
+    schema: FormSchema,
+    job: Awaited<ReturnType<JobOpsApi["getJob"]>>,
     resume: ResumeFacts,
     bank: ReadonlyMap<string, string>,
-  ): Promise<FillPlan> {
-    const { target, stored } = formOf(jobId);
-    const job = await jobOps.getJob(token, jobId);
-    const schema = parseFormSchema(target.ats, stored.payload);
+  ) {
     const learned: PlanInput["learned"] = (label) =>
       deps.learned?.get(normalizeQuestion(label, job.employer)) ?? null;
     const fromClaude = await askClaude(
@@ -175,6 +175,25 @@ export function createPlans(deps: PlansDeps) {
       learned,
       ...fromClaude,
     });
+    return { plan, fromClaude };
+  }
+
+  async function buildWith(
+    token: string,
+    jobId: string,
+    resume: ResumeFacts,
+    bank: ReadonlyMap<string, string>,
+  ): Promise<FillPlan> {
+    const { target, stored } = formOf(jobId);
+    const job = await jobOps.getJob(token, jobId);
+    const schema = parseFormSchema(target.ats, stored.payload);
+    const { plan, fromClaude } = await planSchema(
+      jobId,
+      schema,
+      job,
+      resume,
+      bank,
+    );
     const previous = plans.get(jobId)?.plan;
     plans.save(jobId, plan);
     // Plans are rebuilt on every view and answer-bank save: trace only real changes.
@@ -245,6 +264,45 @@ export function createPlans(deps: PlansDeps) {
         data: { ref, instruction, answer },
       });
       return answer;
+    },
+
+    /**
+     * Workday: plans the one page you're on from the fields the extension read there (its form
+     * only exists after you sign in). Not stored: each page is planned as you reach it.
+     */
+    async planPage(
+      token: string,
+      jobId: string,
+      page: WorkdayPage,
+    ): Promise<FillPlan> {
+      const [job, resume] = await Promise.all([
+        jobOps.getJob(token, jobId),
+        loadResume(token),
+      ]);
+      const schema = parseWorkdayPage(page, job.title);
+      const { plan, fromClaude } = await planSchema(
+        jobId,
+        schema,
+        job,
+        resume,
+        bankMap(),
+      );
+      const { summary } = plan;
+      trace({
+        jobId,
+        kind: "plan",
+        message: `Plan built for Workday page "${page.step}": ${summary.fill} to fill, ${summary.needsYou} need you`,
+        data: {
+          ats: "workday",
+          step: page.step,
+          summary,
+          ...(fromClaude.claudeProblem
+            ? { claudeProblem: fromClaude.claudeProblem }
+            : {}),
+          claudeAnswers: fromClaude.claude?.size ?? 0,
+        },
+      });
+      return plan;
     },
 
     async build(token: string, jobId: string): Promise<FillPlan> {

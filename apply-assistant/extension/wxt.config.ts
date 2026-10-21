@@ -40,6 +40,9 @@ export default defineConfig({
       "https://jobs.ashbyhq.com/*",
       "https://api.lever.co/*",
       "https://jobs.lever.co/*",
+      // Workday applications (filled page by page in the tab you're on).
+      "https://*.myworkdayjobs.com/*",
+      "https://*.myworkdaysite.com/*",
       "https://autocomplete.clearbit.com/*",
     ],
     // All sites, asked for once from the side panel: company careers pages (embedded Greenhouse

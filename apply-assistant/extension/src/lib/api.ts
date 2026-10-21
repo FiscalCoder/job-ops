@@ -113,6 +113,11 @@ export class ApplyClient implements TraceApi {
     return this.request(`/plans/${encodeURIComponent(jobId)}`);
   }
 
+  /** Workday: a plan for the wizard page you're on, from its fields. */
+  planPage(jobId: string, page: unknown): Promise<unknown> {
+    return this.request(`/plans/${encodeURIComponent(jobId)}/page`, page);
+  }
+
   startRun(jobId: string): Promise<{ id: string }> {
     return this.request("/runs", { jobId });
   }

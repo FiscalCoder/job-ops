@@ -434,12 +434,38 @@ Live result: ElevenLabs (a Ready job) is matched on Ashby and planned. Its 2 nee
    - every Next / Continue / Submit click, with the whole page.
 
    Password and one-time-code values are never read. Code: `src/track/inspect.ts`, `manual-capture.ts`. Checked in `e2e/kit.e2e.mjs`.
-2. **W1:** you apply to one or two Workday jobs by hand with recording on (move them to Ready first, so they're in the queue).
-3. **W2: Workday filler, built from those recorded pages.**
-   - **Approach:** a step-by-step supervised fill planned at fill time from each page's fields. It reuses the classifier, answer bank, remembered answers and Claude.
-   - **Fields:** found by Workday's stable `data-automation-id`s, for example `legalNameSection_firstName`, `addressSection_city`, `phone-number`, `bottom-navigation-next-button`. Other autofill projects use the same ids.
-   - **Who clicks what:** you sign in, click "Save and Continue", and submit.
-4. **W3:** Workday lookups (posting liveness) from the public job-board API, and dry runs on the recorded pages.
+2. **W1: one recorded application (done 2026-10-21, LPL Financial).**
+   - The recording captured 4 form pages, 39 answers, 7 step clicks and 11 snapshots. There were no screenshots because the all-sites permission hadn't been re-granted.
+   - Its six steps are Autofill with Resume, My Information, My Experience, Application Questions, Voluntary Disclosures and Review.
+   - The snapshots, with personal values replaced by fakes, are the test fixtures in `extension/test/fixtures/workday/`.
+3. **W2: Workday filler (built 2026-10-21; first live test is your next Workday application).**
+   - **Page by page.** You sign in and open the application. "Fill this page" in the side panel then:
+     - reads the page's fields;
+     - opens each dropdown to list its choices, then closes it again;
+     - has the server plan that page (`POST /plans/:jobId/page`);
+     - fills it step by step as usual.
+   - **Your part.** You check each page and click Save and Continue. The next page is read and filled when it opens. On Review, you submit.
+   - **Fields** come from the recorded pages, not other projects' ids:
+     - each field's container is `data-automation-id="formField-<key>"`;
+     - its `data-fkit-id` is the control's id, used as the plan's ref;
+     - required fields carry an `<abbr>*</abbr>`.
+   - **Field kinds:**
+     - dropdowns are buttons that open a listbox;
+     - "search" fields (How did you hear, Country Phone Code) take text plus Enter and keep picks as tags;
+     - radios, checkboxes and text;
+     - the resume upload sits outside the field containers.
+   - **What fills what** (`server/src/plan/workday-schema.ts`):
+     - names, country, phone, the phone's country code and "worked here before" come from your answer bank;
+     - Phone Device Type is always Mobile;
+     - "How did you hear" and the application questions go through the usual rules, then remembered answers, then Claude;
+     - work history, education, skills and dates are left to Workday, which fills them from your resume;
+     - the resume is attached on Autofill with Resume, so it goes first.
+   - **Tests:**
+     - the page reader runs on the recorded pages;
+     - the page planner runs on the LPL field sets;
+     - `e2e/workday.e2e.mjs` runs a supervised fill on a fake Workday wizard through the built extension.
+   - Workday's domains are now in the extension's own site list, so its pages are recognised without the all-sites permission.
+4. **W3:** Workday lookups (posting liveness) from the public job-board API.
 
 Your Job Ops has 10 Workday jobs: FactSet and Hitachi (applied); Capital One, LPL, Visa, Genpact, ModMed, Candescent and insightsoftware (Discovered). FactSet's manual application predates W0, so only its kit actions were recorded.
 
@@ -453,7 +479,7 @@ Everything planned for Phase 1 is built and live:
 
 What's left is **M4**: your real supervised applications until the §1 targets hold on the Progress tab (5 of 20 so far).
 
-**Workday (Phase 1b) is on hold.** Your jobs now mostly come from LinkedIn and Naukri; only 1 of 74 recent candidates was on Workday. Reconsider when Progress or Timeline data shows otherwise.
+**Workday (Phase 1b)** was resumed at your request on 2026-10-21; see §12G.
 
 ## 12E. M4: dogfooding (started 2026-10-21)
 

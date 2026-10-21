@@ -29,6 +29,8 @@ export type FieldRule =
   | { kind: "eeo"; key: string }
   /** A Yes/No "Are you located in <place>?": answered from your saved location. */
   | { kind: "located-in"; place: string }
+  /** Always the same answer (Workday's "Phone Device Type": Mobile). */
+  | { kind: "fixed"; value: string }
   | { kind: "hidden" }
   | { kind: "question" };
 
@@ -70,6 +72,9 @@ const BY_REF: Record<string, FieldRule> = {
   github: profile("github"),
   website: profile("website"),
   current_company: profile("recent_employer"),
+  // Workday ("Have you worked for <company>...?", "Phone Device Type").
+  worked_here: bank("history.worked_at_company"),
+  phone_type: { kind: "fixed", value: "Mobile" },
   // Extra links (Lever): never filled with your website again; required ones go to Claude/you.
   other_link: { kind: "question" },
   twitter: { kind: "question" },

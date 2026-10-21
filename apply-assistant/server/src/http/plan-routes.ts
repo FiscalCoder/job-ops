@@ -3,6 +3,7 @@ import { z } from "zod";
 import { TellRejectedError } from "../claude/tell.js";
 import { JobOpsError } from "../jobops/client.js";
 import { NotPlannableError, type PlansService } from "../plan/plans-service.js";
+import { workdayPageSchema } from "../plan/workday-schema.js";
 import { type AuthedRequest, sendJobOpsFailure } from "./auth.js";
 import { sendError, sendOk } from "./envelope.js";
 
@@ -68,6 +69,44 @@ export function createPlanRoutes(plans: PlansService) {
           "CLAUDE_FAILED",
           "Claude couldn't be reached; try again",
         );
+      }
+    },
+  );
+
+  /** Workday: a plan for the page you're on, from the fields the extension read. */
+  router.post(
+    "/plans/:jobId/page",
+    async (req: AuthedRequest, res: Response) => {
+      const page = workdayPageSchema.safeParse(req.body);
+      if (!page.success) {
+        sendError(
+          res,
+          400,
+          "INVALID_REQUEST",
+          "The page's fields couldn't be read; reload the page and try again",
+        );
+        return;
+      }
+      try {
+        sendOk(
+          res,
+          await plans.planPage(
+            tokenOf(req),
+            String(req.params.jobId),
+            page.data,
+          ),
+        );
+      } catch (error) {
+        if (error instanceof JobOpsError && error.status === 404) {
+          sendError(
+            res,
+            404,
+            "JOB_NOT_FOUND",
+            "Job Ops has no job with that id",
+          );
+          return;
+        }
+        sendJobOpsFailure(res, error);
       }
     },
   );
