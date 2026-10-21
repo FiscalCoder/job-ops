@@ -58,6 +58,13 @@ export function watchForm(install: boolean): FormPage {
       .map((id) => text(document.getElementById(id)))
       .join(" ")
       .trim();
+    // Workday: the question is the field container's label or legend (a dropdown's own label
+    // repeats its current answer: "Country India Required").
+    const workday = el.closest("[data-automation-id^='formField-']");
+    const question = text(
+      workday?.querySelector("legend label, legend, label"),
+    ).replace(/\*$/, "");
+    if (question) return question.slice(0, 300);
     const box = el.closest(
       "[data-automation-id^='formField'], fieldset, .application-question, .field, [class*='field']",
     );
@@ -72,8 +79,13 @@ export function watchForm(install: boolean): FormPage {
     ).slice(0, 300);
   };
 
+  // The field's own marker, else its Workday field container ("formField-source"), else the
+  // nearest marked wrapper.
   const automationIdOf = (el: HTMLElement) =>
     el.getAttribute("data-automation-id") ??
+    el
+      .closest("[data-automation-id^='formField-']")
+      ?.getAttribute("data-automation-id") ??
     el.closest("[data-automation-id]")?.getAttribute("data-automation-id") ??
     "";
 
@@ -82,15 +94,19 @@ export function watchForm(install: boolean): FormPage {
     const tag = el.tagName.toLowerCase();
     const isDropdownButton =
       tag === "button" && el.getAttribute("aria-haspopup") === "listbox";
-    const type = isDropdownButton
-      ? "dropdown"
-      : tag === "select"
-        ? "select"
-        : tag === "textarea"
-          ? "textarea"
-          : el.getAttribute("role") === "combobox" && tag !== "input"
-            ? "combobox"
-            : (input.type || "text").toLowerCase();
+    // Workday's search-and-pick: picked items show as tags, not as the input's text.
+    const multi = el.closest("[data-automation-id='multiSelectContainer']");
+    const type = multi
+      ? "multiselect"
+      : isDropdownButton
+        ? "dropdown"
+        : tag === "select"
+          ? "select"
+          : tag === "textarea"
+            ? "textarea"
+            : el.getAttribute("role") === "combobox" && tag !== "input"
+              ? "combobox"
+              : (input.type || "text").toLowerCase();
     const secret =
       SECRET.test(input.type ?? "") ||
       SECRET.test(el.getAttribute("autocomplete") ?? "") ||
@@ -113,6 +129,18 @@ export function watchForm(install: boolean): FormPage {
         text(i.labels?.[0]) || i.getAttribute("aria-label") || i.value;
       options = group.map(optionLabel).slice(0, 80);
       value = group.filter((i) => i.checked).map(optionLabel);
+    } else if (multi) {
+      const tags = [
+        ...multi.querySelectorAll("[data-automation-id='selectedItem']"),
+      ].map((item) => text(item));
+      const said = text(
+        multi.querySelector("[data-automation-id='promptAriaInstruction']"),
+      );
+      value = tags.length
+        ? tags
+        : /item(s)? selected,/.test(said)
+          ? said.replace(/^.*?item(s)? selected,\s*/, "").split(/,\s*/)
+          : [];
     } else if (type === "file") {
       value = [...(input.files ?? [])].map((f) => f.name);
     } else if (isDropdownButton || type === "combobox") {
@@ -143,6 +171,8 @@ export function watchForm(install: boolean): FormPage {
     )) {
       const input = el as HTMLInputElement;
       if (el.tagName === "INPUT" && SKIP.test(input.type)) continue;
+      // Site chrome, not the form (Workday's header Settings menu).
+      if (el.closest("header, [data-automation-id='header'], nav")) continue;
       if (input.type === "checkbox" || input.type === "radio") {
         const key = input.name || input.id;
         if (seenGroups.has(key)) continue;
@@ -157,10 +187,11 @@ export function watchForm(install: boolean): FormPage {
     url: location.href,
     title: document.title,
     heading: text(
-      document.querySelector(
-        "[data-automation-id='pageHeader'], [data-automation-id='progressBarActiveStep'], h2, h1",
-      ),
-    ).slice(0, 200),
+      document.querySelector("[data-automation-id='progressBarActiveStep']") ??
+        document.querySelector("[data-automation-id='pageHeader'], h2, h1"),
+    )
+      .replace(/^current step \d+ of \d+\s*/i, "")
+      .slice(0, 200),
     fields: fieldsNow(),
   });
 
