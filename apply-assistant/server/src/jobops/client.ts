@@ -103,13 +103,22 @@ const jobDetailData = jobShape.extend({
   tailoredSummary: z.string().nullable().optional(),
 });
 
+/**
+ * Naukri's "apply on company site" click tracker, saved as the application link by older
+ * Naukri scrapes: it errors unless clicked from a signed-in Naukri page, so the listing is used.
+ */
+const NAUKRI_TRACKER = /^https:\/\/www\.naukri\.com\/.*\/saveCompanyApply/i;
+
 const toJob = (job: z.infer<typeof jobShape>): JobOpsJob => ({
   id: job.id,
   title: job.title,
   employer: job.employer,
   status: job.status,
   jobUrl: job.jobUrl,
-  applicationLink: job.applicationLink ?? null,
+  applicationLink:
+    job.applicationLink && !NAUKRI_TRACKER.test(job.applicationLink)
+      ? job.applicationLink
+      : null,
   suitabilityScore: job.suitabilityScore ?? null,
 });
 

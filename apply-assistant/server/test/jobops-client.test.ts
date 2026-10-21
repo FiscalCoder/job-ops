@@ -119,6 +119,26 @@ describe("JobOpsClient", () => {
     });
   });
 
+  it("drops Naukri's click-tracker link, which only works from inside Naukri", async () => {
+    const { fetchImpl } = fakeFetch(() =>
+      json({
+        ok: true,
+        data: {
+          id: "j1",
+          title: "SE",
+          employer: "Acme",
+          status: "ready",
+          jobUrl:
+            "https://www.naukri.com/job-listings-senior-developer-acme-chennai-5-to-8-years-191026911135",
+          applicationLink:
+            "https://www.naukri.com/cloudgateway-apply/apply-services/v0/apply/saveCompanyApply?id=&file=191026911135&logstr=srprestapi",
+        },
+      }),
+    );
+    const job = await new JobOpsClient(BASE, fetchImpl).getJob("tok", "j1");
+    expect(job.applicationLink).toBeNull();
+  });
+
   it("patches the application link and status", async () => {
     const { fetchImpl, calls } = fakeFetch(() =>
       json({ ok: true, data: { id: "j1" } }),

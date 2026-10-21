@@ -68,8 +68,9 @@ describe("naukri extractor mapping", () => {
         employer: "Barclays",
         jobUrl:
           "https://www.naukri.com/job-listings-software-engineer-barclays-pune-0-to-7-years-270426502000",
+        // Naukri's click tracker errors when opened on its own: the listing has the button.
         applicationLink:
-          "https://www.naukri.com/cloudgateway-apply/apply-services/v0/apply/saveCompanyApply?id=&file=270426502000&logstr=srprestapi",
+          "https://www.naukri.com/job-listings-software-engineer-barclays-pune-0-to-7-years-270426502000",
         location: "Pune",
         locationEvidence: {
           rawLocation: "Pune",

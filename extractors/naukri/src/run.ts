@@ -259,6 +259,16 @@ function toNaukriUrl(pathOrUrl: string | null): string | null {
   return `https://www.naukri.com/${pathOrUrl}`;
 }
 
+/**
+ * Naukri's "apply on company site" link is a click tracker that only redirects from inside a
+ * signed-in Naukri page; opened on its own it errors. Use the listing, which has the button.
+ */
+function toApplyUrl(companyApplyUrl: string | null, jobUrl: string): string {
+  const url = toNaukriUrl(companyApplyUrl);
+  if (!url || /\/saveCompanyApply/i.test(url)) return jobUrl;
+  return url;
+}
+
 function parseDatePosted(value: unknown): string | undefined {
   const timestamp = toNumberOrNull(value);
   if (timestamp === null) return undefined;
@@ -291,7 +301,7 @@ export function mapNaukriJob(row: NaukriRawJob): CreateJobInput | null {
   if (!jobUrl) return null;
 
   const sourceJobId = toStringOrNull(row.jobId);
-  const applyUrl = toNaukriUrl(toStringOrNull(row.companyApplyUrl)) ?? jobUrl;
+  const applyUrl = toApplyUrl(toStringOrNull(row.companyApplyUrl), jobUrl);
   const ambitionBoxData = row.ambitionBoxData;
   const rating = toNumberOrNull(ambitionBoxData?.AggregateRating);
   const reviewsCount = toNumberOrNull(ambitionBoxData?.ReviewsCount);
