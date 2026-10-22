@@ -30,6 +30,16 @@
       <p id="notice" class="ok" role="status" hidden></p>
       <div id="here" class="card here" hidden></div>
       <div class="card">
+        <strong>Add a job</strong>
+        <p class="muted">A job's page or its application form on any site: Job Ops adds it, tailors your resume and scores it.</p>
+        <form id="import-form" class="row">
+          <input id="import-url" type="url" placeholder="https://…" aria-label="Link to the job or its application form" />
+          <button type="submit">Add</button>
+        </form>
+        <button type="button" id="import-tab" class="link">Use this tab</button>
+        <div id="import-box"></div>
+      </div>
+      <div class="card">
         <div class="row">
           <strong>Job-board lookups</strong>
           <button type="button" id="run" class="primary">Run now</button>

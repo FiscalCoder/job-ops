@@ -100,8 +100,29 @@ const ok = (route, data) =>
     contentType: "application/json",
     body: JSON.stringify({ ok: true, data }),
   });
+// "Add a job": a job's page that isn't open, read in a background tab.
+const JOB_URL = `https://${SERVER_HOST}/test/jobs/456`;
+const JOB_PAGE = `<!doctype html><html><head><title>Platform Engineer - Acme</title>
+<meta property="og:site_name" content="Acme"></head><body><nav>Home Jobs</nav>
+<main><h1>Platform Engineer</h1><p>${"Run our Kubernetes platform in Chennai. ".repeat(10)}</p></main></body></html>`;
+const reads = [];
+const imports = [];
+
 function stubServer(route, url) {
   const req = route.request();
+  if (url.pathname === "/test/jobs/456")
+    return route.fulfill({ status: 200, contentType: "text/html", body: JOB_PAGE });
+  if (url.pathname === "/jobs/import/read") {
+    reads.push(JSON.parse(req.postData() ?? "{}"));
+    return ok(route, {
+      job: { title: "Platform Engineer", employer: "Acme", location: "Chennai" },
+      warning: null,
+    });
+  }
+  if (url.pathname === "/jobs/import") {
+    imports.push(JSON.parse(req.postData() ?? "{}").job);
+    return ok(route, { jobId: "new-job", status: "processing" });
+  }
   if (url.pathname.startsWith("/test/careers"))
     return route.fulfill({ status: 200, contentType: "text/html", body: FORM });
   if (url.pathname === "/queue")
@@ -334,6 +355,54 @@ try {
       recipes.get("notice period")?.worked === 2,
     `${notice} · asks ${actAsks.filter((a) => a.label === "Notice period").length} · ${JSON.stringify(recipes.get("notice period"))}`,
   );
+  // Add a job from its link: read in a background tab, Job Ops reads its details, you add it.
+  await panel.bringToFront();
+  await panel.getByRole("button", { name: "Abort" }).click();
+  await panel.getByRole("button", { name: "Close" }).click();
+  const tabsBefore = context.pages().length;
+  await panel.locator("#import-url").fill("https://www.linkedin.com/jobs/view/1");
+  await panel.locator("#import-form").getByRole("button", { name: "Add" }).click();
+  await panel.getByText("LinkedIn and Indeed pages aren't read", { exact: false }).waitFor();
+  check("a LinkedIn link isn't read", reads.length === 0);
+  // A link that isn't open: read in a background tab, then closed. (Pages the extension opens
+  // aren't stubbed: the server's own sign-in reply is too short to be a job, as it should be.)
+  await panel.locator("#import-url").fill(`https://${SERVER_HOST}/queue`);
+  await panel.locator("#import-form").getByRole("button", { name: "Add" }).click();
+  await panel.getByText("That page shows hardly any text", { exact: false }).waitFor({ timeout: 45_000 });
+  check(
+    "a link that isn't open is read in a background tab, closed afterwards",
+    context.pages().length === tabsBefore && reads.length === 0,
+    `tabs ${context.pages().length}/${tabsBefore}`,
+  );
+  // The job's page open in a tab: read there.
+  const jobTab = await context.newPage();
+  await jobTab.goto(JOB_URL);
+  await panel.bringToFront();
+  await panel.locator("#import-url").fill(JOB_URL);
+  await panel.locator("#import-form").getByRole("button", { name: "Add" }).click();
+  const addIt = panel.getByRole("button", { name: "Add to Job Ops" });
+  await addIt.waitFor({ timeout: 45_000 });
+  check(
+    "the open page read in the browser, Job Ops' reading shown to check",
+    reads[0]?.url === JOB_URL &&
+      reads[0].content.includes("Page Title: Platform Engineer - Acme") &&
+      reads[0].content.includes("Run our Kubernetes platform") &&
+      !reads[0].content.includes("Home Jobs") &&
+      (await panel.getByLabel("Job title").inputValue()) === "Platform Engineer",
+    JSON.stringify(reads[0]?.content.slice(0, 120)),
+  );
+  await addIt.click();
+  await panel.getByText("added to Job Ops", { exact: false }).waitFor({ timeout: 15_000 });
+  check(
+    "added to Job Ops with its link as the application",
+    imports[0]?.title === "Platform Engineer" &&
+      imports[0].employer === "Acme" &&
+      imports[0].jobUrl === JOB_URL &&
+      imports[0].applicationLink === JOB_URL &&
+      imports[0].jobDescription.includes("Kubernetes"),
+    JSON.stringify(imports[0])?.slice(0, 200),
+  );
+
   check("no side panel errors", errors.length === 0, errors.join(" | "));
 } catch (error) {
   failures.push(String(error));

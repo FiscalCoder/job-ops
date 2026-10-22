@@ -27,12 +27,13 @@ function el(
   return node;
 }
 
-function button(label: string, onClick: () => void, primary = false) {
-  const b = el(
-    "button",
-    { type: "button", class: primary ? "primary" : undefined },
-    label,
-  ) as HTMLButtonElement;
+/** "primary": the accent colour; "go": green, for the kit's most used actions. */
+function button(
+  label: string,
+  onClick: () => void,
+  look?: "primary" | "go",
+) {
+  const b = el("button", { type: "button", class: look }, label) as HTMLButtonElement;
   b.addEventListener("click", onClick);
   return b;
 }
@@ -99,7 +100,7 @@ export async function showKit(
             void close();
             onFill();
           },
-          true,
+          "primary",
         )
       : null;
     box.replaceChildren(
@@ -200,7 +201,9 @@ export async function showKit(
         ". On LinkedIn the kit only copies.",
       );
 
-  const openButton = button("Open application ↗", async () => {
+  const openButton = button(
+    "Open application ↗",
+    async () => {
     const tab = await chrome.tabs.create({
       url: kit.job.applyUrl,
       active: true,
@@ -208,7 +211,9 @@ export async function showKit(
     // Pages opened from here (Apply, the company's form) are recognised as this job.
     if (tab.id !== undefined) await trackTab(tab.id, job.jobId);
     trace.event("kit-open-application", `Opened ${kit.job.applyUrl}`);
-  });
+    },
+    "primary",
+  );
 
   const saveButton = button("Save resume, copy path", async () => {
     saveButton.disabled = true;
@@ -261,19 +266,23 @@ export async function showKit(
           void close();
           onFill();
         },
-        true,
+        "primary",
       )
     : null;
 
   const fillHereButton =
     onFillHere && !fillButton
-      ? button("Fill this page", async () => {
-          fillHereButton?.setAttribute("disabled", "");
-          const why = await onFillHere();
-          fillHereButton?.removeAttribute("disabled");
-          if (why) say(why, "error");
-          else void close();
-        })
+      ? button(
+          "Fill this page",
+          async () => {
+            fillHereButton?.setAttribute("disabled", "");
+            const why = await onFillHere();
+            fillHereButton?.removeAttribute("disabled");
+            if (why) say(why, "error");
+            else void close();
+          },
+          "go",
+        )
       : null;
 
   box.replaceChildren(
@@ -352,7 +361,7 @@ function outcomeButtons(
           for (const each of buttons) each.disabled = false;
         }
       },
-      outcome === "applied",
+      outcome === "applied" ? "primary" : undefined,
     );
     buttons.push(b);
     return b;
@@ -416,7 +425,7 @@ function askClaude(
         ask.disabled = false;
       }
     },
-    true,
+    "primary",
   );
   return el(
     "div",

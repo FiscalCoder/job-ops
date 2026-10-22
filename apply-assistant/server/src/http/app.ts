@@ -25,6 +25,7 @@ import { createCaptureRoutes } from "./capture-routes.js";
 import { sendError, sendOk } from "./envelope.js";
 import { createKitRoutes } from "./kit-routes.js";
 import { createCompanyRoutes } from "./company-routes.js";
+import { createImportRoutes } from "./import-routes.js";
 import { createSiteRoutes } from "./site-routes.js";
 import { createLearnedRoutes } from "./learned-routes.js";
 import { createLookupRoutes } from "./lookup-routes.js";
@@ -132,6 +133,7 @@ export function createApp({
 
   app.use(requireUser, createAnswerBankRoutes(answers));
   app.use(requireUser, createCompanyRoutes(limits));
+  app.use(requireUser, createImportRoutes({ jobOps, trace: record }));
   app.use(requireUser, createPlanRoutes(plans));
   app.use(
     requireUser,

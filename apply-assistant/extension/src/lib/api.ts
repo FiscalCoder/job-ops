@@ -50,6 +50,30 @@ export interface CompanyWindow {
 }
 
 /** What the server did with a captured LinkedIn apply link. */
+/** What Job Ops' model read from a job's page (any of it may be missing). */
+export interface ImportDraft {
+  readonly title?: string | null;
+  readonly employer?: string | null;
+  readonly location?: string | null;
+  readonly salary?: string | null;
+  readonly deadline?: string | null;
+  readonly jobType?: string | null;
+  readonly jobLevel?: string | null;
+}
+
+export interface ImportJob {
+  readonly title: string;
+  readonly employer: string;
+  readonly jobUrl: string;
+  readonly applicationLink: string;
+  readonly location?: string;
+  readonly salary?: string;
+  readonly deadline?: string;
+  readonly jobType?: string;
+  readonly jobLevel?: string;
+  readonly jobDescription: string;
+}
+
 export type CaptureOutcome =
   | {
       readonly status: "saved" | "unchanged";
@@ -137,6 +161,19 @@ export class ApplyClient implements TraceApi {
 
   queue(): Promise<QueueItem[]> {
     return this.request("/queue");
+  }
+
+  /** Job Ops' model reads a job's details from its page's text (read in your browser). */
+  readJob(page: { url: string; content: string }): Promise<{
+    job: ImportDraft;
+    warning: string | null;
+  }> {
+    return this.request("/jobs/import/read", page);
+  }
+
+  /** Adds a job to Job Ops (its manual import); Job Ops then tailors and scores it. */
+  importJob(job: ImportJob): Promise<{ jobId: string; status: string }> {
+    return this.request("/jobs/import", { job });
   }
 
   plan(jobId: string): Promise<unknown> {

@@ -14,6 +14,7 @@ import { looksSubmitted } from "../../src/track/confirm";
 import { isSupportedPosting, pagedFill } from "../../src/track/job-match";
 import { resolveTab } from "../../src/track/tabs";
 import { renderHere } from "./here-view";
+import { setUpImport } from "./import-view";
 import { showKit } from "./kit-view";
 import { confirmLimit, postedText, renderQueue } from "./queue-view";
 import { renderRun as renderRunView } from "./run-view";
@@ -600,6 +601,8 @@ let queueItems: QueueItem[] = [];
 /** Confirmation pages you answered "Not yet" on (tab + address). */
 const dismissed = new Set<string>();
 let checking = 0;
+/** The tab you're on, for "Add a job" → "Use this tab". */
+let shownTab: chrome.tabs.Tab | undefined;
 
 /**
  * When the current tab belongs to a queued job (its LinkedIn or Naukri page, the company page
@@ -614,6 +617,7 @@ async function checkTab() {
     return;
   }
   const tab = await activeTab();
+  shownTab = tab;
   const match =
     tab?.id === undefined
       ? null
@@ -663,6 +667,15 @@ chrome.tabs.onActivated.addListener(() => void checkTab());
 chrome.tabs.onUpdated.addListener((_id, change, tab) => {
   if (tab.active && (change.url || change.status === "complete"))
     void checkTab();
+});
+
+setUpImport({
+  client: () => client,
+  currentTab: () => shownTab,
+  onAdded: (note) => {
+    showNotice(note);
+    void loadQueue();
+  },
 });
 
 void start();

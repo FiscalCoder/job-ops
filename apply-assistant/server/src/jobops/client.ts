@@ -47,6 +47,32 @@ export interface JobUpdate {
   readonly status?: "applied" | "expired";
 }
 
+/** Job Ops' manual import: what its model read from a job's page (any field may be missing). */
+export const importDraftSchema = z.object({
+  title: z.string().nullish(),
+  employer: z.string().nullish(),
+  location: z.string().nullish(),
+  salary: z.string().nullish(),
+  deadline: z.string().nullish(),
+  jobType: z.string().nullish(),
+  jobLevel: z.string().nullish(),
+});
+export type ImportDraft = z.infer<typeof importDraftSchema>;
+
+/** A job to add to Job Ops (its manual import). */
+export interface ImportJob {
+  readonly title: string;
+  readonly employer: string;
+  readonly jobUrl: string;
+  readonly applicationLink?: string;
+  readonly location?: string;
+  readonly salary?: string;
+  readonly deadline?: string;
+  readonly jobType?: string;
+  readonly jobLevel?: string;
+  readonly jobDescription: string;
+}
+
 export interface JobNote {
   readonly title: string;
   readonly content: string;
@@ -73,6 +99,13 @@ export interface JobOpsApi {
   getPdf(token: string, jobId: string): Promise<Uint8Array>;
   /** Resume Studio document (Reactive Resume JSON): the source the tailored PDFs are built from. */
   getDesignResume(token: string): Promise<unknown>;
+  /** Manual import: Job Ops' model reads a job's description into its details (absent in fakes). */
+  inferJob?(
+    token: string,
+    jobDescription: string,
+  ): Promise<{ job: ImportDraft; warning: string | null }>;
+  /** Manual import: adds the job (Job Ops then tailors and scores it, per your settings). */
+  importJob?(token: string, job: ImportJob): Promise<{ id: string; status: string }>;
 }
 
 const errorEnvelope = z.object({
@@ -227,6 +260,29 @@ export class JobOpsClient implements JobOpsApi {
       token,
     });
     return data.resumeJson;
+  }
+
+  async inferJob(
+    token: string,
+    jobDescription: string,
+  ): Promise<{ job: ImportDraft; warning: string | null }> {
+    const data = await this.request(
+      "/api/manual-jobs/infer",
+      z.object({ job: importDraftSchema, warning: z.string().nullish() }),
+      { method: "POST", token, body: { jobDescription } },
+    );
+    return { job: data.job, warning: data.warning ?? null };
+  }
+
+  async importJob(
+    token: string,
+    job: ImportJob,
+  ): Promise<{ id: string; status: string }> {
+    return this.request(
+      "/api/manual-jobs/import",
+      z.object({ id: z.string(), status: z.string() }),
+      { method: "POST", token, body: { job } },
+    );
   }
 
   private async request<T>(

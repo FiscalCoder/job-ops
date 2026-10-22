@@ -116,6 +116,14 @@ button.primary {
   border-color: var(--accent);
 }
 
+/* The kit's most used action besides opening the application: Fill this page. */
+button.go {
+  background: var(--ok);
+  color: var(--accent-text);
+  border-color: var(--ok);
+  font-weight: 600;
+}
+
 button:disabled {
   opacity: 0.55;
   cursor: default;
