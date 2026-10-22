@@ -8,9 +8,10 @@ import {
   loadSettings,
   saveSettings,
 } from "../../src/lib/settings";
+import { jobForTab, pageKey } from "../../src/lib/tab-match";
 import type { RunSummary } from "../../src/lib/worker";
 import { looksSubmitted } from "../../src/track/confirm";
-import { pagedFill } from "../../src/track/job-match";
+import { isSupportedPosting, pagedFill } from "../../src/track/job-match";
 import { resolveTab } from "../../src/track/tabs";
 import { renderHere } from "./here-view";
 import { showKit } from "./kit-view";
@@ -88,6 +89,13 @@ async function startFill(
   box.replaceChildren(
     el("p", { class: "muted" }, "Opening the posting and finding the form…"),
   );
+  // A Greenhouse, Ashby or Lever posting is filled from its own form, once it's looked up.
+  const posting =
+    paged === "generic" && tabId !== undefined
+      ? await matchPosting(tabId, item)
+      : null;
+  const job = posting ?? item;
+  const pagedHow = posting ? null : paged;
   const closeRun = () => {
     activeRun = null;
     box.hidden = true;
@@ -100,7 +108,7 @@ async function startFill(
   try {
     const options = {
       client,
-      job: item,
+      job,
       countdownSeconds: await countdownSetting(),
       onChange: (view: RunView) =>
         renderRunView(
@@ -109,12 +117,12 @@ async function startFill(
           (event) => activeRun?.dispatch(event),
           closeRun,
           (ref, instruction) =>
-            (client as ApplyClient).tellAgent(item.jobId, { ref, instruction }),
+            (client as ApplyClient).tellAgent(job.jobId, { ref, instruction }),
         ),
     };
     activeRun =
-      paged && tabId !== undefined
-        ? await RunController.startPaged({ ...options, tabId, system: paged })
+      pagedHow && tabId !== undefined
+        ? await RunController.startPaged({ ...options, tabId, system: pagedHow })
         : await RunController.start({
             ...options,
             ...(tabId === undefined ? {} : { tabId }),
@@ -126,6 +134,34 @@ async function startFill(
       el("button", { type: "button" }, "Back"),
     );
     box.querySelector("button")?.addEventListener("click", closeRun);
+  }
+}
+
+const POSTING_WAIT_MS = 20_000;
+const POSTING_POLL_MS = 2_000;
+
+/**
+ * A Greenhouse, Ashby or Lever posting the job isn't matched to yet (its apply link was only just
+ * captured from LinkedIn): looks it up now, so its form plan fills it rather than the generic
+ * filler. Waits for the link to reach Job Ops, then for one lookup made with it.
+ */
+async function matchPosting(
+  tabId: number,
+  item: QueueItem,
+): Promise<QueueItem | null> {
+  const url = (await chrome.tabs.get(tabId).catch(() => null))?.url ?? "";
+  if (!isSupportedPosting(url)) return null;
+  const here = pageKey(url);
+  const deadline = Date.now() + POSTING_WAIT_MS;
+  for (;;) {
+    const current = queueItems.find((i) => i.jobId === item.jobId) ?? item;
+    const linkSaved = pageKey(current.applicationLink ?? "") === here;
+    await chrome.runtime.sendMessage({ type: "run-lookups" }).catch(() => null);
+    await loadQueue();
+    const matched = jobForTab(url, queueItems);
+    if (matched?.jobId === item.jobId && matched.plan) return matched;
+    if (linkSaved || Date.now() >= deadline) return null;
+    await new Promise((resolve) => setTimeout(resolve, POSTING_POLL_MS));
   }
 }
 

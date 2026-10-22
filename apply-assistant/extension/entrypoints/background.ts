@@ -42,8 +42,13 @@ function runNow(): Promise<RunSummary | null> {
   return running;
 }
 
+/** One more pass after any running one: it started before the change (a captured apply link). */
+function runAfterCurrent(): void {
+  void (running ?? Promise.resolve(null)).catch(() => null).then(runNow);
+}
+
 export default defineBackground(() => {
-  listenForLinkedInApplies();
+  listenForLinkedInApplies(runAfterCurrent);
   listenForApplicationTabs();
   listenForManualApplications();
   chrome.sidePanel

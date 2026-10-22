@@ -119,6 +119,7 @@ export function readGenericPage(): GenericPage {
   const text = (el: Element | null | undefined) =>
     (el?.textContent ?? "").replace(/\s+/g, " ").trim();
   const SKIP = /^(hidden|submit|button|reset|image|password|search)$/i;
+  const CAPTCHA = /recaptcha|hcaptcha|turnstile/i;
   const labelOf = (el: HTMLElement): string => {
     const input = el as HTMLInputElement;
     const byIds = (el.getAttribute("aria-labelledby") ?? "")
@@ -175,6 +176,9 @@ export function readGenericPage(): GenericPage {
     if (el.closest("header, nav, footer, #ac-badge")) continue;
     if (/one-time-code/i.test(el.getAttribute("autocomplete") ?? "")) continue;
     if (input.disabled || input.readOnly) continue;
+    // A dropdown's stand-in for the browser's "required" check (react-select), and captcha tokens.
+    if (el.getAttribute("aria-hidden") === "true" && input.type !== "file") continue;
+    if (CAPTCHA.test(`${el.id} ${el.getAttribute("name") ?? ""}`)) continue;
     // Hidden fields aren't for you, except uploads (their input hides behind a button).
     const visible = el.offsetParent !== null || el.getClientRects().length > 0;
     if (!visible && input.type !== "file") continue;
@@ -269,7 +273,7 @@ function domKind(el: Element): DomKind {
 }
 
 /** What a field shows now ("" when empty); runs inside the page. */
-function shownValue(selector: string): string {
+export function shownValue(selector: string): string {
   const text = (el: Element | null | undefined) =>
     (el?.textContent ?? "").replace(/\s+/g, " ").trim();
   const all = [...document.querySelectorAll<HTMLElement>(selector)];
@@ -296,13 +300,18 @@ function shownValue(selector: string): string {
     return [...(input.files ?? [])].map((f) => f.name).join(", ");
   if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") return text(el);
   if (input.value) return input.value;
-  // A searchable dropdown shows its pick next to the (emptied) input.
-  const box = el.closest("[class*='container' i], [class*='control' i], [class*='select' i]");
-  return text(
-    box?.querySelector(
+  // A searchable dropdown shows its pick beside the (emptied) input, often a level or two up
+  // (react-select: a sibling of the input's own container). Stops at the next field.
+  let box = el.parentElement;
+  for (let depth = 0; box && depth < 5; depth++, box = box.parentElement) {
+    if (box.querySelectorAll("input:not([aria-hidden='true']), select, textarea").length > 1)
+      break;
+    const picked = box.querySelector(
       "[class*='singleValue' i], [class*='single-value' i], [class*='selected' i], [class*='chip' i], [class*='tag' i]",
-    ),
-  );
+    );
+    if (picked) return text(picked);
+  }
+  return "";
 }
 
 /**

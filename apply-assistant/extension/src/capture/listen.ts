@@ -44,6 +44,9 @@ async function rememberTabJob(tabId: number, url: string) {
   await chrome.storage.session.set({ [TAB_JOBS]: next });
 }
 
+/** Called when a captured link is saved (the background looks the job up again). */
+let onSaved: () => void = () => {};
+
 async function report(pending: PendingCapture) {
   const captured = toReport(pending);
   if (!captured) return;
@@ -55,6 +58,7 @@ async function report(pending: PendingCapture) {
     reason: error instanceof Error ? error.message : String(error),
   }));
   await addCapture({ at: new Date().toISOString(), report: captured, outcome });
+  if (outcome.status === "saved") onSaved();
 }
 
 function finish(tabId: number) {
@@ -76,7 +80,8 @@ function follow(tabId: number, pending: PendingCapture) {
   });
 }
 
-export function listenForLinkedInApplies(): void {
+export function listenForLinkedInApplies(saved?: () => void): void {
+  if (saved) onSaved = saved;
   const onLinkedInPage = (details: {
     tabId: number;
     frameId: number;

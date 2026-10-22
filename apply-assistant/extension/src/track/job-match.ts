@@ -88,6 +88,28 @@ export function pagedFill(url: string): "workday" | "generic" | null {
   }
 }
 
+/**
+ * A posting on a system with its own filler (Greenhouse, Ashby, Lever): looked up and filled from
+ * its form, not read generically.
+ */
+const SUPPORTED_POSTING: readonly RegExp[] = [
+  /^([a-z-]+\.)*greenhouse\.io\/[^/]+\/jobs\/\d+/i,
+  /^jobs\.ashbyhq\.com\/[^/]+\/[0-9a-f-]{36}/i,
+  /^jobs\.lever\.co\/[^/]+\/[0-9a-f-]{36}/i,
+];
+
+export function isSupportedPosting(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (
+      u.protocol === "https:" &&
+      SUPPORTED_POSTING.some((p) => p.test(`${u.hostname}${u.pathname}`))
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** A Workday application in progress (".../apply/applyManually", ".../apply/autofillWithResume"). */
 export function isWorkdayApply(url: string): boolean {
   try {

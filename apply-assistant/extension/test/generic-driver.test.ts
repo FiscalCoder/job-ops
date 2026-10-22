@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { labelKey, readGenericPage } from "../src/fill/generic-driver";
-import { pagedFill } from "../src/track/job-match";
+import { labelKey, readGenericPage, shownValue } from "../src/fill/generic-driver";
+import { isSupportedPosting, pagedFill } from "../src/track/job-match";
 
 /** Any company's own application page, read generically. */
 
@@ -76,6 +76,54 @@ describe("readGenericPage", () => {
   it("questions are keyed the same however they're punctuated", () => {
     expect(labelKey("Notice period *")).toBe("notice period");
     expect(labelKey("Notice  period:")).toBe("notice period");
+  });
+});
+
+// react-select as Greenhouse renders it, after "India +91" was picked (Fanatics run).
+const REACT_SELECT = `
+<form>
+  <label id="country-label" for="country">Country</label>
+  <div class="select__container"><div class="select__control">
+    <div class="select__value-container select__value-container--has-value">
+      <div class="select__single-value"><span>+91</span></div>
+      <div class="select__input-container"><input class="select__input" id="country" role="combobox" aria-autocomplete="list" aria-labelledby="country-label" value=""></div>
+    </div>
+  </div><input required tabindex="-1" aria-hidden="true" class="requiredInput" value=""></div>
+  <label for="phone">Phone</label><input id="phone" type="tel">
+  <textarea id="g-recaptcha-response-100000" name="g-recaptcha-response"></textarea>
+</form>`;
+
+describe("react-select dropdowns", () => {
+  it("one field each (not its hidden required stand-in), no captcha token", () => {
+    document.body.innerHTML = REACT_SELECT;
+    expect(readGenericPage().fields.map((f) => [f.label, f.kind])).toEqual([
+      ["Country", "search"],
+      ["Phone", "text"],
+    ]);
+  });
+
+  it("the pick shows beside the input's own container", () => {
+    document.body.innerHTML = REACT_SELECT;
+    expect(shownValue("#country")).toBe("+91");
+    // Never another field's value.
+    expect(shownValue("#phone")).toBe("");
+  });
+});
+
+describe("isSupportedPosting", () => {
+  it("Greenhouse, Ashby and Lever postings, not their boards or other sites", () => {
+    expect(
+      isSupportedPosting("https://job-boards.greenhouse.io/fanaticscommerce/jobs/4405584009?gh_src=x"),
+    ).toBe(true);
+    expect(isSupportedPosting("https://boards.greenhouse.io/acme/jobs/1")).toBe(true);
+    expect(
+      isSupportedPosting("https://jobs.ashbyhq.com/acme/0f6b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d/application"),
+    ).toBe(true);
+    expect(
+      isSupportedPosting("https://jobs.lever.co/acme/0f6b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d/apply"),
+    ).toBe(true);
+    expect(isSupportedPosting("https://job-boards.greenhouse.io/acme")).toBe(false);
+    expect(isSupportedPosting("https://careers.acme.com/jobs/123")).toBe(false);
   });
 });
 
