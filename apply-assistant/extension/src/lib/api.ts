@@ -228,7 +228,11 @@ export class ApplyClient implements TraceApi {
   /** "Tell agent": Claude's proposal for one field from your instruction (nothing is filled). */
   tellAgent(
     jobId: string,
-    body: { ref: string; instruction: string },
+    body: {
+      ref: string;
+      instruction: string;
+      field?: { label: string; type: string; options: readonly string[] };
+    },
   ): Promise<{ value: string | readonly string[]; why: string }> {
     return this.request(`/plans/${encodeURIComponent(jobId)}/tell`, body);
   }

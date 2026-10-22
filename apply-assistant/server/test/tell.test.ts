@@ -140,6 +140,23 @@ describe("POST /plans/:jobId/tell", () => {
       ).status,
     ).toBe(409);
 
+    // Workday or any company's page: no stored form, the field as the page showed it.
+    tellAnswer = ["Other"];
+    const shown = await call("/plans/job-1/tell", {
+      ref: "[data-fkit-id='school']",
+      instruction: "use the Other option",
+      field: { label: "School or University", type: "select", options: ["Anna University", "Other"] },
+    });
+    expect(shown.status).toBe(200);
+    expect(shown.body.data).toMatchObject({ value: "Other" });
+    const free = await call("/plans/job-1/tell", {
+      ref: "#school",
+      instruction: "type it in full",
+      field: { label: "School", type: "text", options: [] },
+    });
+    expect(free.body.data).toMatchObject({ value: "Other" });
+    tellAnswer = ["yes"];
+
     await call("/lookups/results", {
       type: "job",
       ats: "greenhouse",
@@ -167,7 +184,9 @@ describe("POST /plans/:jobId/tell", () => {
       value: "Yes",
       why: "You said you know Python",
     });
-    const sent = create.mock.calls.find((c) => c[0].system === TELL_SYSTEM);
+    const sent = create.mock.calls
+      .filter((c) => c[0].system === TELL_SYSTEM)
+      .at(-1);
     expect(String(sent?.[0].messages[0]?.content)).toContain(
       "say yes, I script in Python daily",
     );

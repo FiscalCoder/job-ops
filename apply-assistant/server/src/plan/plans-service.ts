@@ -1,7 +1,7 @@
 import { ATS_NAMES } from "../ats.js";
 import type { QuestionAnswerer } from "../claude/answerer.js";
 import type { ClaudeAnswer } from "../claude/questions.js";
-import { isAnswerable, toQuestion } from "../claude/questions.js";
+import { isAnswerable, type Question, toQuestion } from "../claude/questions.js";
 import type { ActAnswer, ActRequest } from "../claude/act.js";
 import type { TellAnswer } from "../claude/tell.js";
 import { traceUsage } from "../claude/usage-trace.js";
@@ -128,6 +128,17 @@ export function createPlans(deps: PlansDeps) {
           "Claude couldn't be reached; answer it yourself or rebuild the plan later",
       };
     }
+  }
+
+  /** A field of the job's stored form (Greenhouse, Ashby, Lever), as Claude is asked it. */
+  function storedQuestion(jobId: string, ref: string): Question {
+    const { target, stored } = formOf(jobId);
+    const field = parseFormSchema(target.ats, stored.payload).fields.find(
+      (f) => f.ref === ref,
+    );
+    if (!field)
+      throw new NotPlannableError(jobId, "That field isn't on this form");
+    return toQuestion(field);
   }
 
   const bankMap = () => new Map(answers.list().map((a) => [a.key, a.value]));
@@ -318,13 +329,9 @@ export function createPlans(deps: PlansDeps) {
       jobId: string,
       ref: string,
       instruction: string,
+      shown?: Omit<Question, "ref">,
     ): Promise<TellAnswer> {
-      const { target, stored } = formOf(jobId);
-      const field = parseFormSchema(target.ats, stored.payload).fields.find(
-        (f) => f.ref === ref,
-      );
-      if (!field)
-        throw new NotPlannableError(jobId, "That field isn't on this form");
+      const field = shown ? { ref, ...shown } : storedQuestion(jobId, ref);
       if (!answerer)
         throw new NotPlannableError(
           jobId,
@@ -335,7 +342,7 @@ export function createPlans(deps: PlansDeps) {
         loadResume(token),
       ]);
       const answer = await answerer.tell(
-        toQuestion(field),
+        field,
         instruction,
         {
           job: {

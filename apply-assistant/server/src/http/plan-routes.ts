@@ -10,6 +10,16 @@ import { sendError, sendOk } from "./envelope.js";
 const tellBody = z.object({
   ref: z.string().min(1).max(200),
   instruction: z.string().trim().min(2).max(500),
+  /** The field as the page showed it (Workday, any company's page): no stored form to look it up in. */
+  field: z
+    .object({
+      label: z.string().trim().min(1).max(500),
+      type: z
+        .enum(["text", "textarea", "file", "select", "multiselect", "hidden", "unknown"])
+        .catch("text"),
+      options: z.array(z.string().trim().min(1).max(300)).max(500),
+    })
+    .optional(),
 });
 
 /** Workday: the choices found for a field none of which matches your answer as such. */
@@ -84,6 +94,7 @@ export function createPlanRoutes(plans: PlansService) {
             String(req.params.jobId),
             body.data.ref,
             body.data.instruction,
+            body.data.field,
           ),
         );
       } catch (error) {

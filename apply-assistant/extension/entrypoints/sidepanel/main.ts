@@ -116,8 +116,21 @@ async function startFill(
           view,
           (event) => activeRun?.dispatch(event),
           closeRun,
-          (ref, instruction) =>
-            (client as ApplyClient).tellAgent(job.jobId, { ref, instruction }),
+          (entry, instruction) =>
+            (client as ApplyClient).tellAgent(job.jobId, {
+              ref: entry.ref,
+              instruction,
+              // Page by page there's no stored form: the field as the page showed it.
+              ...(pagedHow
+                ? {
+                    field: {
+                      label: entry.label,
+                      type: entry.type,
+                      options: entry.optionValues ?? [],
+                    },
+                  }
+                : {}),
+            }),
         ),
     };
     activeRun =

@@ -11,7 +11,7 @@ type Send = (event: RunEvent) => void;
 
 /** "Tell agent": Claude's proposal for one field from your instruction. */
 export type Tell = (
-  ref: string,
+  entry: Step["entry"],
   instruction: string,
 ) => Promise<{ value: string | readonly string[]; why: string }>;
 
@@ -129,7 +129,7 @@ function tellAgent(
     note.className = "muted";
     note.textContent = "Asking Claude…";
     try {
-      const answer = await tell(step.entry.ref, text);
+      const answer = await tell(step.entry, text);
       target.value = valueText(answer.value);
       note.textContent = `Claude: ${answer.why}. Check it above, then "Use this".`;
       target.focus();
