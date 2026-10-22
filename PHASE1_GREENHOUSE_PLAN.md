@@ -496,6 +496,57 @@ Your Job Ops has 10 Workday jobs: FactSet and Hitachi (applied); Capital One, LP
 - Page by page as on Workday: when the page changes it's read and planned again; after you submit, the confirmation ends the run.
 - Tests: `server/test/generic-site.test.ts`, `extension/test/generic-driver.test.ts`, `extension/e2e/generic.e2e.mjs` (fake careers page: a custom dropdown filled by Claude's stubbed steps, then by its recipe without Claude; a Submit click refused).
 
+## 12I. Users, and Claude operating the page (2026-10-23)
+
+**Users (done, 7601404 + dc4ed6c).** Every apply-assistant request runs as the signed-in Job Ops user (`store/owner.ts`). Everything a user saves, looks up or learns has a `user_id`: answer bank, remembered answers, company limits, runs, traces, captures, company boards, form definitions, Claude's cached answers, site steps. Per-job routes need the job to be the user's in Job Ops (`http/ownership.ts`). Rows from before users belong to Job Ops' admin. Claude uses each user's own Anthropic key (side panel → "Your Claude key"), or for the admin the server's key; without one, Claude is off for that user.
+
+**Where a failed field goes today.**
+- Greenhouse / Ashby / Lever: no Claude fallback. A field that doesn't take a value waits for you.
+- Workday: Claude only picks among search results it found (Field of Study, School). Anything else that fails waits for you.
+- Company sites: this site's recipe, then Claude's DOM steps (field HTML → at most 8 steps), then you.
+
+Claude only ever reads the HTML. It never sees the page or works it like a person.
+
+**Plan: "Let Claude do it" with the computer toolset** (`computer_toolset_20260801`, GA on the Claude API; Sonnet 5.5 / Opus 5.5 accept only the toolset).
+
+1. **Driving the tab.** The extension already controls the tab through CDP (puppeteer-core `ExtensionTransport`, trusted input).
+   - The toolset's members map onto CDP:
+     - `screenshot` / `zoom` → `Page.captureScreenshot` of the viewport, scaled to the model's image limits;
+     - clicks / moves → `Input.dispatchMouseEvent` (coordinates scaled back);
+     - `type` → `Input.insertText`;
+     - keys → `Input.dispatchKeyEvent`;
+     - scroll → mouse wheel.
+   - Members that make no sense in one tab are turned off in `configs`.
+2. **The loop runs through the server** (per-user key, cost in the trail). `POST /plans/:jobId/operate` starts a session with the goal and a first screenshot. Each turn:
+   - the server calls Claude and returns its `tool_use` calls;
+   - the extension carries them out and sends back `tool_result`s, with a screenshot for `screenshot` / `zoom` and "OK" for the rest.
+   - The session state lives on the server, keyed by run.
+3. **Goals, smallest first.**
+   - Per field: "Set the field labelled X (marked) to V; act only inside it."
+   - Per page, when the reader finds nothing it can use or a widget-heavy step fails: "Fill these fields with these answers: …"
+   - Values come from the plan (answer bank / resume / remembered answers), never from Claude's own guess.
+4. **Guard rails, enforced by the extension, not the prompt.**
+   - **Clicks:** before every click, `DOM.getNodeForLocation` hit-tests the point and refuses submit / apply / continue / next / save / delete / remove / upload buttons and links that leave the page. In per-field mode it also refuses anything outside the field's box.
+   - **Pages:** a URL change aborts.
+   - **Keys:** an allow-list; never Ctrl/Cmd shortcuts that close or navigate.
+   - **Secrets:** no typing into password or one-time-code fields.
+   - **Limits:** at most 15 actions per field and 40 per page, a time limit, and a cost cap per application (default about $0.30).
+   - **You stay in charge:** a visible "Claude is operating" banner with Stop, and pause when you move the mouse or type.
+   - **Submitting:** stays yours.
+5. **Learning, so it's needed less.** When Claude succeeds:
+   - each click's element (from the hit-test) and each typed value become a site recipe (`click <selector>`, `type {value}`), replayed next time without Claude;
+   - Workday and Greenhouse get the same recipe layer;
+   - the trail keeps every action with its screenshot.
+6. **Escalation order for a failed field:** the driver's own fill → this site's recipe → Claude's DOM steps (cheap) → Claude operating the page (screenshots) → you. Automatic within the per-application budget, or behind a "Let Claude do it" button (a setting).
+7. **Cost (estimate).** A screenshot is about 1.5k input tokens. A field takes about 3–6 turns, so about 10–20k tokens on Sonnet 5.5, roughly $0.03–0.05 per field, with the system prompt and tools cached.
+8. **Order of work.**
+   - (a) DOM-steps fallback and recipes for Workday and Greenhouse (cheap, closes most gaps);
+   - (b) per-field operate on all three drivers, behind the button;
+   - (c) automatic escalation with the budget;
+   - (d) page mode;
+   - (e) an eval from the trails' failure snapshots.
+   - Tests: a fake page plus scripted `tool_use` replies, as in `generic.e2e.mjs`, including refused Submit clicks and a URL change that aborts.
+
 ## 12F. Phase 1 status (2026-10-21)
 
 Everything planned for Phase 1 is built and live:
