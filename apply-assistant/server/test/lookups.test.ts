@@ -519,7 +519,8 @@ describe("lookups", () => {
           .needsYou,
       ).toBe(needsBefore - 2);
 
-      expect((await call("/plans/nope")).status).toBe(409);
+      // Not a job of yours in Job Ops.
+      expect((await call("/plans/nope")).status).toBe(404);
     });
 
     const planWithClaude = async (create: MessagesApi["create"]) => {

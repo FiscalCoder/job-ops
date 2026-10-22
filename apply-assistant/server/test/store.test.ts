@@ -4,6 +4,7 @@ import { createAnswerBankRepo } from "../src/store/answer-bank-repo.js";
 import { createApplyTargetsRepo } from "../src/store/apply-targets-repo.js";
 import { createAtsBoardsRepo } from "../src/store/ats-boards-repo.js";
 import { MIGRATIONS, openStore } from "../src/store/db.js";
+import { runAsUser } from "../src/store/owner.js";
 import { createFormSchemasRepo } from "../src/store/form-schemas-repo.js";
 
 const memoryStore = () => openStore(":memory:");
@@ -72,7 +73,8 @@ describe("openStore", () => {
 });
 
 describe("answer bank repo", () => {
-  it("stores, reads and lists answers", () => {
+  it("stores, reads and lists answers", () =>
+    runAsUser("u1", () => {
     const repo = createAnswerBankRepo(memoryStore());
     repo.upsert({
       key: "notice_period",
@@ -95,9 +97,10 @@ describe("answer bank repo", () => {
       "notice_period",
       "referral_source",
     ]);
-  });
+    }));
 
-  it("updates an existing key instead of duplicating it", () => {
+  it("updates an existing key instead of duplicating it", () =>
+    runAsUser("u1", () => {
     const repo = createAnswerBankRepo(memoryStore());
     repo.upsert({
       key: "ctc.expected",
@@ -113,13 +116,15 @@ describe("answer bank repo", () => {
     });
     expect(repo.list()).toHaveLength(1);
     expect(repo.get("ctc.expected")?.value).toBe("26 LPA");
-  });
+    }));
 
-  it("returns null for an unknown key", () => {
+  it("returns null for an unknown key", () =>
+    runAsUser("u1", () => {
     expect(createAnswerBankRepo(memoryStore()).get("missing")).toBeNull();
-  });
+    }));
 
-  it("rejects an empty key", () => {
+  it("rejects an empty key", () =>
+    runAsUser("u1", () => {
     const repo = createAnswerBankRepo(memoryStore());
     expect(() =>
       repo.upsert({
@@ -129,7 +134,7 @@ describe("answer bank repo", () => {
         updatedBy: "you",
       }),
     ).toThrow(/key/);
-  });
+    }));
 });
 
 describe("apply targets repo", () => {

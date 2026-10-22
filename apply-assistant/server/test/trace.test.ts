@@ -10,6 +10,7 @@ import {
   type JobOpsJob,
 } from "../src/jobops/client.js";
 import { openStore } from "../src/store/db.js";
+import { runAsUser } from "../src/store/owner.js";
 import { createTraceStore } from "../src/store/trace-store.js";
 import { fakeDesignResume } from "./fixtures/fake-resume.js";
 
@@ -44,7 +45,8 @@ describe("trace store", () => {
     };
   };
 
-  it("keeps events in order with their data, per job and per run", () => {
+  it("keeps events in order with their data, per job and per run", () =>
+    runAsUser("u1", () => {
     const { store } = setup();
     store.addEvents([
       {
@@ -92,9 +94,10 @@ describe("trace store", () => {
       }),
       expect.objectContaining({ jobId: "j2", failures: 0 }),
     ]);
-  });
+    }));
 
-  it("stores DOM snapshots gzipped and gives them back as text, with a pointing event", () => {
+  it("stores DOM snapshots gzipped and gives them back as text, with a pointing event", () =>
+    runAsUser("u1", () => {
     const { store, dir } = setup();
     const html = "<form><input name=first value=Ada></form>".repeat(50);
     const meta = store.saveSnapshot({
@@ -116,9 +119,10 @@ describe("trace store", () => {
       }),
     ]);
     expect(store.readSnapshot("nope")).toBeNull();
-  });
+    }));
 
-  it("prunes by age, then the oldest snapshots over the size cap", () => {
+  it("prunes by age, then the oldest snapshots over the size cap", () =>
+    runAsUser("u1", () => {
     const { store, dir, advance } = setup(undefined, JPEG.length * 2);
     const shot = (reason: string) =>
       store.saveSnapshot({
@@ -145,7 +149,7 @@ describe("trace store", () => {
     expect(store.readSnapshot(ancient.id)).toBeNull();
     expect(store.readSnapshot(a.id)).toBeNull();
     expect(store.events("j1").some((e) => e.message === "old")).toBe(false);
-  });
+    }));
 });
 
 const job: JobOpsJob = {

@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { currentUser } from "./owner.js";
 
 /** Answers you gave to form questions, keyed by the normalised question (question-norm.ts). */
 
@@ -41,19 +42,21 @@ const toAnswer = (row: Row): LearnedAnswer => ({
 
 export function createLearnedAnswersRepo(db: DatabaseSync) {
   const upsertStmt = db.prepare(
-    `insert into learned_answers (question_norm, label, field_type, answer_json, how, last_job_id)
-     values (?, ?, ?, ?, ?, ?)
-     on conflict(question_norm) do update set label = excluded.label, field_type = excluded.field_type,
+    `insert into learned_answers (user_id, question_norm, label, field_type, answer_json, how, last_job_id)
+     values (?, ?, ?, ?, ?, ?, ?)
+     on conflict(user_id, question_norm) do update set label = excluded.label, field_type = excluded.field_type,
        answer_json = excluded.answer_json, how = excluded.how, last_job_id = excluded.last_job_id,
        updated_at = datetime('now')`,
   );
   const byNorm = db.prepare(
-    "select * from learned_answers where question_norm = ?",
+    "select * from learned_answers where user_id = ? and question_norm = ?",
   );
   const all = db.prepare(
-    "select * from learned_answers order by updated_at desc, id desc",
+    "select * from learned_answers where user_id = ? order by updated_at desc, id desc",
   );
-  const remove = db.prepare("delete from learned_answers where id = ?");
+  const remove = db.prepare(
+    "delete from learned_answers where user_id = ? and id = ?",
+  );
 
   return {
     save(input: {
@@ -64,7 +67,9 @@ export function createLearnedAnswersRepo(db: DatabaseSync) {
       how: LearnedHow;
       jobId: string | null;
     }): LearnedAnswer {
+      const user = currentUser();
       upsertStmt.run(
+        user,
         input.questionNorm,
         input.label,
         input.fieldType,
@@ -72,18 +77,18 @@ export function createLearnedAnswersRepo(db: DatabaseSync) {
         input.how,
         input.jobId,
       );
-      return toAnswer(byNorm.get(input.questionNorm) as unknown as Row);
+      return toAnswer(byNorm.get(user, input.questionNorm) as unknown as Row);
     },
     get(questionNorm: string): LearnedAnswer | null {
-      const row = byNorm.get(questionNorm) as Row | undefined;
+      const row = byNorm.get(currentUser(), questionNorm) as Row | undefined;
       return row ? toAnswer(row) : null;
     },
     list(): LearnedAnswer[] {
-      return (all.all() as unknown as Row[]).map(toAnswer);
+      return (all.all(currentUser()) as unknown as Row[]).map(toAnswer);
     },
     /** True when something was deleted. */
     delete(id: number): boolean {
-      return Number(remove.run(id).changes) > 0;
+      return Number(remove.run(currentUser(), id).changes) > 0;
     },
   };
 }

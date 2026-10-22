@@ -13,6 +13,7 @@ import type { FillPlan, PlanEntry } from "../src/plan/planner.js";
 import { resumeFacts } from "../src/plan/resume-facts.js";
 import { createAnswerBankRepo } from "../src/store/answer-bank-repo.js";
 import { openStore } from "../src/store/db.js";
+import { runAsUser } from "../src/store/owner.js";
 import { fakeDesignResume } from "./fixtures/fake-resume.js";
 
 const entry = (patch: Partial<PlanEntry>): PlanEntry => ({
@@ -214,12 +215,15 @@ afterEach(() => close?.());
 
 async function start(create?: MessagesApi["create"]) {
   const db = openStore(":memory:");
-  createAnswerBankRepo(db).upsert({
-    key: "work.notice_period",
-    value: "30",
-    isProtected: true,
-    updatedBy: "you",
-  });
+  // The signed-in test user ("u1", see jobOps.me) has this saved answer.
+  runAsUser("u1", () =>
+    createAnswerBankRepo(db).upsert({
+      key: "work.notice_period",
+      value: "30",
+      isProtected: true,
+      updatedBy: "you",
+    }),
+  );
   const server = createApp({
     jobOps,
     db,

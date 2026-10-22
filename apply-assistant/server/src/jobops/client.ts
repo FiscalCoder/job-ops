@@ -19,6 +19,8 @@ export class JobOpsError extends Error {
 export interface JobOpsUser {
   readonly id: string;
   readonly username: string;
+  /** Job Ops' admin: the one person apply-assistant's data belonged to before it had users. */
+  readonly isSystemAdmin?: boolean;
 }
 
 export interface JobOpsJob {
@@ -115,7 +117,11 @@ const errorEnvelope = z.object({
 
 const loginData = z.object({ token: z.string().min(1), expiresIn: z.number() });
 const meData = z.object({
-  user: z.object({ id: z.string(), username: z.string() }),
+  user: z.object({
+    id: z.string(),
+    username: z.string(),
+    isSystemAdmin: z.boolean().optional(),
+  }),
 });
 const designResumeData = z.object({ resumeJson: z.unknown() });
 const jobShape = z
@@ -178,7 +184,11 @@ export class JobOpsClient implements JobOpsApi {
 
   async me(token: string): Promise<JobOpsUser> {
     const data = await this.request("/api/auth/me", meData, { token });
-    return { id: data.user.id, username: data.user.username };
+    return {
+      id: data.user.id,
+      username: data.user.username,
+      isSystemAdmin: data.user.isSystemAdmin === true,
+    };
   }
 
   async listJobs(token: string, statuses: readonly string[]) {

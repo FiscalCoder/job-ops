@@ -190,6 +190,65 @@ export const MIGRATIONS: readonly string[] = [
      updated_at text not null default (datetime('now')),
      primary key (host, label_key)
    );`,
+  // Users: each Job Ops user has their own answers, limits, runs and traces (user_id). Rows from
+  // before ('') are claimed by Job Ops' admin on their first request (see owner.ts).
+  `create table answer_bank_v2 (
+     user_id text not null default '',
+     key text not null,
+     value text not null,
+     is_protected integer not null default 0,
+     notes text,
+     updated_by text not null,
+     updated_at text not null default (datetime('now')),
+     primary key (user_id, key)
+   );
+   insert into answer_bank_v2 (key, value, is_protected, notes, updated_by, updated_at)
+     select key, value, is_protected, notes, updated_by, updated_at from answer_bank;
+   drop table answer_bank;
+   alter table answer_bank_v2 rename to answer_bank;
+
+   create table learned_answers_v2 (
+     id integer primary key autoincrement,
+     user_id text not null default '',
+     question_norm text not null,
+     label text not null,
+     field_type text not null,
+     answer_json text not null,
+     how text not null,
+     last_job_id text,
+     created_at text not null default (datetime('now')),
+     updated_at text not null default (datetime('now')),
+     unique (user_id, question_norm)
+   );
+   insert into learned_answers_v2 (id, question_norm, label, field_type, answer_json, how, last_job_id, created_at, updated_at)
+     select id, question_norm, label, field_type, answer_json, how, last_job_id, created_at, updated_at from learned_answers;
+   drop table learned_answers;
+   alter table learned_answers_v2 rename to learned_answers;
+
+   create table company_limits_v2 (
+     id integer primary key autoincrement,
+     user_id text not null default '',
+     company_key text not null,
+     name text not null,
+     max_applications integer not null,
+     window_days integer not null,
+     note text not null default '',
+     created_at text not null default (datetime('now')),
+     updated_at text not null default (datetime('now')),
+     unique (user_id, company_key)
+   );
+   insert into company_limits_v2 (id, company_key, name, max_applications, window_days, note, created_at, updated_at)
+     select id, company_key, name, max_applications, window_days, note, created_at, updated_at from company_limits;
+   drop table company_limits;
+   alter table company_limits_v2 rename to company_limits;
+
+   alter table runs add column user_id text not null default '';
+   alter table trace_events add column user_id text not null default '';
+   alter table trace_snapshots add column user_id text not null default '';
+   alter table captured_links add column user_id text not null default '';
+   create index runs_user_job on runs (user_id, job_id);
+   create index trace_events_user_job on trace_events (user_id, job_id, id);
+   create index trace_snapshots_user_job on trace_snapshots (user_id, job_id);`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

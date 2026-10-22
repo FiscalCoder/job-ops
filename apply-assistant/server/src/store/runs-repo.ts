@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { currentUser } from "./owner.js";
 
 /** Supervised fill runs and every action in them (what was proposed, who decided, what happened). */
 
@@ -73,11 +74,16 @@ const toAction = (row: ActionRow): RunAction => ({
 });
 
 export function createRunsRepo(db: DatabaseSync) {
-  const insertRun = db.prepare("insert into runs (id, job_id) values (?, ?)");
-  const getRun = db.prepare("select * from runs where id = ?");
-  const allRuns = db.prepare("select * from runs order by started_at, rowid");
+  // Each user's own runs (see owner.ts).
+  const insertRun = db.prepare(
+    "insert into runs (id, user_id, job_id) values (?, ?, ?)",
+  );
+  const getRun = db.prepare("select * from runs where user_id = ? and id = ?");
+  const allRuns = db.prepare(
+    "select * from runs where user_id = ? order by started_at, rowid",
+  );
   const runsByJob = db.prepare(
-    "select * from runs where job_id = ? order by started_at desc, rowid desc",
+    "select * from runs where user_id = ? and job_id = ? order by started_at desc, rowid desc",
   );
   const insertAction = db.prepare(
     `insert into run_actions (run_id, seq, action_class, field_ref, value_masked, source, decision, decided_by, result)
@@ -87,18 +93,21 @@ export function createRunsRepo(db: DatabaseSync) {
     "select * from run_actions where run_id = ? order by seq",
   );
   const abandonOpen = db.prepare(
-    "update runs set ended_at = datetime('now'), outcome = 'aborted' where job_id = ? and ended_at is null",
+    "update runs set ended_at = datetime('now'), outcome = 'aborted' where user_id = ? and job_id = ? and ended_at is null",
   );
   const finish = db.prepare(
     "update runs set ended_at = datetime('now'), outcome = ?, interventions = ? where id = ? and ended_at is null",
   );
 
   const get = (id: string): Run | null => {
-    const row = getRun.get(id) as RunRow | undefined;
+    const row = getRun.get(currentUser(), id) as RunRow | undefined;
     return row ? toRun(row) : null;
   };
+  /** A run's actions; none for a run that isn't yours. */
   const actions = (id: string): RunAction[] =>
-    (actionsOf.all(id) as unknown as ActionRow[]).map(toAction);
+    get(id)
+      ? (actionsOf.all(id) as unknown as ActionRow[]).map(toAction)
+      : [];
   /** The run if it exists and is still open; throws if it already finished. */
   const openRun = (id: string): Run | null => {
     const run = get(id);
@@ -111,17 +120,20 @@ export function createRunsRepo(db: DatabaseSync) {
     create(jobId: string): Run {
       const id = randomUUID();
       // A run left open (the panel closed, the browser quit) can't continue: close it first.
-      abandonOpen.run(jobId);
-      insertRun.run(id, jobId);
+      const user = currentUser();
+      abandonOpen.run(user, jobId);
+      insertRun.run(id, user, jobId);
       return get(id) as Run;
     },
     get,
     actions,
     all(): Run[] {
-      return (allRuns.all() as unknown as RunRow[]).map(toRun);
+      return (allRuns.all(currentUser()) as unknown as RunRow[]).map(toRun);
     },
     listByJob(jobId: string): Run[] {
-      return (runsByJob.all(jobId) as unknown as RunRow[]).map(toRun);
+      return (runsByJob.all(currentUser(), jobId) as unknown as RunRow[]).map(
+        toRun,
+      );
     },
     /** null when the run doesn't exist. */
     addAction(runId: string, action: RunAction): RunAction | null {

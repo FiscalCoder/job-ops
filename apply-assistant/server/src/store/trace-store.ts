@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { gunzipSync, gzipSync } from "node:zlib";
+import { currentUser, currentUserOrNull } from "./owner.js";
 
 /**
  * Run trace: every event the server, the extension and the page reported for a job, plus DOM
@@ -137,36 +138,40 @@ export function createTraceStore(options: TraceStoreOptions) {
   const maxSnapshotBytes = options.maxSnapshotBytes ?? MAX_SNAPSHOT_BYTES;
   const log = options.log ?? (() => {});
 
+  // Each user's own trace (see owner.ts): written as, and read back by, the signed-in user.
   const insertEvent = db.prepare(
-    `insert into trace_events (job_id, run_id, ts, source, kind, step_seq, message, data_json, snapshot_id)
-     values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `insert into trace_events (user_id, job_id, run_id, ts, source, kind, step_seq, message, data_json, snapshot_id)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertSnapshot = db.prepare(
-    `insert into trace_snapshots (id, job_id, run_id, kind, reason, url, bytes, file, created_at)
-     values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `insert into trace_snapshots (user_id, id, job_id, run_id, kind, reason, url, bytes, file, created_at)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const eventsOfJob = db.prepare(
-    "select * from trace_events where job_id = ? order by id desc limit ?",
+    "select * from trace_events where user_id = ? and job_id = ? order by id desc limit ?",
   );
   const eventsOfRun = db.prepare(
-    "select * from trace_events where job_id = ? and run_id = ? order by id desc limit ?",
+    "select * from trace_events where user_id = ? and job_id = ? and run_id = ? order by id desc limit ?",
   );
   const snapshotsOfJob = db.prepare(
-    "select * from trace_snapshots where job_id = ? order by created_at, id",
+    "select * from trace_snapshots where user_id = ? and job_id = ? order by created_at, id",
   );
-  const snapshotById = db.prepare("select * from trace_snapshots where id = ?");
+  const snapshotById = db.prepare(
+    "select * from trace_snapshots where user_id = ? and id = ?",
+  );
   const ofKind = db.prepare(
-    "select * from trace_events where kind = ? order by id",
+    "select * from trace_events where user_id = ? and kind = ? order by id",
   );
   const recent = db.prepare(
     `select job_id, max(ts) as last_ts, count(*) as events,
             sum(case when kind in (${[...FAILURE_KINDS].map(() => "?").join(",")}) then 1 else 0 end) as failures,
-            (select message from trace_events e2 where e2.job_id = e.job_id order by id desc limit 1) as last_message
-       from trace_events e group by job_id order by last_ts desc limit ?`,
+            (select message from trace_events e2 where e2.user_id = e.user_id and e2.job_id = e.job_id order by id desc limit 1) as last_message
+       from trace_events e where user_id = ? group by job_id order by last_ts desc limit ?`,
   );
 
   const add = (input: TraceEventInput): number => {
     const result = insertEvent.run(
+      currentUser(),
       input.jobId,
       input.runId ?? null,
       input.ts ?? now().toISOString(),
@@ -191,6 +196,10 @@ export function createTraceStore(options: TraceStoreOptions) {
   return {
     /** Server-side events: never throws, so tracing can't break a request. */
     record(input: Omit<TraceEventInput, "source">): void {
+      if (!currentUserOrNull()) {
+        log(`[trace] not recorded outside a request: "${input.message}"`);
+        return;
+      }
       try {
         add({ ...input, source: "server" });
       } catch (error) {
@@ -229,6 +238,7 @@ export function createTraceStore(options: TraceStoreOptions) {
       const createdAt = input.ts ?? now().toISOString();
       try {
         insertSnapshot.run(
+          currentUser(),
           id,
           input.jobId,
           input.runId ?? null,
@@ -253,12 +263,12 @@ export function createTraceStore(options: TraceStoreOptions) {
         removeSnapshotFile(file);
         throw error;
       }
-      return toMeta(snapshotById.get(id) as unknown as SnapshotRow);
+      return toMeta(snapshotById.get(currentUser(), id) as unknown as SnapshotRow);
     },
 
     /** The snapshot and its content (DOM decompressed), or null when gone. */
     readSnapshot(id: string): { meta: SnapshotMeta; content: Buffer } | null {
-      const row = snapshotById.get(id) as SnapshotRow | undefined;
+      const row = snapshotById.get(currentUser(), id) as SnapshotRow | undefined;
       if (!row) return null;
       try {
         const raw = readFileSync(path.join(dir, row.file));
@@ -274,26 +284,29 @@ export function createTraceStore(options: TraceStoreOptions) {
     /** Newest last; at most `limit` (the most recent ones). */
     events(jobId: string, query: { runId?: string; limit?: number } = {}) {
       const limit = query.limit ?? 2000;
+      const user = currentUser();
       const rows = (query.runId
-        ? eventsOfRun.all(jobId, query.runId, limit)
-        : eventsOfJob.all(jobId, limit)) as unknown as EventRow[];
+        ? eventsOfRun.all(user, jobId, query.runId, limit)
+        : eventsOfJob.all(user, jobId, limit)) as unknown as EventRow[];
       return rows.map(toEvent).reverse();
     },
 
     /** Every event of one kind, across jobs (oldest first). */
     eventsOfKind(kind: string): TraceEvent[] {
-      return (ofKind.all(kind) as unknown as EventRow[]).map(toEvent);
+      return (ofKind.all(currentUser(), kind) as unknown as EventRow[]).map(
+        toEvent,
+      );
     },
 
     snapshots(jobId: string): SnapshotMeta[] {
-      return (snapshotsOfJob.all(jobId) as unknown as SnapshotRow[]).map(
+      return (snapshotsOfJob.all(currentUser(), jobId) as unknown as SnapshotRow[]).map(
         toMeta,
       );
     },
 
     recentJobs(limit = 50): TracedJob[] {
       return (
-        recent.all(...FAILURE_KINDS, limit) as unknown as {
+        recent.all(...FAILURE_KINDS, currentUser(), limit) as unknown as {
           job_id: string;
           last_ts: string;
           events: number;

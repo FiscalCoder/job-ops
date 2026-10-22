@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { employerKey } from "../resolver/text.js";
+import { currentUser } from "./owner.js";
 
 /** A company that takes only so many applications from you in a while. */
 export interface CompanyLimit {
@@ -30,21 +31,28 @@ const toLimit = (row: Row): CompanyLimit => ({
   note: row.note,
 });
 
+/** The signed-in user's limits (see owner.ts). */
 export function createCompanyLimitsRepo(db: DatabaseSync) {
   const upsertStmt = db.prepare(
-    `insert into company_limits (company_key, name, max_applications, window_days, note)
-     values (?, ?, ?, ?, ?)
-     on conflict(company_key) do update set name = excluded.name,
+    `insert into company_limits (user_id, company_key, name, max_applications, window_days, note)
+     values (?, ?, ?, ?, ?, ?)
+     on conflict(user_id, company_key) do update set name = excluded.name,
        max_applications = excluded.max_applications, window_days = excluded.window_days,
        note = excluded.note, updated_at = datetime('now')`,
   );
-  const byKey = db.prepare("select * from company_limits where company_key = ?");
-  const all = db.prepare("select * from company_limits order by name");
-  const remove = db.prepare("delete from company_limits where id = ?");
+  const byKey = db.prepare(
+    "select * from company_limits where user_id = ? and company_key = ?",
+  );
+  const all = db.prepare(
+    "select * from company_limits where user_id = ? order by name",
+  );
+  const remove = db.prepare(
+    "delete from company_limits where user_id = ? and id = ?",
+  );
 
   return {
     list(): CompanyLimit[] {
-      return (all.all() as unknown as Row[]).map(toLimit);
+      return (all.all(currentUser()) as unknown as Row[]).map(toLimit);
     },
     save(input: {
       name: string;
@@ -52,13 +60,14 @@ export function createCompanyLimitsRepo(db: DatabaseSync) {
       windowDays: number;
       note: string;
     }): CompanyLimit {
+      const user = currentUser();
       const key = employerKey(input.name);
-      upsertStmt.run(key, input.name, input.maxApplications, input.windowDays, input.note);
-      return toLimit(byKey.get(key) as unknown as Row);
+      upsertStmt.run(user, key, input.name, input.maxApplications, input.windowDays, input.note);
+      return toLimit(byKey.get(user, key) as unknown as Row);
     },
     /** True when something was deleted. */
     delete(id: number): boolean {
-      return Number(remove.run(id).changes) > 0;
+      return Number(remove.run(currentUser(), id).changes) > 0;
     },
   };
 }

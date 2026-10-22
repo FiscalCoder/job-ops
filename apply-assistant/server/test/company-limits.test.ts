@@ -100,7 +100,8 @@ const jobs = [
 const jobOps: JobOpsApi = {
   login: async () => ({ token: "good", expiresIn: 3600 }),
   me: async (t) => {
-    if (t === "good") return { id: "u1", username: "me" };
+    // Job Ops' admin: the seeded limits (from before there were users) become theirs.
+    if (t === "good") return { id: "u1", username: "me", isSystemAdmin: true };
     throw new JobOpsError(401, "UNAUTHORIZED", "nope");
   },
   listJobs: async (_t, statuses) => {

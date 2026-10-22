@@ -17,6 +17,7 @@ import { createFormSchemasRepo } from "../store/form-schemas-repo.js";
 import { createCompanyLimitsRepo } from "../store/company-limits-repo.js";
 import { createSiteRecipesRepo } from "../store/site-recipes-repo.js";
 import { createLearnedAnswersRepo } from "../store/learned-answers-repo.js";
+import { claimUnowned } from "../store/owner.js";
 import { createRunsRepo } from "../store/runs-repo.js";
 import { createTraceStore, type TraceStore } from "../store/trace-store.js";
 import { createAnswerBankRoutes } from "./answer-bank-routes.js";
@@ -29,6 +30,7 @@ import { createImportRoutes } from "./import-routes.js";
 import { createSiteRoutes } from "./site-routes.js";
 import { createLearnedRoutes } from "./learned-routes.js";
 import { createLookupRoutes } from "./lookup-routes.js";
+import { createJobOwnership } from "./ownership.js";
 import { createPlanRoutes } from "./plan-routes.js";
 import { createProgressRoutes } from "./progress-routes.js";
 import { createRunRoutes } from "./run-routes.js";
@@ -75,7 +77,14 @@ export function createApp({
   const app = express();
   const record = trace.record;
   const answers = createAnswerBankRepo(db);
-  const requireUser = createAuthMiddleware(jobOps, authCacheSeconds);
+  // Data from before apply-assistant had users was all one person's: Job Ops' admin.
+  let claimed = false;
+  const requireUser = createAuthMiddleware(jobOps, authCacheSeconds, (user) => {
+    if (claimed || !user.isSystemAdmin) return;
+    claimed = true;
+    const rows = claimUnowned(db, user.id);
+    if (rows) log?.(`[users] ${rows} rows from before users given to ${user.username}`);
+  });
 
   app.disable("x-powered-by");
   // One hop: nginx (CloudPanel) is the only way in, so its X-Forwarded-For is the client.
@@ -131,6 +140,13 @@ export function createApp({
     learned,
   });
 
+  // Per-job data (plan, posting, kit, trace) only for your own jobs.
+  const ownership = createJobOwnership(jobOps);
+  app.use(
+    ["/plans/:jobId", "/kit/:jobId", "/jobs/:jobId", "/trace/jobs/:jobId"],
+    requireUser,
+    ownership.guard,
+  );
   app.use(requireUser, createAnswerBankRoutes(answers));
   app.use(requireUser, createCompanyRoutes(limits));
   app.use(requireUser, createImportRoutes({ jobOps, trace: record }));
@@ -178,6 +194,7 @@ export function createApp({
       planStore,
       limits,
       trace: record,
+      ownership,
     }),
   );
 

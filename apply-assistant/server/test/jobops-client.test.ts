@@ -53,6 +53,7 @@ describe("JobOpsClient", () => {
     await expect(client.me("tok")).resolves.toEqual({
       id: "u1",
       username: "me",
+      isSystemAdmin: true,
     });
     expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe(
       "Bearer tok",

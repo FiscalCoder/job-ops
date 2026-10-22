@@ -4,11 +4,13 @@ import {
   JobOpsError,
   type JobOpsUser,
 } from "../jobops/client.js";
+import { runAsUser } from "../store/owner.js";
 import { sendError } from "./envelope.js";
 
 /**
  * Every protected route needs the caller's own Job Ops token. The token is checked against
- * Job Ops (/api/auth/me) and the result cached briefly, so one login covers both apps.
+ * Job Ops (/api/auth/me) and the result cached briefly, so one login covers both apps. The
+ * rest of the request runs as that user: it reads and writes only their data (owner.ts).
  */
 
 export interface AuthedRequest extends Request {
@@ -21,8 +23,23 @@ interface CacheEntry {
   readonly expiresAt: number;
 }
 
-export function createAuthMiddleware(jobOps: JobOpsApi, cacheSeconds: number) {
+export function createAuthMiddleware(
+  jobOps: JobOpsApi,
+  cacheSeconds: number,
+  onUser: (user: JobOpsUser) => void = () => {},
+) {
   const cache = new Map<string, CacheEntry>();
+  const proceed = (
+    req: AuthedRequest,
+    user: JobOpsUser,
+    token: string,
+    next: NextFunction,
+  ) => {
+    req.user = user;
+    req.jobOpsToken = token;
+    onUser(user);
+    runAsUser(user.id, () => next());
+  };
 
   return async function requireJobOpsUser(
     req: AuthedRequest,
@@ -42,18 +59,13 @@ export function createAuthMiddleware(jobOps: JobOpsApi, cacheSeconds: number) {
       );
 
     const cached = cache.get(token);
-    if (cached && cached.expiresAt > Date.now()) {
-      req.user = cached.user;
-      req.jobOpsToken = token;
-      return next();
-    }
+    if (cached && cached.expiresAt > Date.now())
+      return proceed(req, cached.user, token, next);
 
     try {
       const user = await jobOps.me(token);
       cache.set(token, { user, expiresAt: Date.now() + cacheSeconds * 1000 });
-      req.user = user;
-      req.jobOpsToken = token;
-      return next();
+      return proceed(req, user, token, next);
     } catch (error) {
       cache.delete(token);
       if (

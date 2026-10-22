@@ -9,6 +9,7 @@ import {
   lookupResultSchema,
   type ResultOutcome,
 } from "../resolver/lookups.js";
+import type { JobOwnership } from "./ownership.js";
 import type { TraceRecord } from "../store/trace-store.js";
 import type { AuthedRequest } from "./auth.js";
 import { sendJobOpsFailure } from "./auth.js";
@@ -38,7 +39,11 @@ function lookupLine(result: LookupResult, outcome: ResultOutcome): string {
 }
 
 export function createLookupRoutes(
-  deps: LookupsDeps & { readonly trace?: TraceRecord },
+  deps: LookupsDeps & {
+    readonly trace?: TraceRecord;
+    /** Results only for your own jobs (absent in tests that don't check it). */
+    readonly ownership?: JobOwnership;
+  },
 ) {
   const router = Router();
   const lookups = createLookups(deps);
@@ -67,6 +72,10 @@ export function createLookupRoutes(
       return;
     }
     try {
+      if (deps.ownership && !(await deps.ownership.owns(req, parsed.data.jobId))) {
+        sendError(res, 404, "JOB_NOT_FOUND", "Job Ops has no job with that id");
+        return;
+      }
       const outcome = await lookups.apply(tokenOf(req), parsed.data);
       trace({
         jobId: parsed.data.jobId,

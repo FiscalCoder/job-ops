@@ -25,8 +25,9 @@ function fakeJobOps(imported: ImportJob[]): JobOpsApi {
       throw new JobOpsError(401, "UNAUTHORIZED", "nope");
     },
     listJobs: async () => ({ jobs: [], total: 0, revision: "r" }),
-    getJob: async () => {
-      throw new JobOpsError(404, "NOT_FOUND", "no job");
+    getJob: async (_t, id) => {
+      if (id !== "job-new") throw new JobOpsError(404, "NOT_FOUND", "no job");
+      return { id, title: "Senior Engineer", employer: "Acme" } as never;
     },
     updateJob: async () => {},
     addNote: async () => {},
