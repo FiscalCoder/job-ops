@@ -232,10 +232,9 @@ export function reduce(state: RunState, event: RunEvent): RunState {
         }),
       );
     case "let-claude":
+      // Any step waiting (for you, or its countdown), with or without an answer; never a file.
       if (
-        step.state !== "awaiting-you" ||
-        !(step.attempts ?? 0) ||
-        step.value === null ||
+        !["pending", "countdown", "awaiting-you"].includes(step.state) ||
         step.entry.type === "file"
       )
         return state;

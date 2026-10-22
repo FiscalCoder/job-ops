@@ -92,6 +92,8 @@ export interface OperateTurn {
   }[];
   readonly done: boolean;
   readonly why: string;
+  /** What Claude says the field shows when it finished (null: it didn't say). */
+  readonly value: string | null;
   readonly cost: number;
 }
 

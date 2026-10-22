@@ -22,10 +22,10 @@ const tellBody = z.object({
     .optional(),
 });
 
-/** Workday: the choices found for a field none of which matches your answer as such. */
+/** A field whose choices don't include your answer (or you have none): Claude picks what fits you. */
 const chooseBody = z.object({
   label: z.string().trim().min(1).max(500),
-  wanted: z.string().trim().min(1).max(500),
+  wanted: z.string().trim().max(500),
   options: z.array(z.string().trim().min(1).max(300)).min(1).max(300),
 });
 

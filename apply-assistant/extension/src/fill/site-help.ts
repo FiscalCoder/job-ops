@@ -155,6 +155,24 @@ export async function pickOpenChoice(
   return null;
 }
 
+/** The choices of a list open in the frame, once any show (none after waitMs). */
+export async function visibleChoices(frame: Frame, waitMs: number): Promise<string[]> {
+  const deadline = Date.now() + waitMs;
+  do {
+    await sleep(POLL_MS * 2);
+    const labels = await frame
+      .$$eval(OPEN_CHOICES, (els) =>
+        els
+          .filter((el) => (el as HTMLElement).offsetParent !== null)
+          .map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim())
+          .filter(Boolean),
+      )
+      .catch(() => [] as string[]);
+    if (labels.length) return [...new Set(labels)];
+  } while (Date.now() < deadline);
+  return [];
+}
+
 /** Shows the value (a number may show formatted: "+91 98…" for "98…"). */
 export const showsValue = (shown: string, wanted: string): boolean =>
   selectionMatches(shown, wanted) ||

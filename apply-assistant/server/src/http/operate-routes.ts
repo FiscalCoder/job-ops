@@ -26,7 +26,10 @@ const stopBody = z.object({ session: z.string().uuid() });
 
 /** What Claude did this turn, for the trail: action names, and refs or points, never text typed. */
 function summary(turn: OperateTurn): string {
-  if (turn.done) return `Claude stopped: ${turn.why || "done"}`;
+  if (turn.done)
+    return turn.value
+      ? `Claude finished: the field shows "${turn.value.slice(0, 80)}". ${turn.why}`
+      : `Claude stopped: ${turn.why || "done"}`;
   return `Claude: ${turn.calls
     .map((c) => {
       const input = (c.input ?? {}) as { ref?: string; action?: string; coordinate?: number[] };
@@ -40,6 +43,8 @@ export function createOperateRoutes(deps: {
   readonly operator: Operator | null;
   readonly answerer: QuestionAnswerer | null;
   readonly trace?: TraceRecord;
+  /** Your saved answers for the prompt (private ones hidden), so Claude can pick what fits you. */
+  readonly savedAnswers?: () => string;
 }) {
   const router = Router();
   const trace = deps.trace ?? (() => {});
@@ -93,7 +98,13 @@ export function createOperateRoutes(deps: {
       res,
       (operator, jobId) =>
         start.success
-          ? operator.start(currentUser(), jobId, start.data, traceUsage(trace, jobId))
+          ? operator.start(
+              currentUser(),
+              jobId,
+              start.data,
+              traceUsage(trace, jobId),
+              deps.savedAnswers?.() ?? "",
+            )
           : operator.next(
               currentUser(),
               jobId,

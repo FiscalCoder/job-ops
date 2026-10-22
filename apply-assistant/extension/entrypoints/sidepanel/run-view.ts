@@ -194,13 +194,9 @@ function currentCard(
         busy,
       ),
     );
-  // The fill couldn't set it: Claude can work the field on the page, like a person would.
-  if (
-    action.kind === "wait-for-you" &&
-    (step.attempts ?? 0) >= 1 &&
-    !needsValue &&
-    step.entry.type !== "file"
-  )
+  // Claude can work any field on the page like a person would: with your answer, or (none,
+  // or it doesn't fit the choices) picking what fits you from your saved answers.
+  if (action.kind !== "fill" && step.entry.type !== "file")
     controls.push(
       button("Let Claude do it", () => send({ type: "let-claude" }), false, busy),
     );

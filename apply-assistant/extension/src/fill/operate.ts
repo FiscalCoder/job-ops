@@ -88,6 +88,8 @@ export async function operateField(
   const steps: ActStep[] = [];
   let learnable = true;
   let actions = 0;
+  /** A step kept without your answer: "{value}" in its place (as it is when you have none). */
+  const general = (value: string) => (wanted ? value.split(wanted).join("{value}") : value);
 
   const viewport = () => page.evaluate(() => ({ w: innerWidth, h: innerHeight }));
 
@@ -152,7 +154,7 @@ export async function operateField(
     if (inspection.learn)
       steps.push({
         ...inspection.learn,
-        value: inspection.learn.value.split(wanted).join("{value}"),
+        value: general(inspection.learn.value),
       });
     else learnable = false;
   };
@@ -182,7 +184,7 @@ export async function operateField(
     const refused = await (await focusedFrame()).evaluate(focusCheck, false).catch(() => "Couldn't check the focus");
     if (refused) return { ok: false, text: refused };
     await page.keyboard.sendCharacter(text.slice(0, 2_000));
-    steps.push({ action: "type", value: text.split(wanted).join("{value}") });
+    steps.push({ action: "type", value: general(text) });
     return { ok: true };
   }
 
@@ -218,7 +220,7 @@ export async function operateField(
     if (input.action === "pick") {
       const picked = await pickOpenChoice(frame, text);
       if (!picked) return { ok: false, text: `No open list shows "${text}"` };
-      steps.push({ action: "pick", value: text.split(wanted).join("{value}") });
+      steps.push({ action: "pick", value: general(text) });
       return { ok: true, text: `Picked "${picked}"` };
     }
     if (input.action !== "click" && input.action !== "type")
@@ -237,7 +239,7 @@ export async function operateField(
     await handle.evaluate((el) => (el as HTMLInputElement).select?.());
     await page.keyboard.press("Backspace");
     await page.keyboard.sendCharacter(text.slice(0, 2_000));
-    steps.push({ action: "type", value: text.split(wanted).join("{value}") });
+    steps.push({ action: "type", value: general(text) });
     return { ok: true };
   }
 
@@ -339,16 +341,23 @@ export async function operateField(
     session = null;
     await sleep(200);
     const shown = await target.readBack();
-    if (!showsValue(shown, wanted))
+    // Your answer, or (none fitted the field, or you had none) the choice Claude says it made.
+    const yours = !!wanted && showsValue(shown, wanted);
+    const chosen = !yours && !!turn.value && showsValue(shown, turn.value);
+    if (!yours && !chosen)
       return {
         ok: false,
         reason: `Claude couldn't set it${turn.why ? `: ${turn.why}` : ""}`,
       };
-    if (options.help && learnable && steps.some((s) => s.action !== "wait"))
+    // Only steps that set your own answer are kept: they replay with {value}.
+    if (yours && options.help && learnable && steps.some((s) => s.action !== "wait"))
       await options.help.record(entry.label, steps.slice(0, 8), true).catch(() => {});
+    const cost = `${actions} actions, about $${turn.cost.toFixed(2)}`;
     return {
       ok: true,
-      result: `set by Claude (${actions} actions, about $${turn.cost.toFixed(2)})`,
+      result: yours
+        ? `set by Claude (${cost})`
+        : `Claude chose "${turn.value}" (${cost})${turn.why ? `: ${turn.why}` : ""}`,
     };
   } finally {
     if (session) await api.stop(session).catch(() => {});

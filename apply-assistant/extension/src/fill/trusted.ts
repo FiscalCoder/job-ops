@@ -127,9 +127,10 @@ export abstract class TrustedDriver implements FormDriver {
     api: OperateApi,
     stopped: () => boolean,
   ): Promise<FillOutcome> {
+    // No answer of yours: Claude picks what fits you from your saved answers.
     const wanted = (Array.isArray(value) ? value : [value]).filter(Boolean).join(", ");
-    if (!wanted || entry.type === "file")
-      return Promise.resolve({ ok: false, reason: "Nothing Claude can put in this field" });
+    if (entry.type === "file")
+      return Promise.resolve({ ok: false, reason: "Attach the file yourself" });
     const target = {
       page: this.page,
       frame: this.frame,

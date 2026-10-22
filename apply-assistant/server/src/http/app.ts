@@ -17,6 +17,7 @@ import { createFormSchemasRepo } from "../store/form-schemas-repo.js";
 import { createCompanyLimitsRepo } from "../store/company-limits-repo.js";
 import { createSiteRecipesRepo } from "../store/site-recipes-repo.js";
 import { createOperator } from "../claude/operate.js";
+import { savedAnswersForPrompt } from "../claude/questions.js";
 import { createOperateRoutes } from "./operate-routes.js";
 import { createLearnedAnswersRepo } from "../store/learned-answers-repo.js";
 import { createClaudeAccess } from "../claude/access.js";
@@ -186,7 +187,16 @@ export function createApp({
     requireUser,
     createSiteRoutes({ plans, recipes: createSiteRecipesRepo(db), trace: record }),
   );
-  app.use(requireUser, createOperateRoutes({ operator, answerer, trace: record }));
+  app.use(
+    requireUser,
+    createOperateRoutes({
+      operator,
+      answerer,
+      trace: record,
+      savedAnswers: () =>
+        savedAnswersForPrompt(new Map(answers.list().map((a) => [a.key, a.value]))),
+    }),
+  );
   const runs = createRunsRepo(db);
   app.use(
     requireUser,

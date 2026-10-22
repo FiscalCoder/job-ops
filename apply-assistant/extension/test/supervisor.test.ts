@@ -193,10 +193,12 @@ describe("failures, pause, abort, submit", () => {
     });
   });
 
-  it("Let Claude do it: only for a field that failed, even after the retries; a failure comes back to you", () => {
+  it("Let Claude do it: any step that waits, with or without an answer, even after the retries; never a file", () => {
     let state = run([entry("contact"), entry("resume", { type: "file" })]);
-    // Not before a fill has failed.
-    expect(apply(state, { type: "let-claude" })).toBe(state);
+    // Before anything failed (and with no answer): Claude works it.
+    expect(
+      nextAction(apply(run([entry("dob", { value: null, status: "needs-you" })]), { type: "let-claude" })),
+    ).toMatchObject({ kind: "fill", step: { operate: true } });
     state = apply(
       state,
       { type: "countdown-finished" },

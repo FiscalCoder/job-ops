@@ -1,6 +1,9 @@
 // A company form in parts on one address (as on Virtusa): Next swaps the fields in place, with
 // the same address and heading. The run notices the swap, plans the new part and fills it; and
-// "Fill this page" reads the page on screen again whenever you ask. Stub server; nothing real.
+// "Fill this page" reads the page on screen again whenever you ask. A typeahead (Virtusa's
+// "work model") whose choices don't include the answer: Claude picks among the choices it
+// shows. Let Claude do it is offered on a step that waits for you before anything failed.
+// Stub server; nothing real.
 //   node e2e/wizard.e2e.mjs
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,13 +27,42 @@ const FORM = String.raw`<!doctype html><html><head><title>Acme Careers</title>
 const $ = (s) => document.querySelector(s);
 const PARTS = [
   '<div class="field"><label for="fn">First Name *</label><input id="fn"></div>' +
-  '<div class="field"><label for="ln">Last Name *</label><input id="ln"></div>',
+  '<div class="field"><label for="ln">Last Name *</label><input id="ln"></div>' +
+  '<div class="field"><label for="wm">Type of work model intrested in *</label><div class="rbt"><div class="rbt-input-multi">' +
+  '<div class="tokens"></div><input id="wm" autocomplete="off" aria-autocomplete="list" aria-haspopup="listbox"></div>' +
+  '<div class="rbt-menu" role="listbox" hidden></div></div></div>' +
+  '<div class="field"><label for="dob">Date of Birth *</label><input id="dob" placeholder="dd-MM-yyyy"></div>',
   '<div class="field"><label for="city">City *</label><input id="city"></div>' +
   '<div class="field"><label for="prev-emp">Have you been employed with Acme previously? *</label>' +
   '<select id="prev-emp"><option value="">Please Select</option><option>Yes</option><option>No</option></select></div>',
 ];
 let at = 0;
 const show = () => { $("#part").innerHTML = PARTS[at]; };
+// The typeahead (react-bootstrap-typeahead): picks are tokens with a remove button; the menu
+// lists the choices not picked yet, filtered by what's typed; Backspace in an empty box
+// removes the last token.
+const tokens = () => [...document.querySelectorAll(".rbt-token")].map((t) => t.firstChild.textContent);
+function menu() {
+  const input = $("#wm"), list = $(".rbt-menu");
+  const left = ["Onsite", "Hybrid", "Remote"].filter((c) => !tokens().includes(c) && c.toLowerCase().includes(input.value.toLowerCase()));
+  list.innerHTML = left.map((c) => '<a role="option" class="dropdown-item" href="#">' + c + "</a>").join("");
+  list.hidden = !left.length;
+}
+document.addEventListener("focusin", (e) => { if (e.target.id === "wm") menu(); });
+document.addEventListener("input", (e) => { if (e.target.id === "wm") menu(); });
+document.addEventListener("keydown", (e) => {
+  if (e.target.id !== "wm") return;
+  if (e.key === "Escape") $(".rbt-menu").hidden = true;
+  if (e.key === "Backspace" && !e.target.value) { [...document.querySelectorAll(".rbt-token")].at(-1)?.remove(); window.tokensRemoved = (window.tokensRemoved ?? 0) + 1; }
+});
+document.addEventListener("click", (e) => {
+  const option = e.target.closest(".rbt-menu [role=option]");
+  if (!option) return;
+  e.preventDefault();
+  $(".tokens").insertAdjacentHTML("beforeend", '<div class="rbt-token">' + option.textContent + '<button type="button" class="rbt-token-remove-button" aria-label="Remove">×</button></div>');
+  $("#wm").value = "";
+  $(".rbt-menu").hidden = true;
+});
 $("#next").addEventListener("click", () => { at = Math.min(at + 1, PARTS.length - 1); show(); });
 $("#prev").addEventListener("click", () => { at = Math.max(at - 1, 0); show(); });
 show();
@@ -39,12 +71,15 @@ show();
 const VALUES = {
   "First Name": "Testy",
   "Last Name": "User",
+  // Matched to the wrong saved answer: none of the field's choices.
+  "Type of work model intrested in": "Chennai, Bengaluru",
   City: "Chennai",
   "Have you been employed with Acme previously?": "No",
 };
 
 const posted = [];
 const trail = [];
+const chooseAsks = [];
 const ok = (route, data) =>
   route.fulfill({
     status: 200,
@@ -84,12 +119,21 @@ function stubServer(route, url) {
         type: f.kind === "text" ? "text" : "select",
         required: f.required,
         actionClass: "auto",
-        status: VALUES[f.label.replace(/\s*\*$/, "")] ? "fill" : "skip",
+        status: VALUES[f.label.replace(/\s*\*$/, "")]
+          ? "fill"
+          : /Date of Birth/.test(f.label)
+            ? "needs-you"
+            : "skip",
         value: VALUES[f.label.replace(/\s*\*$/, "")] ?? null,
         optionValues: null,
         source: "bank:stub",
       })),
     });
+  }
+  // "Claude" picks what fits you among the choices the field shows.
+  if (url.pathname === "/plans/stub/choose") {
+    chooseAsks.push(req.postDataJSON());
+    return ok(route, { value: "Remote", why: "stub: you prefer remote work" });
   }
   if (url.pathname.startsWith("/trace")) {
     try {
@@ -151,6 +195,27 @@ try {
   await form.goto(FORM_URL);
   await panel.bringToFront();
   await panel.locator("#here").getByRole("button", { name: "Fill this page" }).click();
+  // Date of Birth has no saved answer: it waits for you, and Claude is offered at once.
+  await panel.getByText("Date of Birth", { exact: false }).first().waitFor({ timeout: 60_000 });
+  await panel.getByRole("button", { name: "Skip" }).waitFor({ timeout: 60_000 });
+  check(
+    "Let Claude do it is offered on a step waiting for you, before anything failed",
+    await panel.getByRole("button", { name: "Let Claude do it" }).isVisible(),
+  );
+  const workModel = await form.evaluate(() => ({
+    tokens: [...document.querySelectorAll(".rbt-token")].map((t) => t.firstChild.textContent),
+    removed: window.tokensRemoved ?? 0,
+  }));
+  check(
+    "a typeahead whose choices don't include the answer: Claude picked among the choices it shows",
+    JSON.stringify(workModel.tokens) === '["Remote"]' &&
+      chooseAsks.length === 1 &&
+      chooseAsks[0].wanted === "Chennai, Bengaluru" &&
+      ["Onsite", "Hybrid", "Remote"].every((c) => chooseAsks[0].options.includes(c)),
+    JSON.stringify({ workModel, chooseAsks }),
+  );
+  check("no picked tag was removed by Backspace", workModel.removed === 0, JSON.stringify(workModel));
+  await panel.getByRole("button", { name: "Skip" }).click();
   const done = () =>
     panel
       .getByText("Check this page, then continue or submit it there yourself", { exact: false })
@@ -158,7 +223,7 @@ try {
   await done();
   check(
     "part 1 planned and filled",
-    labels(posted[0]) === "First Name|Last Name" &&
+    labels(posted[0]) === "First Name|Last Name|Type of work model intrested in|Date of Birth" &&
       (await form.evaluate(() => document.querySelector("#fn").value)) === "Testy",
     labels(posted[0]),
   );

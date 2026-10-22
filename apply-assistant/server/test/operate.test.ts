@@ -153,6 +153,28 @@ describe("Claude operating one field", () => {
     expect(after.status).toBe(409);
   });
 
+  it("with no saved answer Claude picks from your saved answers, and finish says what the field shows", async () => {
+    const finish = (id: string, value: string) => ({ type: "tool_use", id, name: "finish", input: { value } });
+    const { call, create } = await serve([
+      // finish beside an action: the action runs; finish is answered for Claude.
+      reply([click("t1"), finish("f1", "Remote")]),
+      reply([finish("f2", "Remote")], "tool_use"),
+    ]);
+    const first = (await call("/plans/job-1/operate", { ...start, label: "Work model", wanted: "" })).json.data;
+    expect(first.calls.map((c: any) => c.id)).toEqual(["t1"]);
+    expect(JSON.stringify(create.mock.calls[0]?.[0].messages[0])).toContain("<saved_answers>");
+    expect(JSON.stringify(create.mock.calls[0]?.[0].messages[0])).toContain("pick what fits the candidate");
+    const second = (
+      await call("/plans/job-1/operate", { session: first.session, results: [{ id: "t1", ok: true }] })
+    ).json.data;
+    const results = create.mock.calls[1]?.[0].messages[2]?.content as any[];
+    expect(results.map((r) => [r.tool_use_id, r.is_error ?? false])).toEqual([
+      ["t1", false],
+      ["f1", true],
+    ]);
+    expect(second).toMatchObject({ done: true, value: "Remote", calls: [] });
+  });
+
   it("a refused action goes back as an error for Claude to work around", async () => {
     const { call, create } = await serve([
       reply([click("t1")]),

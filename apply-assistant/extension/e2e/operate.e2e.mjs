@@ -240,8 +240,9 @@ try {
   await fill.waitFor({ timeout: 15_000 });
   await fill.click();
 
+  // Offered on every step that waits; this one is the field the fill couldn't set.
+  await panel.getByText("No choice matching", { exact: false }).waitFor({ timeout: 90_000 });
   const letClaude = panel.getByRole("button", { name: "Let Claude do it" });
-  await letClaude.waitFor({ timeout: 90_000 });
   check("a field the fill and Claude's HTML steps couldn't set offers Let Claude do it", true);
   await letClaude.click();
   await panel

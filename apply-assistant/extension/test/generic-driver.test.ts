@@ -109,6 +109,14 @@ describe("react-select dropdowns", () => {
     // Never another field's value.
     expect(shownValue("#phone")).toBe("");
   });
+
+  it("a typeahead's picks are its tokens, without their remove buttons (Virtusa)", () => {
+    document.body.innerHTML = `<div class="rbt"><div class="rbt-input-multi"><div class="rbt-input-wrapper">
+      <div class="rbt-token rbt-token-removeable">Remote<button class="rbt-token-remove-button" type="button"><span aria-hidden="true">×</span><span class="sr-only">Remove</span></button></div>
+      <div class="rbt-token">Hybrid<button type="button">×</button></div>
+      <div><input id="wm" aria-autocomplete="list"><input aria-hidden="true" class="rbt-input-hint" readonly></div></div></div></div>`;
+    expect(shownValue("#wm")).toBe("Remote, Hybrid");
+  });
 });
 
 describe("isSupportedPosting", () => {
