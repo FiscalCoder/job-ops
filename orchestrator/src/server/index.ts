@@ -19,6 +19,7 @@ import { attachChallengeViewerUpgradeProxy } from "./services/challenge-viewer";
 import { initializeDemoModeServices } from "./services/demo-mode";
 import { applyStoredEnvOverrides } from "./services/envSettings";
 import { initializeHistoricalServerEventReplaySafely } from "./services/historical-product-analytics";
+import { initializeDailySearch } from "./services/daily-search/scheduler";
 import { initializeJobLiveness } from "./services/job-liveness/scheduler";
 import { initialize as initializeVisaSponsors } from "./services/visa-sponsors/index";
 
@@ -150,6 +151,14 @@ async function startServer() {
       initializeJobLiveness();
     } catch (error) {
       logger.warn("Failed to initialize job liveness sweep", {
+        error: sanitizeUnknown(error),
+      });
+    }
+
+    try {
+      initializeDailySearch();
+    } catch (error) {
+      logger.warn("Failed to initialize the daily search", {
         error: sanitizeUnknown(error),
       });
     }
