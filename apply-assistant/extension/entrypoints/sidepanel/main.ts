@@ -14,6 +14,7 @@ import { isWorkdayApply } from "../../src/track/job-match";
 import { resolveTab } from "../../src/track/tabs";
 import { renderHere } from "./here-view";
 import { showKit } from "./kit-view";
+import { confirmLimit, postedText, renderQueue } from "./queue-view";
 import { renderRun as renderRunView } from "./run-view";
 
 // Side panel: sign in, run lookups, see the queue and each job's plan.
@@ -76,6 +77,7 @@ function countdownPicker(current: number): HTMLElement {
  */
 async function startFill(item: QueueItem, tabId?: number, workday = false) {
   if (!client || activeRun) return;
+  if (!confirmLimit(item)) return;
   const box = $("run-box");
   box.hidden = false;
   $("main").hidden = true;
@@ -128,6 +130,7 @@ let closeKit: (() => Promise<void>) | null = null;
 /** The apply kit for any queued job: answers to copy or fill by hand. */
 async function openKit(item: QueueItem) {
   if (!client || activeRun || closeKit) return;
+  if (!confirmLimit(item)) return;
   const box = $("kit-box");
   box.hidden = false;
   $("main").hidden = true;
@@ -382,22 +385,55 @@ async function loadQueue() {
   }
   queueItems = items;
   void checkTab();
-  const list = $("queue");
-  if (items.length === 0) {
-    list.replaceChildren(
-      el("li", { class: "muted" }, "No Ready jobs in Job Ops."),
-    );
-    return;
+  renderQueue($("queue"), items, {
+    row: queueRow,
+    limit: (company) => void limitCompany(company),
+    unlimit: (limit) => {
+      if (!window.confirm(`Remove the limit on ${limit.name}?`)) return;
+      void (client as ApplyClient)
+        .unlimitCompany(limit.id)
+        .then(loadQueue, handle);
+    },
+  });
+}
+
+/** Marks a company as one application per N months (asks how many; 6 by default). */
+async function limitCompany(company: string) {
+  const answer = window.prompt(
+    `${company} takes one application from you every how many months?`,
+    "6",
+  );
+  const months = Number(answer);
+  if (!answer || !Number.isFinite(months) || months <= 0) return;
+  try {
+    await (client as ApplyClient).limitCompany({
+      name: company,
+      maxApplications: 1,
+      windowDays: Math.round(months * 30.4),
+      note: "Yours",
+    });
+    await loadQueue();
+  } catch (error) {
+    handle(error);
   }
-  list.replaceChildren(
-    ...items.map((item) => {
+}
+
+/** One role in the queue: title, when posted, its badges and the kit. */
+function queueRow(item: QueueItem, showEmployer: boolean): HTMLElement {
       const [tone, label] = targetBadge(item.target);
       const needs = item.plan?.summary.needsYou ?? 0;
+      const posted = postedText(item.postedAt);
       const li = el(
         "li",
         { class: item.plan ? "clickable" : undefined },
         el("div", {}, item.title),
-        el("div", { class: "muted" }, item.employer),
+        showEmployer || posted
+          ? el(
+              "div",
+              { class: "muted" },
+              [showEmployer ? item.employer : "", posted].filter(Boolean).join(" · "),
+            )
+          : null,
         el(
           "div",
           { class: "row" },
@@ -419,8 +455,6 @@ async function loadQueue() {
       );
       if (item.plan) li.addEventListener("click", () => void showPlan(item));
       return li;
-    }),
-  );
 }
 
 $("refresh").addEventListener("click", () => void loadQueue());

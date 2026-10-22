@@ -31,6 +31,22 @@ export interface QueueItem {
     postingUrl?: string | null;
   };
   readonly plan: { summary: Record<string, number>; builtAt: string } | null;
+  /** When the posting went up, if the job board said (absent on old servers). */
+  readonly postedAt?: string | null;
+  /** Set when the company takes only so many applications from you (Amazon: 1 per 6 months). */
+  readonly companyLimit?: CompanyWindow | null;
+}
+
+/** Where you stand with a limited company (the server's view, from your Job Ops applications). */
+export interface CompanyWindow {
+  readonly id: number;
+  readonly name: string;
+  readonly maxApplications: number;
+  readonly windowDays: number;
+  readonly note: string;
+  readonly used: readonly { jobId: string; title: string; appliedAt: string }[];
+  readonly full: boolean;
+  readonly nextOpen: string | null;
 }
 
 /** What the server did with a captured LinkedIn apply link. */
@@ -103,6 +119,20 @@ export class ApplyClient implements TraceApi {
 
   capture(report: CaptureReport): Promise<CaptureOutcome> {
     return this.request("/captures", report);
+  }
+
+  /** Marks a company as taking only so many applications from you in a while. */
+  limitCompany(limit: {
+    name: string;
+    maxApplications: number;
+    windowDays: number;
+    note?: string;
+  }): Promise<unknown> {
+    return this.request("/company-limits", limit, "PUT");
+  }
+
+  unlimitCompany(id: number): Promise<unknown> {
+    return this.request(`/company-limits/${id}`, undefined, "DELETE");
   }
 
   queue(): Promise<QueueItem[]> {
@@ -213,11 +243,15 @@ export class ApplyClient implements TraceApi {
     return { base64: btoa(binary), name };
   }
 
-  private async request<T>(path: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    path: string,
+    body?: unknown,
+    method?: "PUT" | "DELETE",
+  ): Promise<T> {
     const res = await this.fetchImpl(
       `${this.baseUrl.replace(/\/+$/, "")}${path}`,
       {
-        method: body === undefined ? "GET" : "POST",
+        method: method ?? (body === undefined ? "GET" : "POST"),
         headers: {
           accept: "application/json",
           ...(body === undefined ? {} : { "content-type": "application/json" }),

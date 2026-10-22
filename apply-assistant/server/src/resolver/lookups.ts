@@ -9,10 +9,16 @@ import type {
   ApplyTargetsRepo,
 } from "../store/apply-targets-repo.js";
 import type { AtsBoardsRepo } from "../store/ats-boards-repo.js";
+import type { CompanyLimitsRepo } from "../store/company-limits-repo.js";
 import type { FillPlansRepo } from "../store/fill-plans-repo.js";
 import type { FormSchemasRepo } from "../store/form-schemas-repo.js";
 import { classifyApplyUrl } from "./greenhouse-url.js";
 import { matchOnBoard } from "./match.js";
+import {
+  companyWindow,
+  limitFor,
+  type PastApplication,
+} from "./company-window.js";
 import { employerKey } from "./text.js";
 
 /**
@@ -22,6 +28,8 @@ import { employerKey } from "./text.js";
  */
 
 export const QUEUE_STATUSES = ["ready"] as const;
+/** Your past applications: what limited companies (one per six months, ...) count. */
+const APPLIED_STATUSES = ["applied", "in_progress"] as const;
 
 /**
  * Lookups run before tailoring too, so you know which high scorers have a fillable form before
@@ -126,6 +134,8 @@ export interface LookupsDeps {
   readonly schemas: FormSchemasRepo;
   readonly plans: PlansService;
   readonly planStore: FillPlansRepo;
+  /** Companies that take only so many applications from you (absent: none limited). */
+  readonly limits?: CompanyLimitsRepo;
 }
 
 export function createLookups(deps: LookupsDeps) {
@@ -372,7 +382,19 @@ export function createLookups(deps: LookupsDeps) {
 
   async function queue(token: string) {
     const summaries = planStore.summaries();
-    const { jobs } = await jobOps.listJobs(token, QUEUE_STATUSES);
+    const limits = deps.limits?.list() ?? [];
+    const [{ jobs }, applied] = await Promise.all([
+      jobOps.listJobs(token, QUEUE_STATUSES),
+      limits.length
+        ? jobOps.listJobs(token, APPLIED_STATUSES).then((r) => r.jobs)
+        : Promise.resolve([]),
+    ]);
+    const past: PastApplication[] = applied.flatMap((j) =>
+      j.appliedAt
+        ? [{ jobId: j.id, title: j.title, employer: j.employer, appliedAt: j.appliedAt }]
+        : [],
+    );
+    const now = new Date();
     return [...jobs]
       .sort((a, b) => (b.suitabilityScore ?? 0) - (a.suitabilityScore ?? 0))
       .map((job) => {
@@ -396,6 +418,12 @@ export function createLookups(deps: LookupsDeps) {
               }
             : { status: "pending" as const },
           plan: summaries.get(job.id) ?? null,
+          postedAt: job.datePosted ?? null,
+          // A company that takes only so many applications from you: pick your best role.
+          companyLimit: (() => {
+            const limit = limitFor(job.employer, limits);
+            return limit ? companyWindow(limit, past, now) : null;
+          })(),
         };
       });
   }

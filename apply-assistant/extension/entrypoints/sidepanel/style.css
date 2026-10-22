@@ -144,6 +144,21 @@ button.link {
   cursor: pointer;
 }
 
+/* A company's header above its roles; a limit's line may be long, so it wraps. */
+.list li.company {
+  padding-top: 14px;
+}
+
+.list li.company .badge {
+  white-space: normal;
+  border-radius: 8px;
+  margin-top: 4px;
+}
+
+#queue li:not(.company) {
+  padding-left: 10px;
+}
+
 .list li:first-child {
   border-top: 0;
 }

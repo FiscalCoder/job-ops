@@ -161,6 +161,22 @@ export const MIGRATIONS: readonly string[] = [
      created_at text not null default (datetime('now')),
      updated_at text not null default (datetime('now'))
    );`,
+  // Companies that take only so many applications from you in a while (Amazon: one per six
+  // months), so you pick your one best role there. Seeded; you add, change or remove them.
+  `create table company_limits (
+     id integer primary key autoincrement,
+     company_key text not null unique,
+     name text not null,
+     max_applications integer not null,
+     window_days integer not null,
+     note text not null default '',
+     created_at text not null default (datetime('now')),
+     updated_at text not null default (datetime('now'))
+   );
+   insert into company_limits (company_key, name, max_applications, window_days, note) values
+     ('amazon', 'Amazon', 1, 183, 'Yours: one application every 6 months'),
+     ('elevenlabs', 'ElevenLabs', 1, 183, 'Yours: one application every 6 months'),
+     ('google', 'Google', 3, 30, 'Widely reported, not confirmed by Google: 3 applications in 30 days');`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

@@ -29,6 +29,10 @@ export interface JobOpsJob {
   readonly jobUrl: string;
   readonly applicationLink: string | null;
   readonly suitabilityScore: number | null;
+  /** When the posting went up (as the job board said), if known. */
+  readonly datePosted?: string | null;
+  /** When you applied (Job Ops sets it on "applied"). */
+  readonly appliedAt?: string | null;
 }
 
 export interface JobOpsJobDetail extends JobOpsJob {
@@ -90,6 +94,8 @@ const jobShape = z
     jobUrl: z.string(),
     applicationLink: z.string().nullable().optional(),
     suitabilityScore: z.number().nullable().optional(),
+    datePosted: z.string().nullable().optional(),
+    appliedAt: z.string().nullable().optional(),
   })
   .passthrough();
 const jobsData = z.object({
@@ -120,6 +126,8 @@ const toJob = (job: z.infer<typeof jobShape>): JobOpsJob => ({
       ? job.applicationLink
       : null,
   suitabilityScore: job.suitabilityScore ?? null,
+  datePosted: job.datePosted ?? null,
+  appliedAt: job.appliedAt ?? null,
 });
 
 export class JobOpsClient implements JobOpsApi {
