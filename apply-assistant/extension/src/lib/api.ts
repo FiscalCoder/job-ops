@@ -57,6 +57,44 @@ export interface ClaudeKeyStatus {
   readonly hint: string | null;
 }
 
+export interface OperateShot {
+  readonly data: string;
+  readonly mediaType: "image/jpeg";
+}
+
+/** Starting Claude on a field, or the results of its last actions (one per action, in order). */
+export type OperateRequest =
+  | {
+      readonly label: string;
+      readonly wanted: string;
+      readonly failure: string;
+      readonly outline: string;
+      readonly screenshot: OperateShot;
+    }
+  | {
+      readonly session: string;
+      readonly results: readonly {
+        readonly id: string;
+        readonly ok: boolean;
+        readonly text?: string;
+        readonly screenshot?: OperateShot;
+      }[];
+    };
+
+/** Claude's next actions on the field (a computer member, or the element tool by ref). */
+export interface OperateTurn {
+  readonly session: string;
+  readonly calls: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly toolset: "computer" | null;
+    readonly input: unknown;
+  }[];
+  readonly done: boolean;
+  readonly why: string;
+  readonly cost: number;
+}
+
 /** What Job Ops' model read from a job's page (any of it may be missing). */
 export interface ImportDraft {
   readonly title?: string | null;
@@ -225,6 +263,15 @@ export class ApplyClient implements TraceApi {
     why: string;
   }> {
     return this.request(`/plans/${encodeURIComponent(jobId)}/act`, ask);
+  }
+
+  /** "Let Claude do it": starts Claude on one field, or sends its last actions' results. */
+  operate(jobId: string, body: OperateRequest): Promise<OperateTurn> {
+    return this.request(`/plans/${encodeURIComponent(jobId)}/operate`, body);
+  }
+
+  stopOperate(jobId: string, session: string): Promise<unknown> {
+    return this.request(`/plans/${encodeURIComponent(jobId)}/operate/stop`, { session });
   }
 
   /** A site's saved steps, by question. */

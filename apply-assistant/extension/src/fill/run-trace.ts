@@ -116,6 +116,7 @@ const VERB: Partial<Record<RunEvent["type"], string>> = {
   edit: "edited",
   skip: "skipped",
   "i-did-it": "filled it yourself on",
+  "let-claude": "asked Claude to work",
   pause: "paused at",
   resume: "resumed at",
   abort: "stopped the run at",

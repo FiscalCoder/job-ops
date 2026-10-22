@@ -193,6 +193,34 @@ describe("failures, pause, abort, submit", () => {
     });
   });
 
+  it("Let Claude do it: only for a field that failed, even after the retries; a failure comes back to you", () => {
+    let state = run([entry("contact"), entry("resume", { type: "file" })]);
+    // Not before a fill has failed.
+    expect(apply(state, { type: "let-claude" })).toBe(state);
+    state = apply(
+      state,
+      { type: "countdown-finished" },
+      { type: "fill-failed", reason: "x" },
+      { type: "approve" },
+      { type: "fill-failed", reason: "still x" },
+    );
+    state = apply(state, { type: "let-claude" });
+    expect(nextAction(state)).toMatchObject({
+      kind: "fill",
+      step: { operate: true, decision: "approved", decidedBy: "you" },
+    });
+    state = apply(state, { type: "fill-failed", reason: "Claude couldn't set it" });
+    expect(nextAction(state)).toMatchObject({
+      kind: "wait-for-you",
+      step: { operate: false, attempts: 3, note: "Claude couldn't set it" },
+    });
+    state = apply(state, { type: "let-claude" }, { type: "filled", result: "set by Claude" });
+    expect(state.steps[0]).toMatchObject({ state: "done", result: "set by Claude" });
+    // Never for the resume.
+    state = apply(state, { type: "countdown-finished" }, { type: "fill-failed", reason: "x" });
+    expect(apply(state, { type: "let-claude" })).toBe(state);
+  });
+
   it("pause holds everything until resume", () => {
     let state = apply(run([entry("a")]), { type: "pause" });
     expect(nextAction(state)).toEqual({ kind: "paused" });

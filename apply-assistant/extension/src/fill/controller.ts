@@ -22,6 +22,7 @@ import {
   startRun,
 } from "./supervisor";
 import {
+  type FillOutcome,
   type FormDriver,
   type ResumeFile,
   sleep,
@@ -718,13 +719,15 @@ export class RunController {
       }, STALL_MS);
       if (step.entry.type === "file" && !this.resume)
         this.resume = await this.client.resumePdf(this.job.jobId);
-      let outcome = await this.driver.fill(
-        step.entry,
-        step.value,
-        this.resume ?? undefined,
-      );
+      let outcome = step.operate
+        ? await this.operate(step)
+        : await this.driver.fill(
+            step.entry,
+            step.value,
+            this.resume ?? undefined,
+          );
       // Not filled the usual way: this site's saved steps, then Claude's.
-      if (!outcome.ok)
+      if (!outcome.ok && !step.operate)
         outcome =
           (await this.driver
             .rescue?.(step.entry, step.value, outcome.reason)
@@ -755,6 +758,25 @@ export class RunController {
       this.busy = false;
     }
     void this.loop();
+  }
+
+  /** "Let Claude do it": Claude works the field on the page; Pause or Abort stops it. */
+  private operate(step: Step): Promise<FillOutcome> {
+    if (!this.driver.operate)
+      return Promise.resolve({ ok: false, reason: "Claude can't work this form" });
+    const jobId = this.job.jobId;
+    return this.driver.operate(
+      step.entry,
+      step.value,
+      step.note ?? step.result ?? "",
+      {
+        turn: (body) => this.client.operate(jobId, body),
+        stop: async (session) => {
+          await this.client.stopOperate(jobId, session);
+        },
+      },
+      () => this.state.paused || this.closed || this.tabClosed,
+    );
   }
 
   private async checkSubmitted() {

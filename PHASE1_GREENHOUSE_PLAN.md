@@ -539,7 +539,7 @@ Claude only reads the HTML so far. It doesn't see the page or work it like a per
 7. **Cost (estimate).** A screenshot is about 1.5k input tokens, plus 1–3k for the outline. A field takes about 3–6 turns (fewer than with screenshots alone, since Claude doesn't guess and retry clicks), so about 10–25k tokens on Sonnet 5.5, roughly $0.03–0.05 per field, with the system prompt and tools cached.
 8. **Order of work.**
    - (a) DOM-steps fallback and recipes for Workday and Greenhouse (cheap, closes most gaps): **done 2026-10-23**, on all systems;
-   - (b) per-field operate on all three drivers, behind the button;
+   - (b) per-field operate on every driver, behind the button: **done 2026-10-23**. "Let Claude do it" shows on a field whose fill failed. Server: `POST /plans/:jobId/operate` (`claude/operate.ts`): Sonnet 5.5, the toolset with drags, raw mouse buttons and held keys off, plus the `element` tool; at most 8 turns, 20 actions, $0.15 a field and $0.30 an application per day. Extension: `fill/operate.ts` and `fill/operate-page.ts`, with the checks above (except pausing on your own mouse or keys: Stop on the page or Pause in the side panel stops it). Steps that worked become the site's saved steps. Test: `extension/e2e/operate.e2e.mjs`;
    - (c) automatic escalation with the budget;
    - (d) page mode;
    - (e) an eval from the trails' failure snapshots.

@@ -16,6 +16,8 @@ import { createFillPlansRepo } from "../store/fill-plans-repo.js";
 import { createFormSchemasRepo } from "../store/form-schemas-repo.js";
 import { createCompanyLimitsRepo } from "../store/company-limits-repo.js";
 import { createSiteRecipesRepo } from "../store/site-recipes-repo.js";
+import { createOperator } from "../claude/operate.js";
+import { createOperateRoutes } from "./operate-routes.js";
 import { createLearnedAnswersRepo } from "../store/learned-answers-repo.js";
 import { createClaudeAccess } from "../claude/access.js";
 import { claimUnowned } from "../store/owner.js";
@@ -150,6 +152,10 @@ export function createApp({
           ...(log ? { log } : {}),
         })
       : null;
+  const operator =
+    claude && access
+      ? createOperator({ messages: access.messages, model: claude.draftModel })
+      : null;
   const learned = createLearnedAnswersRepo(db);
   const limits = createCompanyLimitsRepo(db);
   const plans = createPlans({
@@ -180,6 +186,7 @@ export function createApp({
     requireUser,
     createSiteRoutes({ plans, recipes: createSiteRecipesRepo(db), trace: record }),
   );
+  app.use(requireUser, createOperateRoutes({ operator, answerer, trace: record }));
   const runs = createRunsRepo(db);
   app.use(
     requireUser,

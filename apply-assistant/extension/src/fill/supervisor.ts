@@ -46,6 +46,8 @@ export interface Step {
   readonly result?: string;
   /** Failed fill attempts on this step; after MAX_ATTEMPTS, Approve stops retrying. */
   readonly attempts?: number;
+  /** "Let Claude do it": this fill is Claude working the page, not the driver. */
+  readonly operate?: boolean;
 }
 
 export type Phase = "filling" | "review" | "finished";
@@ -68,6 +70,8 @@ export type RunEvent =
   | { type: "edit"; value: string | readonly string[] }
   | { type: "skip" }
   | { type: "i-did-it"; value?: string }
+  /** A field the fill couldn't set: Claude works it on the page instead. */
+  | { type: "let-claude" }
   | { type: "filled"; result: string }
   | { type: "fill-failed"; reason: string }
   | { type: "pause" }
@@ -227,6 +231,20 @@ export function reduce(state: RunState, event: RunEvent): RunState {
           result: "skipped",
         }),
       );
+    case "let-claude":
+      if (
+        step.state !== "awaiting-you" ||
+        !(step.attempts ?? 0) ||
+        step.value === null ||
+        step.entry.type === "file"
+      )
+        return state;
+      return replaceStep(state, {
+        state: "running",
+        operate: true,
+        decision: "approved",
+        decidedBy: "you",
+      });
     case "i-did-it":
       return advance(
         replaceStep(state, {
@@ -253,6 +271,7 @@ export function reduce(state: RunState, event: RunEvent): RunState {
         note: event.reason,
         result: event.reason,
         attempts: (step.attempts ?? 0) + 1,
+        operate: false,
       });
     default:
       return state;

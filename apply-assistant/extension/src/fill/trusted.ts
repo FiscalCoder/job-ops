@@ -5,6 +5,7 @@ import type {
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import { captureDom, type DomCapture, MAX_DOM_CHARS } from "../trace/dom";
 import { digits, sleep } from "./options";
+import { type OperateApi, operateField } from "./operate";
 import { type SiteHelp, rescueField } from "./site-help";
 import type { PlanEntry } from "./supervisor";
 
@@ -46,6 +47,14 @@ export interface FormDriver {
     value: string | readonly string[] | null,
     failure: string,
   ): Promise<FillOutcome | null>;
+  /** "Let Claude do it" on a field that failed. */
+  operate?(
+    entry: PlanEntry,
+    value: string | readonly string[] | null,
+    failure: string,
+    api: OperateApi,
+    stopped: () => boolean,
+  ): Promise<FillOutcome>;
 }
 
 export {
@@ -108,6 +117,26 @@ export abstract class TrustedDriver implements FormDriver {
       readBack: () => this.readBack(entry),
     };
     return rescueField(target, this.help, entry, wanted, failure);
+  }
+
+  /** "Let Claude do it": Claude works the field on the page (screenshots and the field's outline). */
+  operate(
+    entry: PlanEntry,
+    value: string | readonly string[] | null,
+    failure: string,
+    api: OperateApi,
+    stopped: () => boolean,
+  ): Promise<FillOutcome> {
+    const wanted = (Array.isArray(value) ? value : [value]).filter(Boolean).join(", ");
+    if (!wanted || entry.type === "file")
+      return Promise.resolve({ ok: false, reason: "Nothing Claude can put in this field" });
+    const target = {
+      page: this.page,
+      frame: this.frame,
+      selector: this.boxFor(entry.ref),
+      readBack: () => this.readBack(entry),
+    };
+    return operateField(target, entry, wanted, failure, api, { help: this.help, stopped });
   }
 
   /** Outlines the field being worked on and shows a small badge on the page. */

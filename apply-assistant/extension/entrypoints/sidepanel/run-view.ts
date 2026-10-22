@@ -194,6 +194,16 @@ function currentCard(
         busy,
       ),
     );
+  // The fill couldn't set it: Claude can work the field on the page, like a person would.
+  if (
+    action.kind === "wait-for-you" &&
+    (step.attempts ?? 0) >= 1 &&
+    !needsValue &&
+    step.entry.type !== "file"
+  )
+    controls.push(
+      button("Let Claude do it", () => send({ type: "let-claude" }), false, busy),
+    );
   controls.push(
     button("I'll do it", () => send({ type: "i-did-it" }), false, busy),
     button("Skip", () => send({ type: "skip" }), false, busy),
@@ -213,7 +223,9 @@ function currentCard(
               class: `badge ${step.entry.actionClass === "protected" ? "warn" : ""}`,
             },
             action.kind === "fill"
-              ? "filling…"
+              ? step.operate
+                ? "Claude is working on it… (Pause stops it)"
+                : "filling…"
               : (GATE[step.entry.actionClass] ?? ""),
           ),
     ),
