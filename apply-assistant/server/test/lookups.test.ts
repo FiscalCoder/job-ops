@@ -97,7 +97,7 @@ function fakeJobOps(log: {
   return {
     login: async () => ({ token: "good", expiresIn: 3600 }),
     me: async (token) => {
-      if (token === "good") return { id: "u1", username: "me" };
+      if (token === "good") return { id: "u1", username: "me", isSystemAdmin: true };
       throw new JobOpsError(401, "UNAUTHORIZED", "nope");
     },
     listJobs: async (_t, statuses) => {

@@ -249,6 +249,75 @@ export const MIGRATIONS: readonly string[] = [
    create index runs_user_job on runs (user_id, job_id);
    create index trace_events_user_job on trace_events (user_id, job_id, id);
    create index trace_snapshots_user_job on trace_snapshots (user_id, job_id);`,
+  // Everything else a user's extension or plans write is theirs too: postings' boards and forms
+  // they looked up, Claude's cached answers, site steps. And each user's own Claude key.
+  `create table ats_boards_v2 (
+     user_id text not null default '',
+     employer_norm text not null,
+     token text,
+     method text not null,
+     checked_at text not null default (datetime('now')),
+     jobs_cache_json text,
+     jobs_cached_at text,
+     ats text,
+     searched text,
+     primary key (user_id, employer_norm)
+   );
+   insert into ats_boards_v2 (employer_norm, token, method, checked_at, jobs_cache_json, jobs_cached_at, ats, searched)
+     select employer_norm, token, method, checked_at, jobs_cache_json, jobs_cached_at, ats, searched from ats_boards;
+   drop table ats_boards;
+   alter table ats_boards_v2 rename to ats_boards;
+
+   create table form_schemas_v3 (
+     user_id text not null default '',
+     ats text not null,
+     board text not null,
+     posting_id text not null,
+     payload_json text not null,
+     schema_hash text not null,
+     fetched_at text not null default (datetime('now')),
+     primary key (user_id, ats, board, posting_id)
+   );
+   insert into form_schemas_v3 (ats, board, posting_id, payload_json, schema_hash, fetched_at)
+     select ats, board, posting_id, payload_json, schema_hash, fetched_at from form_schemas;
+   drop table form_schemas;
+   alter table form_schemas_v3 rename to form_schemas;
+
+   create table claude_answers_v2 (
+     user_id text not null default '',
+     cache_key text not null,
+     answer_json text not null,
+     model text not null,
+     created_at text not null default (datetime('now')),
+     primary key (user_id, cache_key)
+   );
+   insert into claude_answers_v2 (cache_key, answer_json, model, created_at)
+     select cache_key, answer_json, model, created_at from claude_answers;
+   drop table claude_answers;
+   alter table claude_answers_v2 rename to claude_answers;
+
+   create table site_recipes_v2 (
+     user_id text not null default '',
+     host text not null,
+     label_key text not null,
+     label text not null,
+     steps_json text not null,
+     worked integer not null default 0,
+     failed integer not null default 0,
+     created_at text not null default (datetime('now')),
+     updated_at text not null default (datetime('now')),
+     primary key (user_id, host, label_key)
+   );
+   insert into site_recipes_v2 (host, label_key, label, steps_json, worked, failed, created_at, updated_at)
+     select host, label_key, label, steps_json, worked, failed, created_at, updated_at from site_recipes;
+   drop table site_recipes;
+   alter table site_recipes_v2 rename to site_recipes;
+
+   create table user_settings (
+     user_id text primary key,
+     anthropic_key text,
+     updated_at text not null default (datetime('now'))
+   );`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

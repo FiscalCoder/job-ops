@@ -34,20 +34,21 @@ const app = createApp({
   jobOps: new JobOpsClient(config.jobOpsBaseUrl),
   db,
   authCacheSeconds: config.authCacheSeconds,
-  claude: config.claude
-    ? {
-        messages: new Anthropic({ apiKey: config.claude.apiKey }).messages,
-        mapModel: config.claude.mapModel,
-        draftModel: config.claude.draftModel,
-      }
-    : null,
+  claude: {
+    messages: config.claude.apiKey
+      ? new Anthropic({ apiKey: config.claude.apiKey }).messages
+      : null,
+    messagesFor: (apiKey) => new Anthropic({ apiKey }).messages,
+    mapModel: config.claude.mapModel,
+    draftModel: config.claude.draftModel,
+  },
   log,
   trace,
 });
 
 const server = app.listen(config.port, () => {
   console.log(
-    `[apply-assistant] listening on :${config.port}, Job Ops at ${config.jobOpsBaseUrl}, Claude ${config.claude ? `on (${config.claude.mapModel} / ${config.claude.draftModel})` : "off (no ANTHROPIC_API_KEY)"}`,
+    `[apply-assistant] listening on :${config.port}, Job Ops at ${config.jobOpsBaseUrl}, Claude ${config.claude.mapModel} / ${config.claude.draftModel}, server key ${config.claude.apiKey ? "set (the admin's)" : "not set"}`,
   );
 });
 

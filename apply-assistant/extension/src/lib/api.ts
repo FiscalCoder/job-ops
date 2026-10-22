@@ -50,6 +50,13 @@ export interface CompanyWindow {
 }
 
 /** What the server did with a captured LinkedIn apply link. */
+/** "yours", "server" (you run this server and saved no key) or null: Claude is off for you. */
+export interface ClaudeKeyStatus {
+  readonly source: "yours" | "server" | null;
+  /** Your key's last characters ("…WXYZ"), when you saved one. */
+  readonly hint: string | null;
+}
+
 /** What Job Ops' model read from a job's page (any of it may be missing). */
 export interface ImportDraft {
   readonly title?: string | null;
@@ -161,6 +168,19 @@ export class ApplyClient implements TraceApi {
 
   queue(): Promise<QueueItem[]> {
     return this.request("/queue");
+  }
+
+  /** Whose Claude key your Claude calls use (your key itself is never sent back). */
+  claudeKey(): Promise<ClaudeKeyStatus> {
+    return this.request("/settings/claude");
+  }
+
+  saveClaudeKey(apiKey: string): Promise<ClaudeKeyStatus> {
+    return this.request("/settings/claude", { apiKey }, "PUT");
+  }
+
+  removeClaudeKey(): Promise<ClaudeKeyStatus> {
+    return this.request("/settings/claude", undefined, "DELETE");
   }
 
   /** Job Ops' model reads a job's details from its page's text (read in your browser). */

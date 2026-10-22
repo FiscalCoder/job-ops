@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type Anthropic from "@anthropic-ai/sdk";
+import type { MessagesApi } from "../src/claude/answerer.js";
 import { createApp } from "../src/http/app.js";
 import {
   type JobOpsApi,
@@ -64,9 +66,24 @@ const jobOps: JobOpsApi = {
   getDesignResume: async () => fakeDesignResume,
 };
 
+/** Whose key each Claude call went out with. */
+const claudeCalls: string[] = [];
+const claudeAs = (whose: string): MessagesApi => ({
+  create: async () => {
+    claudeCalls.push(whose);
+    return {
+      model: "fake",
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: JSON.stringify({ answers: [] }) }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    } as unknown as Anthropic.Message;
+  },
+});
+
 let close: (() => void) | undefined;
 const dirs: string[] = [];
 afterEach(() => {
+  claudeCalls.length = 0;
   close?.();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -86,6 +103,13 @@ async function start() {
     db,
     authCacheSeconds: 60,
     trace: createTraceStore({ db, dir }),
+    // The server's own key (its admin's), and anyone's own key: each call says whose it used.
+    claude: {
+      messages: claudeAs("server"),
+      messagesFor: (apiKey) => claudeAs(apiKey),
+      mapModel: "claude-haiku-5-5",
+      draftModel: "claude-sonnet-5-5",
+    },
   }).listen(0);
   await new Promise((r) => server.once("listening", r));
   close = () => server.close();
@@ -222,5 +246,47 @@ describe("several users on one apply-assistant", () => {
     // Your own: all there.
     expect((await you("GET", `/runs/${run.id}`)).status).toBe(200);
     expect((await you("GET", `/trace/snapshots/${snapshot.id}`)).status).toBe(200);
+  });
+
+  it("site steps a user's runs learn are theirs alone", async () => {
+    const { you, friend } = await start();
+    const steps = [{ action: "click", value: ".dd" }];
+    await friend("POST", "/recipes", { host: "careers.acme.com", label: "Notice period", steps, ok: true });
+    expect((await friend("GET", "/recipes?host=careers.acme.com")).body.data).toHaveLength(1);
+    expect((await you("GET", "/recipes?host=careers.acme.com")).body.data).toEqual([]);
+  });
+
+  it("Claude uses each person's own key; the server's is only the admin's", async () => {
+    const { you, friend } = await start();
+    // A new question each time: an answered one is cached (per person) and costs no call.
+    let asked = 0;
+    const ask = (who: typeof you, jobId: string) =>
+      who("POST", `/kit/${jobId}/answer`, { question: `Why do you want to work here? (${++asked})` });
+
+    // No key of their own: Claude is off for them, and says how to turn it on.
+    expect((await friend("GET", "/settings/claude")).body.data).toEqual({ source: null, hint: null });
+    const off = await ask(friend, "job-theirs");
+    expect(off.status).toBe(503);
+    expect(off.body.error.message).toMatch(/Claude API key/);
+    expect(claudeCalls).toEqual([]);
+
+    // The admin, without one: the server's key.
+    expect((await you("GET", "/settings/claude")).body.data.source).toBe("server");
+    await ask(you, "job-yours");
+    expect(claudeCalls).toEqual(["server"]);
+
+    // Their own key: used for them, never sent back whole, not usable by anyone else.
+    expect((await friend("PUT", "/settings/claude", { apiKey: "not-a-key" })).status).toBe(400);
+    const key = "sk-ant-api03-friendfriendfriendfriend-WXYZ";
+    const saved = await friend("PUT", "/settings/claude", { apiKey: key });
+    expect(saved.body.data).toEqual({ source: "yours", hint: "…WXYZ" });
+    expect(JSON.stringify(saved.body)).not.toContain("friendfriend");
+    await ask(friend, "job-theirs");
+    expect(claudeCalls).toEqual(["server", key]);
+    await ask(you, "job-yours");
+    expect(claudeCalls).toEqual(["server", key, "server"]);
+
+    // Removed: off again.
+    expect((await friend("DELETE", "/settings/claude")).body.data.source).toBeNull();
   });
 });

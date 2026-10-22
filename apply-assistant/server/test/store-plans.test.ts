@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FillPlan } from "../src/plan/planner.js";
 import { openStore } from "../src/store/db.js";
+import { runAsUser } from "../src/store/owner.js";
 import { createFillPlansRepo } from "../src/store/fill-plans-repo.js";
 import { createFormSchemasRepo } from "../src/store/form-schemas-repo.js";
 
@@ -20,7 +21,8 @@ const plan = (needsYou: number): FillPlan => ({
 });
 
 describe("form schemas repo", () => {
-  it("stores the raw Greenhouse payload per posting and reads it back while fresh", () => {
+  it("stores the raw Greenhouse payload per posting and reads it back while fresh", () =>
+    runAsUser("u1", () => {
     const db = openStore(":memory:");
     const schemas = createFormSchemasRepo(db);
     expect(schemas.getFresh("greenhouse", "acme", "11")).toBeNull();
@@ -43,17 +45,19 @@ describe("form schemas repo", () => {
       "hash-b",
     );
     expect(schemas.getFresh("greenhouse", "acme", "11")?.hash).toBe("hash-b");
-  });
+    }));
 
-  it("keeps each system's forms apart", () => {
+  it("keeps each system's forms apart", () =>
+    runAsUser("u1", () => {
     const schemas = createFormSchemasRepo(openStore(":memory:"));
     schemas.save("greenhouse", "acme", "11", { gh: true }, "g");
     schemas.save("ashby", "acme", "11", { ashby: true }, "a");
     expect(schemas.getAny("greenhouse", "acme", "11")?.hash).toBe("g");
     expect(schemas.getAny("ashby", "acme", "11")?.hash).toBe("a");
-  });
+    }));
 
-  it("treats a schema older than the freshness window as missing", () => {
+  it("treats a schema older than the freshness window as missing", () =>
+    runAsUser("u1", () => {
     const db = openStore(":memory:");
     const schemas = createFormSchemasRepo(db);
     schemas.save("greenhouse", "acme", "11", {}, "h");
@@ -62,7 +66,7 @@ describe("form schemas repo", () => {
     ).run();
     expect(schemas.getFresh("greenhouse", "acme", "11")).toBeNull();
     expect(schemas.getAny("greenhouse", "acme", "11")?.hash).toBe("h");
-  });
+    }));
 });
 
 describe("fill plans repo", () => {

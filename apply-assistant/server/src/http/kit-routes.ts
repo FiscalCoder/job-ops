@@ -1,3 +1,4 @@
+import { claudeOff } from "../claude/off.js";
 import { type Response, Router } from "express";
 import { z } from "zod";
 import type { QuestionAnswerer } from "../claude/answerer.js";
@@ -184,13 +185,9 @@ export function createKitRoutes(deps: KitRoutesDeps) {
         );
         return;
       }
-      if (!answerer) {
-        sendError(
-          res,
-          503,
-          "CLAUDE_OFF",
-          "Claude isn't set up on the server (no Anthropic key)",
-        );
+      const off = claudeOff(answerer);
+      if (!answerer || off) {
+        sendError(res, 503, "CLAUDE_OFF", off ?? "");
         return;
       }
       const jobId = String(req.params.jobId);

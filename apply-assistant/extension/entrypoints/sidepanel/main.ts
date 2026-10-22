@@ -14,6 +14,7 @@ import { looksSubmitted } from "../../src/track/confirm";
 import { isSupportedPosting, pagedFill } from "../../src/track/job-match";
 import { resolveTab } from "../../src/track/tabs";
 import { renderHere } from "./here-view";
+import { setUpClaudeSettings } from "./claude-settings";
 import { setUpImport } from "./import-view";
 import { showKit } from "./kit-view";
 import { confirmLimit, postedText, renderQueue } from "./queue-view";
@@ -288,6 +289,7 @@ async function showMain() {
   $("sites").hidden = await chrome.permissions.contains({
     origins: [ALL_SITES],
   });
+  void claudeSettings.refresh();
   await loadQueue();
 }
 
@@ -668,6 +670,8 @@ chrome.tabs.onUpdated.addListener((_id, change, tab) => {
   if (tab.active && (change.url || change.status === "complete"))
     void checkTab();
 });
+
+const claudeSettings = setUpClaudeSettings(() => client);
 
 setUpImport({
   client: () => client,

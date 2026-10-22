@@ -56,6 +56,8 @@ export interface QuestionAnswerer {
   ): Promise<TellAnswer>;
   /** Any company's form: steps that set one field the extension couldn't fill by itself. */
   act(request: ActRequest, onUsage?: UsageListener): Promise<ActAnswer>;
+  /** Why Claude is off for the signed-in user (no Claude key); null or absent when it's on. */
+  unavailable?(): string | null;
 }
 
 /** The one SDK call used (the real client's `messages`, or a fake in tests). */
@@ -67,6 +69,8 @@ export interface MessagesApi {
 
 export interface AnswererOptions {
   readonly messages: MessagesApi;
+  /** Why Claude is off for the signed-in user (see access.ts); absent: always on. */
+  readonly unavailable?: () => string | null;
   readonly cache: ClaudeAnswersRepo;
   readonly mapModel: string;
   readonly draftModel: string;
@@ -190,6 +194,7 @@ export function createClaudeAnswerer(
   }
 
   return {
+    unavailable: () => options.unavailable?.() ?? null,
     async act(request, onUsage = () => {}) {
       // Reading a widget's markup is harder than answering: the drafting model.
       const message = await messages.create({

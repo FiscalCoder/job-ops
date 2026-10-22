@@ -16,6 +16,7 @@ import { createApp } from "../../server/src/http/app.ts";
 import { JobOpsError } from "../../server/src/jobops/client.ts";
 import { createAnswerBankRepo } from "../../server/src/store/answer-bank-repo.ts";
 import { openStore } from "../../server/src/store/db.ts";
+import { runAsUser } from "../../server/src/store/owner.ts";
 import { fakeDesignResume } from "../../server/test/fixtures/fake-resume.ts";
 
 const extensionDir = fileURLToPath(
@@ -73,13 +74,16 @@ const jobOps = {
 
 const db = openStore(":memory:");
 const bank = createAnswerBankRepo(db);
-for (const [key, value] of [
-  ["identity.first_name", "Test"],
-  ["identity.last_name", "C"],
-  ["work.notice_period", "30"],
-  ["eeo.gender", "Decline to self-identify"],
-])
-  bank.upsert({ key, value, isProtected: false, updatedBy: "you" });
+// The signed-in test user's ("u1", see jobOps.me) saved answers.
+runAsUser("u1", () => {
+  for (const [key, value] of [
+    ["identity.first_name", "Test"],
+    ["identity.last_name", "C"],
+    ["work.notice_period", "30"],
+    ["eeo.gender", "Decline to self-identify"],
+  ])
+    bank.upsert({ key, value, isProtected: false, updatedBy: "you" });
+});
 const app = createApp({ jobOps, db, authCacheSeconds: 60 });
 
 // A careers page like the ones the kit is for: a React-style field that keeps only what
@@ -434,7 +438,7 @@ try {
     await panel.getByLabel("Question").fill("Why do you want to work here?");
     await panel.getByRole("button", { name: "Ask Claude" }).click();
     await panel
-      .getByText("Claude isn't set up on the server (no Anthropic key)")
+      .getByText("Claude isn't set up on the server")
       .waitFor();
     if (shots)
       await panel.screenshot({ path: `${shots}/kit-2.png`, fullPage: true });

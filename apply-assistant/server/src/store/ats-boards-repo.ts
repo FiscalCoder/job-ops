@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { currentUser } from "./owner.js";
 import { ATS_LIST, type Ats } from "../ats.js";
 
 /**
@@ -34,18 +35,18 @@ export const BOARD_CACHE_DAYS = 7;
 
 export function createAtsBoardsRepo(db: DatabaseSync) {
   const getStmt = db.prepare(
-    `select * from ats_boards where employer_norm = ? and checked_at >= datetime('now', ?)`,
+    `select * from ats_boards where user_id = ? and employer_norm = ? and checked_at >= datetime('now', ?)`,
   );
   const upsertStmt = db.prepare(
-    `insert into ats_boards (employer_norm, ats, token, method, searched, checked_at) values (?, ?, ?, ?, ?, datetime('now'))
-     on conflict(employer_norm) do update set ats = excluded.ats, token = excluded.token,
+    `insert into ats_boards (user_id, employer_norm, ats, token, method, searched, checked_at) values (?, ?, ?, ?, ?, ?, datetime('now'))
+     on conflict(user_id, employer_norm) do update set ats = excluded.ats, token = excluded.token,
        method = excluded.method, searched = excluded.searched, checked_at = excluded.checked_at`,
   );
 
   return {
     /** A fresh cache entry (checked within BOARD_CACHE_DAYS), or null if unknown or stale. */
     getFresh(employerKey: string): BoardCacheEntry | null {
-      const row = getStmt.get(employerKey, `-${BOARD_CACHE_DAYS} days`) as
+      const row = getStmt.get(currentUser(), employerKey, `-${BOARD_CACHE_DAYS} days`) as
         | BoardRow
         | undefined;
       if (row && !row.token && !coversAllSystems(row.searched)) return null;
@@ -65,6 +66,7 @@ export function createAtsBoardsRepo(db: DatabaseSync) {
       method: string,
     ): void {
       upsertStmt.run(
+        currentUser(),
         employerKey,
         board?.ats ?? null,
         board?.token ?? null,

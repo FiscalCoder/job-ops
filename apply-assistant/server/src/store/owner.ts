@@ -3,24 +3,41 @@ import type { DatabaseSync } from "node:sqlite";
 
 /**
  * Whose data a request reads and writes: the signed-in Job Ops user, set by the auth
- * middleware for the whole request. Each user's answer bank, remembered answers, company
- * limits, runs, traces and captured links are theirs alone.
+ * middleware for the whole request. Everything a user saves or looks up (answers, limits,
+ * runs, traces, boards, forms, Claude's answers, site steps, their Claude key) is theirs alone.
  */
 
-const owner = new AsyncLocalStorage<string>();
+interface Owner {
+  readonly id: string;
+  /** Job Ops' admin: the person who runs this server (its own Claude key is theirs). */
+  readonly isSystemAdmin: boolean;
+}
 
-export function runAsUser<T>(userId: string, work: () => T): T {
-  return owner.run(userId, work);
+const owner = new AsyncLocalStorage<Owner>();
+
+export function runAsUser<T>(
+  user: string | { readonly id: string; readonly isSystemAdmin?: boolean },
+  work: () => T,
+): T {
+  const who =
+    typeof user === "string"
+      ? { id: user, isSystemAdmin: false }
+      : { id: user.id, isSystemAdmin: user.isSystemAdmin === true };
+  return owner.run(who, work);
 }
 
 /** The signed-in user; throws outside a request, so data is never read or written unowned. */
 export function currentUser(): string {
-  const userId = owner.getStore();
-  if (!userId) throw new Error("No signed-in user for this request");
-  return userId;
+  const who = owner.getStore();
+  if (!who) throw new Error("No signed-in user for this request");
+  return who.id;
 }
 
-export const currentUserOrNull = (): string | null => owner.getStore() ?? null;
+export const currentUserOrNull = (): string | null =>
+  owner.getStore()?.id ?? null;
+
+export const currentUserIsAdmin = (): boolean =>
+  owner.getStore()?.isSystemAdmin === true;
 
 /** Tables with a user_id column; rows from before there were users have user_id ''. */
 const OWNED_TABLES = [
@@ -31,6 +48,10 @@ const OWNED_TABLES = [
   "trace_events",
   "trace_snapshots",
   "captured_links",
+  "ats_boards",
+  "form_schemas",
+  "claude_answers",
+  "site_recipes",
 ] as const;
 
 /**

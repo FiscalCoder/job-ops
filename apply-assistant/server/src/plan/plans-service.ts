@@ -4,6 +4,7 @@ import type { ClaudeAnswer } from "../claude/questions.js";
 import { isAnswerable, type Question, toQuestion } from "../claude/questions.js";
 import type { ActAnswer, ActRequest } from "../claude/act.js";
 import type { TellAnswer } from "../claude/tell.js";
+import { claudeOff } from "../claude/off.js";
 import { traceUsage } from "../claude/usage-trace.js";
 import type { JobOpsApi } from "../jobops/client.js";
 import type { AnswerBankRepo } from "../store/answer-bank-repo.js";
@@ -105,10 +106,10 @@ export function createPlans(deps: PlansDeps) {
       })
       .map(toQuestion);
     if (questions.length === 0) return {};
-    if (!answerer)
+    const off = claudeOff(answerer);
+    if (!answerer || off)
       return {
-        claudeProblem:
-          "No saved answer for this question yet (Claude isn't set up on the server)",
+        claudeProblem: `No saved answer for this question yet. ${off}`,
       };
     try {
       return {
@@ -289,7 +290,7 @@ export function createPlans(deps: PlansDeps) {
     resume: ResumeFacts,
   ): Promise<FillPlan> {
     const claude = answerer;
-    if (!claude) return plan;
+    if (!claude || claudeOff(claude)) return plan;
     const fields = new Map(schema.fields.map((f) => [f.ref, f]));
     const entries = await Promise.all(
       plan.entries.map(async (entry) => {
@@ -332,11 +333,8 @@ export function createPlans(deps: PlansDeps) {
       shown?: Omit<Question, "ref">,
     ): Promise<TellAnswer> {
       const field = shown ? { ref, ...shown } : storedQuestion(jobId, ref);
-      if (!answerer)
-        throw new NotPlannableError(
-          jobId,
-          "Claude isn't set up on the server (no Anthropic key)",
-        );
+      const off = claudeOff(answerer);
+      if (!answerer || off) throw new NotPlannableError(jobId, off ?? "");
       const [job, resume] = await Promise.all([
         jobOps.getJob(token, jobId),
         loadResume(token),
@@ -369,11 +367,8 @@ export function createPlans(deps: PlansDeps) {
      * Traced with your answer replaced by "{value}".
      */
     async act(jobId: string, request: ActRequest): Promise<ActAnswer> {
-      if (!answerer)
-        throw new NotPlannableError(
-          jobId,
-          "Claude isn't set up on the server (no Anthropic key)",
-        );
+      const off = claudeOff(answerer);
+      if (!answerer || off) throw new NotPlannableError(jobId, off ?? "");
       const answer = await answerer.act(request, traceUsage(trace, jobId));
       const masked = answer.steps.map((s) => ({
         ...s,
@@ -399,11 +394,8 @@ export function createPlans(deps: PlansDeps) {
       jobId: string,
       ask: { label: string; wanted: string; options: readonly string[] },
     ): Promise<TellAnswer> {
-      if (!answerer)
-        throw new NotPlannableError(
-          jobId,
-          "Claude isn't set up on the server (no Anthropic key)",
-        );
+      const off = claudeOff(answerer);
+      if (!answerer || off) throw new NotPlannableError(jobId, off ?? "");
       const [job, resume] = await Promise.all([
         jobOps.getJob(token, jobId),
         loadResume(token),

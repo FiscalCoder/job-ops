@@ -8,6 +8,7 @@ import type { Question, QuestionContext } from "../src/claude/questions.js";
 import { resumeFacts } from "../src/plan/resume-facts.js";
 import { createClaudeAnswersRepo } from "../src/store/claude-answers-repo.js";
 import { openStore } from "../src/store/db.js";
+import { runAsUser } from "../src/store/owner.js";
 import { fakeDesignResume } from "./fixtures/fake-resume.js";
 
 const context: QuestionContext = {
@@ -63,7 +64,8 @@ function setup(...replies: Anthropic.Message[]) {
 }
 
 describe("Claude answerer", () => {
-  it("maps all questions in one call, drafts written ones, and caches both", async () => {
+  it("maps all questions in one call, drafts written ones, and caches both", () =>
+    runAsUser("u1", async () => {
     const { create, answerer } = setup(
       mapReply([answer({}), answer({ ref: "q2", kind: "write", answer: [] })]),
       reply("I like building APIs."),
@@ -88,9 +90,10 @@ describe("Claude answerer", () => {
     const again = await answerer.answer([yesNo, why], context);
     expect(again).toEqual(first);
     expect(create).toHaveBeenCalledTimes(2);
-  });
+    }));
 
-  it("only asks about questions that aren't cached", async () => {
+  it("only asks about questions that aren't cached", () =>
+    runAsUser("u1", async () => {
     const { create, answerer } = setup(
       mapReply([answer({})]),
       mapReply([answer({ ref: "q3", answer: ["No"] })]),
@@ -102,9 +105,10 @@ describe("Claude answerer", () => {
     expect(create.mock.calls[1]?.[0].messages[0]?.content).not.toContain(
       'ref="q1"',
     );
-  });
+    }));
 
-  it("turns a refusal into 'unknown' without caching it", async () => {
+  it("turns a refusal into 'unknown' without caching it", () =>
+    runAsUser("u1", async () => {
     const { create, answerer } = setup(
       reply("", "refusal"),
       mapReply([answer({})]),
@@ -117,20 +121,22 @@ describe("Claude answerer", () => {
       kind: "answer",
     });
     expect(create).toHaveBeenCalledTimes(2);
-  });
+    }));
 
-  it("fails loudly on a cut-off or malformed reply (the plan then asks you)", async () => {
+  it("fails loudly on a cut-off or malformed reply (the plan then asks you)", () =>
+    runAsUser("u1", async () => {
     await expect(
       setup(reply("{", "max_tokens")).answerer.answer([yesNo], context),
     ).rejects.toThrow("cut off");
     await expect(
       setup(reply("nope")).answerer.answer([yesNo], context),
     ).rejects.toThrow();
-  });
+    }));
 
-  it("makes no call when there are no questions", async () => {
+  it("makes no call when there are no questions", () =>
+    runAsUser("u1", async () => {
     const { create, answerer } = setup();
     expect((await answerer.answer([], context)).size).toBe(0);
     expect(create).not.toHaveBeenCalled();
-  });
+    }));
 });

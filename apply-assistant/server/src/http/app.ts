@@ -17,7 +17,9 @@ import { createFormSchemasRepo } from "../store/form-schemas-repo.js";
 import { createCompanyLimitsRepo } from "../store/company-limits-repo.js";
 import { createSiteRecipesRepo } from "../store/site-recipes-repo.js";
 import { createLearnedAnswersRepo } from "../store/learned-answers-repo.js";
+import { createClaudeAccess } from "../claude/access.js";
 import { claimUnowned } from "../store/owner.js";
+import { createUserSettingsRepo } from "../store/user-settings-repo.js";
 import { createRunsRepo } from "../store/runs-repo.js";
 import { createTraceStore, type TraceStore } from "../store/trace-store.js";
 import { createAnswerBankRoutes } from "./answer-bank-routes.js";
@@ -27,6 +29,7 @@ import { sendError, sendOk } from "./envelope.js";
 import { createKitRoutes } from "./kit-routes.js";
 import { createCompanyRoutes } from "./company-routes.js";
 import { createImportRoutes } from "./import-routes.js";
+import { createSettingsRoutes } from "./settings-routes.js";
 import { createSiteRoutes } from "./site-routes.js";
 import { createLearnedRoutes } from "./learned-routes.js";
 import { createLookupRoutes } from "./lookup-routes.js";
@@ -48,9 +51,14 @@ export interface AppDeps {
   readonly jobOps: JobOpsApi;
   readonly db: DatabaseSync;
   readonly authCacheSeconds: number;
-  /** Claude for unrecognised questions; null or absent without an Anthropic key. */
+  /**
+   * Claude for unrecognised questions: each user's own key, or for Job Ops' admin the server's
+   * (`messages`, null without one). Absent: no Claude at all.
+   */
   readonly claude?: {
-    readonly messages: MessagesApi;
+    readonly messages: MessagesApi | null;
+    /** Claude's API with a user's own key (tests leave it out: their keys then aren't used). */
+    readonly messagesFor?: (apiKey: string) => MessagesApi;
     readonly mapModel: string;
     readonly draftModel: string;
   } | null;
@@ -119,13 +127,29 @@ export function createApp({
   const targets = createApplyTargetsRepo(db);
   const schemas = createFormSchemasRepo(db);
   const planStore = createFillPlansRepo(db);
-  const answerer = claude
-    ? createClaudeAnswerer({
-        ...claude,
-        cache: createClaudeAnswersRepo(db),
-        ...(log ? { log } : {}),
+  const userSettings = createUserSettingsRepo(db);
+  const access = claude
+    ? createClaudeAccess({
+        settings: userSettings,
+        serverMessages: claude.messages,
+        messagesFor:
+          claude.messagesFor ??
+          (() => {
+            throw new Error("Users' own Claude keys aren't set up here");
+          }),
       })
     : null;
+  const answerer =
+    claude && access
+      ? createClaudeAnswerer({
+          messages: access.messages,
+          unavailable: access.unavailable,
+          mapModel: claude.mapModel,
+          draftModel: claude.draftModel,
+          cache: createClaudeAnswersRepo(db),
+          ...(log ? { log } : {}),
+        })
+      : null;
   const learned = createLearnedAnswersRepo(db);
   const limits = createCompanyLimitsRepo(db);
   const plans = createPlans({
@@ -148,6 +172,7 @@ export function createApp({
     ownership.guard,
   );
   app.use(requireUser, createAnswerBankRoutes(answers));
+  app.use(requireUser, createSettingsRoutes({ settings: userSettings, access }));
   app.use(requireUser, createCompanyRoutes(limits));
   app.use(requireUser, createImportRoutes({ jobOps, trace: record }));
   app.use(requireUser, createPlanRoutes(plans));

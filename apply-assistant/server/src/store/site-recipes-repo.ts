@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { currentUser } from "./owner.js";
 
 /**
  * Steps that set a field on a company's own form (worked out by Claude, then checked on the
@@ -52,25 +53,25 @@ const toRecipe = (row: Row): SiteRecipe => ({
 
 export function createSiteRecipesRepo(db: DatabaseSync) {
   const worked = db.prepare(
-    `insert into site_recipes (host, label_key, label, steps_json, worked, failed)
-     values (?, ?, ?, ?, 1, 0)
-     on conflict(host, label_key) do update set label = excluded.label,
+    `insert into site_recipes (user_id, host, label_key, label, steps_json, worked, failed)
+     values (?, ?, ?, ?, ?, 1, 0)
+     on conflict(user_id, host, label_key) do update set label = excluded.label,
        steps_json = excluded.steps_json, worked = worked + 1, updated_at = datetime('now')`,
   );
   const failed = db.prepare(
     `update site_recipes set failed = failed + 1, updated_at = datetime('now')
-     where host = ? and label_key = ?`,
+     where user_id = ? and host = ? and label_key = ?`,
   );
   const byHost = db.prepare(
-    "select * from site_recipes where host = ? order by label_key",
+    "select * from site_recipes where user_id = ? and host = ? order by label_key",
   );
   const one = db.prepare(
-    "select * from site_recipes where host = ? and label_key = ?",
+    "select * from site_recipes where user_id = ? and host = ? and label_key = ?",
   );
 
   return {
     forHost(host: string): SiteRecipe[] {
-      return (byHost.all(host) as unknown as Row[]).map(toRecipe);
+      return (byHost.all(currentUser(), host) as unknown as Row[]).map(toRecipe);
     },
     /** A run's result with a recipe (or with Claude's steps, which become the recipe). */
     record(input: {
@@ -79,11 +80,12 @@ export function createSiteRecipesRepo(db: DatabaseSync) {
       steps: readonly RecipeStep[];
       ok: boolean;
     }): SiteRecipe | null {
+      const user = currentUser();
       const key = labelKey(input.label);
       if (input.ok)
-        worked.run(input.host, key, input.label, JSON.stringify(input.steps));
-      else failed.run(input.host, key);
-      const row = one.get(input.host, key) as Row | undefined;
+        worked.run(user, input.host, key, input.label, JSON.stringify(input.steps));
+      else failed.run(user, input.host, key);
+      const row = one.get(user, input.host, key) as Row | undefined;
       return row ? toRecipe(row) : null;
     },
   };

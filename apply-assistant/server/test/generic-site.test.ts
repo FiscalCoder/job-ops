@@ -92,7 +92,7 @@ const job: JobOpsJob = {
 const jobOps: JobOpsApi = {
   login: async () => ({ token: "good", expiresIn: 3600 }),
   me: async (t) => {
-    if (t === "good") return { id: "u1", username: "me" };
+    if (t === "good") return { id: "u1", username: "me", isSystemAdmin: true };
     throw new JobOpsError(401, "UNAUTHORIZED", "nope");
   },
   listJobs: async () => ({ jobs: [job], total: 1, revision: "r" }),

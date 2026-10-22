@@ -4,7 +4,7 @@ import { createAnswerBankRepo } from "../src/store/answer-bank-repo.js";
 import { createApplyTargetsRepo } from "../src/store/apply-targets-repo.js";
 import { createAtsBoardsRepo } from "../src/store/ats-boards-repo.js";
 import { MIGRATIONS, openStore } from "../src/store/db.js";
-import { runAsUser } from "../src/store/owner.js";
+import { claimUnowned, runAsUser } from "../src/store/owner.js";
 import { createFormSchemasRepo } from "../src/store/form-schemas-repo.js";
 
 const memoryStore = () => openStore(":memory:");
@@ -48,6 +48,9 @@ describe("openStore", () => {
              insert into apply_targets (job_id, gh_token, gh_job_id, match_method, status)
              values ('j1', 'acme', '11', 'direct', 'matched');`);
     openStore(db);
+    // Rows from before there were users: Job Ops' admin's (here "u1"), read as them.
+    claimUnowned(db, "u1");
+    runAsUser("u1", () => {
     expect(
       createFormSchemasRepo(db).getAny("greenhouse", "acme", "11")?.hash,
     ).toBe("h");
@@ -63,6 +66,7 @@ describe("openStore", () => {
     expect(boards.getFresh("none co")).toMatchObject({
       ats: null,
       token: null,
+    });
     });
   });
 

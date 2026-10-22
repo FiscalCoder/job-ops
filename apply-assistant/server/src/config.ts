@@ -6,11 +6,12 @@ export interface AppConfig {
   readonly dataDir: string;
   readonly authCacheSeconds: number;
   /** Null without ANTHROPIC_API_KEY: unrecognised questions then stay "needs you". */
-  readonly claude: ClaudeConfig | null;
+  readonly claude: ClaudeConfig;
 }
 
 export interface ClaudeConfig {
-  readonly apiKey: string;
+  /** The server's own key: its admin's. Others add theirs in Apply Copilot's settings. */
+  readonly apiKey: string | null;
   /** Matches form questions to your answers (cheap, fast). */
   readonly mapModel: string;
   /** Drafts written answers to open-ended questions (always for your review). */
@@ -63,12 +64,10 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
     dataDir: values.APPLY_DATA_DIR,
     authCacheSeconds:
       values.APPLY_AUTH_CACHE_SECONDS ?? DEFAULT_AUTH_CACHE_SECONDS,
-    claude: apiKey
-      ? {
-          apiKey,
-          mapModel: values.APPLY_MAP_MODEL ?? DEFAULT_MAP_MODEL,
-          draftModel: values.APPLY_DRAFT_MODEL ?? DEFAULT_DRAFT_MODEL,
-        }
-      : null,
+    claude: {
+      apiKey: apiKey || null,
+      mapModel: values.APPLY_MAP_MODEL ?? DEFAULT_MAP_MODEL,
+      draftModel: values.APPLY_DRAFT_MODEL ?? DEFAULT_DRAFT_MODEL,
+    },
   };
 }

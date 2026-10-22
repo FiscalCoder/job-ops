@@ -69,6 +69,16 @@
       </div>
 
       <div id="plan" class="card" hidden></div>
+
+      <details class="card">
+        <summary><strong>Your Claude key</strong></summary>
+        <p id="claude-status" class="muted"></p>
+        <form id="claude-form" class="row">
+          <input id="claude-key" type="password" autocomplete="off" placeholder="sk-ant-…" aria-label="Your Anthropic API key" />
+          <button type="submit">Save</button>
+        </form>
+        <button type="button" id="claude-remove" class="link" hidden>Remove my key</button>
+      </details>
     </section>
 
     <script type="module" src="./main.ts"></script>

@@ -12,7 +12,12 @@ describe("loadConfig", () => {
       jobOpsBaseUrl: "http://job-ops:3001",
       dataDir: "/data",
       authCacheSeconds: 60,
-      claude: null,
+      // No server key: each user adds their own in Apply Copilot's settings.
+      claude: {
+        apiKey: null,
+        mapModel: "claude-haiku-5-5",
+        draftModel: "claude-sonnet-5-5",
+      },
     });
   });
 
@@ -35,7 +40,7 @@ describe("loadConfig", () => {
       APPLY_DATA_DIR: "/data",
       ANTHROPIC_API_KEY: "  ",
     });
-    expect(config.claude).toBeNull();
+    expect(config.claude.apiKey).toBeNull();
   });
 
   it("strips a trailing slash from the Job Ops URL", () => {
