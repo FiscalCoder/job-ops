@@ -75,6 +75,12 @@ const UPLOAD_WAIT_MS = 15_000;
 const MAX_OPTIONS = 500;
 /** How long a new page gets to replace the last one's fields (Workday swaps them in place). */
 const NEW_PAGE_WAIT_MS = 10_000;
+/**
+ * An open list's choices. Not the tags a search field keeps what you picked as: Workday marks
+ * those up as a listbox of options too ("selectedItemList").
+ */
+const OPEN_OPTIONS =
+  "[role='listbox']:not([data-automation-id='selectedItemList']) [role='option']";
 /** Workday's placeholder choice in every dropdown. */
 const PLACEHOLDER = /^select one$/i;
 
@@ -349,7 +355,7 @@ export class WorkdayDriver extends TrustedDriver {
       const handles: ElementHandle[] = [];
       const labels: string[] = [];
       for (const option of await this.frame.$$(
-        "[role='listbox'] [role='option']",
+        OPEN_OPTIONS,
       )) {
         const label = await option.evaluate((el) =>
           (el as HTMLElement).offsetParent === null
@@ -472,13 +478,15 @@ export class WorkdayDriver extends TrustedDriver {
         `:is(${boxOf(ref)}) [data-automation-id='multiSelectContainer'] input`,
       );
       if (!input) return { ok: false, reason: "Search box not found" };
-      await input.click();
+      await this.focusAndClear(input);
       await this.page.keyboard.sendCharacter(item.slice(0, 60));
       await this.page.keyboard.press("Enter");
       let chosen = await this.pickOpen(item);
       if (chosen && !selectionMatches(await this.readBackRef(ref), chosen))
         chosen = (await this.pickOpen(item)) ?? chosen;
       await this.page.keyboard.press("Escape");
+      // Nothing found: don't leave the text for the next search to be typed onto.
+      if (!chosen) await this.focusAndClear(input);
       if (chosen) picked.push(chosen);
     }
     const shown = await this.readBackRef(ref);
@@ -494,6 +502,18 @@ export class WorkdayDriver extends TrustedDriver {
       ok: true,
       result: `picked "${shown}"${notFound ? ` (${notFound} not in Workday's list)` : ""}`,
     };
+  }
+
+  /** Puts the cursor in a search box (the click can land on its frame) and empties it. */
+  private async focusAndClear(input: ElementHandle): Promise<void> {
+    await input.click().catch(() => undefined);
+    await input.evaluate((el) => {
+      if (document.activeElement !== el) (el as HTMLElement).focus();
+    });
+    await this.page.keyboard.down("Control");
+    await this.page.keyboard.press("a");
+    await this.page.keyboard.up("Control");
+    await this.page.keyboard.press("Backspace");
   }
 
   /** Types a date into its spin buttons: "09/2025" (month and year) or "2019" (year only). */

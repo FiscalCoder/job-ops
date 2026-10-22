@@ -190,6 +190,26 @@ describe("Workday page plans", () => {
     expect(of("resumeAttachments--attachments")?.source).toBe("jobops:tailored-pdf");
   });
 
+  it("Walmart's education entry: school typed, degree in Workday's own words", () => {
+    const plan = planOf({
+      step: "My Experience",
+      fields: [
+        { ...field("schoolName", "School or University", "text", { required: true }), ref: "education-74--schoolName" },
+        {
+          ...field("degree", "Degree", "dropdown", {
+            required: true,
+            options: ["Certificate", "High School", "Associates", "Bachelors", "Masters"],
+          }),
+          ref: "education-74--degree",
+        },
+      ],
+    });
+    expect(plan.entries.map((e) => [e.status, e.value])).toEqual([
+      ["fill", "Some Institute of Technology"],
+      ["fill", "Bachelors"],
+    ]);
+  });
+
   it("My Experience without entries: Add one per job and degree on your resume", () => {
     const page: WorkdayPage = {
       step: "My Experience",

@@ -26,11 +26,13 @@ const WIZARD = String.raw`<!doctype html><html><head><title>Acme Careers</title>
 <footer data-automation-id="pageFooter"><button data-automation-id="pageFooterNextButton" id="next">Save and Continue</button></footer></div>
 <script>
 const $ = (s, r = document) => r.querySelector(s);
-const closeLists = () => document.querySelectorAll("[role=listbox]").forEach((l) => l.remove());
+// Only the pop-up lists: a search field's picked tags are a listbox too.
+const closeLists = () => document.querySelectorAll("[role=listbox][data-popup]").forEach((l) => l.remove());
 function openList(anchor, labels, onPick) {
   closeLists();
   const list = document.createElement("ul");
   list.setAttribute("role", "listbox");
+  list.setAttribute("data-popup", "");
   const r = anchor.getBoundingClientRect();
   list.style.left = r.left + scrollX + "px";
   list.style.top = r.bottom + scrollY + "px";
@@ -47,7 +49,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeLists
 window.opened = [];
 const myInformation = '<h2>My Information</h2>' +
   '<div class="field" data-automation-id="formField-source" data-fkit-id="source--source"><label><span>How Did You Hear About Us?<abbr>*</abbr></span></label>' +
-  '<div data-automation-id="multiSelectContainer"><ul data-automation-id="selectedItemList"></ul><div data-automation-id="multiselectInputContainer"><input id="source--source" placeholder="Search"></div></div></div>' +
+  '<div data-automation-id="multiSelectContainer"><ul role="listbox" data-automation-id="selectedItemList"></ul><div data-automation-id="multiselectInputContainer"><input id="source--source" placeholder="Search"></div></div></div>' +
   '<fieldset class="field" data-automation-id="formField-candidateIsPreviousWorker" data-fkit-id="previousWorker--candidateIsPreviousWorker"><legend><label><span>Have you worked for Acme?<abbr>*</abbr></span></label></legend>' +
   '<input id="pw1" name="pw" type="radio" value="true"><label for="pw1">Yes</label><input id="pw2" name="pw" type="radio" value="false"><label for="pw2">No</label></fieldset>' +
   '<div class="field" data-automation-id="formField-country" data-fkit-id="country--country"><label for="country--country"><span>Country<abbr>*</abbr></span></label>' +
@@ -64,7 +66,7 @@ const myExperience = '<h2>My Experience</h2>' +
   '<div role="group" aria-labelledby="Education-section"><h4 id="Education-section">Education</h4><div id="ed-list"></div><button type="button" data-automation-id="add-button" id="ed-add">Add</button></div>' +
   '<div role="group" aria-labelledby="Skills-section"><h4 id="Skills-section">Skills</h4>' +
   '<div class="field" data-automation-id="formField-skills" data-fkit-id="skills--skills"><label for="skills--skills">Type to Add Skills</label>' +
-  '<div data-automation-id="multiSelectContainer"><ul data-automation-id="selectedItemList"></ul><input id="skills--skills" placeholder="Search"></div></div></div>' +
+  '<div data-automation-id="multiSelectContainer"><ul role="listbox" data-automation-id="selectedItemList"></ul><input id="skills--skills" placeholder="Search"></div></div></div>' +
   '<div class="field" data-automation-id="formField-" data-fkit-id="resumeAttachments--attachments"><label><span>Upload a file (5MB max)<abbr>*</abbr></span></label>' +
   '<div data-automation-id="file-upload-drop-zone"><button type="button" data-automation-id="select-files" id="resumeAttachments--attachments">Select files</button>' +
   '<input data-automation-id="file-upload-input-ref" type="file" style="display:none"></div><div id="uploaded"></div></div>';
@@ -78,7 +80,7 @@ const date = (id, key, label) =>
   '<div data-automation-id="dateInputWrapper"><div data-automation-id="dateSectionMonth-display">MM</div><input role="spinbutton" style="width:0;height:0;padding:0;border:0" data-automation-id="dateSectionMonth-input">/' +
   '<div data-automation-id="dateSectionYear-display">YYYY</div><input role="spinbutton" style="width:0;height:0;padding:0;border:0" data-automation-id="dateSectionYear-input"></div></fieldset></div>';
 const search = (id, key, label) => field(id, key, label + '<abbr>*</abbr>',
-  '<div data-automation-id="multiSelectContainer"><ul data-automation-id="selectedItemList"></ul><input id="' + id + '--' + key + '" placeholder="Search"></div>');
+  '<div data-automation-id="multiSelectContainer"><ul role="listbox" data-automation-id="selectedItemList"></ul><input id="' + id + '--' + key + '" placeholder="Search"></div>');
 let nextId = 200;
 function addJob() {
   const n = $("#we-list").children.length + 1, id = "workExperience-" + nextId++;
@@ -91,13 +93,14 @@ function addJob() {
 function addDegree() {
   const n = $("#ed-list").children.length + 1, id = "education-" + nextId++;
   $("#ed-list").insertAdjacentHTML("beforeend", '<div role="group" aria-labelledby="Education-' + n + '-panel"><h5 id="Education-' + n + '-panel">Education ' + n + '</h5>' +
-    search(id, "school", "School or University") +
+    search(id, "school", "School or University") + search(id, "fieldOfStudy", "Field of Study") +
     field(id, "degree", "Degree<abbr>*</abbr>", '<button aria-haspopup="listbox" type="button" id="' + id + '--degree">Select One</button><input type="text" hidden>') + '</div>');
 }
 // What each search field finds (by the end of its id).
 const RESULTS = {
   source: ["LinkedIn", "LinkedIn Learning", "Indeed", "Referral"],
   school: ["Some Institute of Technology", "Some School"],
+  fieldOfStudy: ["Computer Science", "Computer Engineering"],
   skills: ["React", "React Native", "TypeScript"],
 };
 document.addEventListener("input", (e) => {
@@ -119,6 +122,8 @@ document.addEventListener("keydown", (e) => {
   const results = RESULTS[input.id.split("--").pop()].filter((r) => r.toLowerCase().includes(typed));
   openList(input, results, (label) => {
     const pill = document.createElement("li");
+    // As on Workday, a picked tag is an option of a listbox ("selectedItemList").
+    pill.setAttribute("role", "option");
     pill.setAttribute("data-automation-id", "selectedItem");
     pill.textContent = label;
     input.closest("[data-automation-id=multiSelectContainer]").querySelector("[data-automation-id=selectedItemList]").append(pill);
@@ -178,7 +183,7 @@ const JOBS = [
   { jobTitle: "Senior Engineer", companyName: "Acme", currentlyWorkHere: "I currently work here", startDate: "09/2023", roleDescription: "Built the platform." },
   { jobTitle: "Engineer", companyName: "Beta", startDate: "01/2020", endDate: "08/2023", roleDescription: "Built features." },
 ];
-const DEGREES = [{ school: "Some Institute of Technology", degree: "Bachelor's Degree" }];
+const DEGREES = [{ school: "Some Institute of Technology", fieldOfStudy: "Computer Science", degree: "Bachelor's Degree" }];
 /** The stub's answer for one field (the server maps entries the same way). */
 function valueFor(field, order) {
   const entry = /^(workExperience|education)-(\d+)--/.exec(field.ref);
@@ -187,8 +192,9 @@ function valueFor(field, order) {
     const index = order.filter((o) => o.startsWith(entry[1])).indexOf(entry[0]);
     return list[index]?.[field.key] ?? null;
   }
-  // Kafka isn't in Workday's list: the skills the list has are enough.
-  if (field.key === "skills") return ["React", "TypeScript", "Kafka"];
+  // Kafka isn't in Workday's list: the skills the list has are enough, and its text mustn't be
+  // left for the next one to be typed onto.
+  if (field.key === "skills") return ["React", "Kafka", "TypeScript"];
   return VALUES[field.key] ?? null;
 }
 
@@ -302,6 +308,7 @@ const context = await chromium.launchPersistentContext(profile, {
   ],
 });
 const failures = [];
+let shownOnFailure = null;
 const check = (name, pass, detail = "") => {
   console.log(`${pass ? "PASS" : "FAIL"} ${name}${detail ? `: ${detail}` : ""}`);
   if (!pass) failures.push(name);
@@ -327,6 +334,7 @@ try {
     }),
   );
   const panel = await context.newPage();
+  shownOnFailure = () => panel.locator("body").innerText();
   const errors = [];
   panel.on("pageerror", (e) => errors.push(e.message));
   await panel.goto(
@@ -376,7 +384,7 @@ try {
     worked: document.querySelector("#pw2")?.checked,
     name: document.querySelector("#name--legalName--firstName")?.value,
     terms: document.querySelector("#terms")?.checked,
-    listsOpen: document.querySelectorAll("[role=listbox]").length,
+    listsOpen: document.querySelectorAll("[role=listbox][data-popup]").length,
   }));
   check("dropdown filled", shown.country === "India", shown.country);
   check("search picked once", shown.source === "LinkedIn", shown.source);
@@ -428,6 +436,7 @@ try {
     return {
       jobs,
       school: pills("#ed-list [data-fkit-id$='--school']"),
+      study: pills("#ed-list [data-fkit-id$='--fieldOfStudy']"),
       degree: document.querySelector("#ed-list [id$='--degree']")?.textContent,
       skills: pills("[data-fkit-id='skills--skills']"),
       uploaded: window.uploaded,
@@ -445,8 +454,9 @@ try {
   check(
     "an education entry added and filled",
     experience.school === "Some Institute of Technology" &&
+      experience.study === "Computer Science" &&
       experience.degree === "Bachelor's Degree",
-    `${experience.school} / ${experience.degree}`,
+    `${experience.school} / ${experience.study} / ${experience.degree}`,
   );
   check(
     "skills added one by one (those Workday has)",
@@ -478,11 +488,14 @@ try {
     runCalls.join(" | "),
   );
   const steps = runCalls.filter((c) => c.includes("/actions")).length;
-  check("every filled step logged", steps === 19, `${steps} logged`);
+  check("every filled step logged", steps === 20, `${steps} logged`);
   check("no side panel errors", errors.length === 0, errors.join(" | "));
 } catch (error) {
   failures.push(String(error));
   console.log(`FAIL ${error instanceof Error ? error.message : error}`);
+  // What the side panel showed: usually says which step stopped and why.
+  const shown = (await shownOnFailure?.().catch(() => "")) ?? "";
+  console.log(`Side panel: ${shown.replace(/\s*\n\s*/g, " / ")}`);
 } finally {
   await context.close();
   rmSync(profile, { recursive: true, force: true });

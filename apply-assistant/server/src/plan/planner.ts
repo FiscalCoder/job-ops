@@ -90,6 +90,15 @@ const DEGREE_LABEL: Record<DegreeLevel, string> = {
   doctorate: "Doctorate",
 };
 
+/** Other ways forms name each level (Walmart's Workday: "Bachelors", "Masters"). */
+const DEGREE_WORDS: Record<DegreeLevel, readonly string[]> = {
+  high_school: ["High School", "Secondary School"],
+  associate: ["Associates", "Associate"],
+  bachelor: ["Bachelors", "Bachelor", "Undergraduate"],
+  master: ["Masters", "Master", "Postgraduate"],
+  doctorate: ["Doctorate", "PhD", "Doctoral"],
+};
+
 const AFFIRMATIVE =
   /^(yes|i agree|agree|i confirm|confirm|i acknowledge|acknowledge|i accept|accept|i understand|i certify|i have read)/i;
 
@@ -314,11 +323,17 @@ function resolveHistory(
   const degree = resume.education[rule.index];
   if (!degree) return "skip";
   switch (rule.part) {
+    // A search on some sites ("school"), a text box on others (Walmart's "schoolName").
     case "school":
+    case "schoolName":
       return answer(degree.school);
     case "degree":
       return degree.level
-        ? { value: DEGREE_LABEL[degree.level], alternatives: [degree.degree], source }
+        ? {
+            value: DEGREE_LABEL[degree.level],
+            alternatives: [...DEGREE_WORDS[degree.level], degree.degree],
+            source,
+          }
         : answer(degree.degree);
     case "fieldOfStudy":
       return answer(degree.area);
