@@ -133,6 +133,7 @@ async function startFill(
                   }
                 : {}),
             }),
+          () => activeRun?.refillPage(),
         ),
     };
     activeRun =

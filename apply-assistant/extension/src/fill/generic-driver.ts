@@ -290,8 +290,33 @@ export class GenericDriver extends TrustedDriver {
     return this.frame.evaluate(genericStep).catch(() => "");
   }
 
-  readPage(): Promise<GenericPage> {
-    return this.frame.evaluate(readGenericPage);
+  /** The fields of the page last read, to notice when the site swaps them for the next part. */
+  private lastRefs: readonly string[] = [];
+
+  async readPage(): Promise<GenericPage> {
+    const page = await this.frame.evaluate(readGenericPage);
+    this.lastRefs = page.fields.map((f) => f.ref);
+    return page;
+  }
+
+  /**
+   * Most of the fields last read are gone or hidden: the form moved on in place (Next on a
+   * one-address form, the address and heading unchanged). A field or two appearing doesn't count.
+   */
+  async swapped(): Promise<boolean> {
+    if (!this.lastRefs.length) return false;
+    const gone = await this.frame
+      .evaluate(
+        (refs) =>
+          refs.filter((ref) => {
+            const el = document.querySelector(ref);
+            // Styled inputs are often hidden themselves: their wrapper shows.
+            return !el || !(el.parentElement ?? el).checkVisibility({ visibilityProperty: true });
+          }).length,
+        this.lastRefs,
+      )
+      .catch(() => 0);
+    return gone * 2 > this.lastRefs.length;
   }
 
   /** Workday's Add buttons; nothing to add on a company's own page. */

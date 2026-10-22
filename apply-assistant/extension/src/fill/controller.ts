@@ -579,8 +579,23 @@ export class RunController {
 
   /** Workday moved to another page: the step you're on now, when it changed. */
   private async movedTo(): Promise<string | null> {
-    const step = (await this.wizard?.step()) ?? "";
-    return step && step !== this.pageStep ? step : null;
+    const wizard = this.wizard;
+    const step = (await wizard?.step()) ?? "";
+    if (step && step !== this.pageStep) return step;
+    // Some sites swap in the next part in place, with the same address and heading.
+    if (wizard instanceof GenericDriver && (await wizard.swapped()))
+      return step || this.pageStep || "this page";
+    return null;
+  }
+
+  /** "Fill this page": read the page on screen again and fill it (when it moved unnoticed). */
+  refillPage(): void {
+    const wizard = this.wizard;
+    if (!wizard || this.busy || this.closed || this.tabClosed) return;
+    this.clearTimer();
+    this.trace.event("decision", "You asked to fill the page on screen");
+    void (async () =>
+      this.nextPage((await wizard.step()) || this.pageStep || "this page"))();
   }
 
   /** While a step waits for you on Workday: you may have filled the rest and moved on. */

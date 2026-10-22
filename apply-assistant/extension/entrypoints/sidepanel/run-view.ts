@@ -249,6 +249,8 @@ export function renderRun(
   send: Send,
   onClose: () => void,
   tell?: Tell,
+  /** Page by page: read the page on screen again and fill it. */
+  refill?: () => void,
 ): void {
   const { state, action } = view;
   const finished = state.steps.filter((s) => STATE_LABEL[s.state]);
@@ -264,6 +266,9 @@ export function renderRun(
           state.paused
             ? button("Resume", () => send({ type: "resume" }))
             : button("Pause", () => send({ type: "pause" })),
+          view.page && refill && !view.busy
+            ? button("Fill this page", refill, true)
+            : null,
           button("Abort", () => send({ type: "abort" })),
         ),
   );
