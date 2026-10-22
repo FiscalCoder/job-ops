@@ -11,6 +11,7 @@ import {
 import { buildPlan } from "../src/plan/planner.js";
 import { resumeFacts } from "../src/plan/resume-facts.js";
 import {
+  entriesToAdd,
   parseWorkdayPage,
   type WorkdayPage,
 } from "../src/plan/workday-schema.js";
@@ -126,26 +127,83 @@ describe("Workday page plans", () => {
     expect(entry(plan, "addressLine1")?.status).toBe("skip");
   });
 
-  it("My Experience: work history, dates and skills are Workday's (from your resume)", () => {
+  it("My Experience: each job and degree entry from your resume, in order, plus skills", () => {
+    const at = (entry: string, key: string, label: string, kind: Field["kind"], more: Partial<Field> = {}) => ({
+      ...field(key, label, kind, more),
+      ref: `${entry}--${key}`,
+    });
+    const job = (n: number) => [
+      at(`workExperience-${n}`, "jobTitle", "Job Title", "text", { required: true }),
+      at(`workExperience-${n}`, "companyName", "Company", "text", { required: true }),
+      at(`workExperience-${n}`, "location", "Location", "text"),
+      at(`workExperience-${n}`, "currentlyWorkHere", "I currently work here", "checkbox", {
+        options: ["I currently work here"],
+      }),
+      at(`workExperience-${n}`, "startDate", "From", "date", { required: true }),
+      at(`workExperience-${n}`, "endDate", "To", "date", { required: true }),
+      at(`workExperience-${n}`, "roleDescription", "Role Description", "textarea"),
+    ];
     const plan = planOf({
       step: "My Experience",
       fields: [
-        {
-          ...field("jobTitle", "Job Title", "text", { required: true }),
-          ref: "workExperience-192--jobTitle",
-        },
-        field("skills", "Type to Add Skills", "search"),
-        field("startDate", "From", "date"),
-        field("", "Upload a file (5MB max)", "file"),
+        ...job(129),
+        ...job(130),
+        // A third entry: your resume has two (visible) jobs, so it's yours.
+        ...job(131).slice(0, 1),
+        at("education-153", "school", "School or University", "search", { required: true }),
+        at("education-153", "degree", "Degree", "dropdown", {
+          required: true,
+          options: ["Diploma", "Bachelor's Degree", "Master's Degree"],
+        }),
+        at("education-153", "fieldOfStudy", "Field of Study", "search"),
+        at("education-153", "lastYearAttended", "To (Actual or Expected)", "date"),
+        at("education-153", "gradeAverage", "Overall Result (GPA)", "text"),
+        at("skills", "skills", "Type to Add Skills", "search"),
+        at("socialNetworkAccounts", "linkedInAccount", "LinkedIn", "text"),
+        at("resumeAttachments", "attachments", "Upload a file (5MB max)", "file"),
       ],
     });
-    expect(plan.entries.map((e) => e.status)).toEqual([
-      "skip",
-      "skip",
-      "skip",
-      "fill",
+    const of = (ref: string) => plan.entries.find((e) => e.ref === ref);
+    // Most recent job first: Acme (current), then Beta.
+    expect(of("workExperience-129--jobTitle")).toMatchObject({ status: "fill", value: "Senior Engineer" });
+    expect(of("workExperience-129--companyName")?.value).toBe("Acme");
+    expect(of("workExperience-129--currentlyWorkHere")).toMatchObject({
+      status: "fill",
+      value: "I currently work here",
+    });
+    expect(of("workExperience-129--startDate")?.value).toBe("09/2023");
+    expect(of("workExperience-129--endDate")?.status).toBe("skip");
+    expect(of("workExperience-130--companyName")?.value).toBe("Beta");
+    expect(of("workExperience-130--currentlyWorkHere")?.status).toBe("skip");
+    expect(of("workExperience-130--startDate")?.value).toBe("01/2020");
+    expect(of("workExperience-130--endDate")?.value).toBe("08/2023");
+    expect(of("workExperience-131--jobTitle")?.status).toBe("skip");
+    // Highest degree first.
+    expect(of("education-153--school")?.value).toBe("Some Institute of Technology");
+    expect(of("education-153--degree")).toMatchObject({ status: "fill", value: "Bachelor's Degree" });
+    expect(of("education-153--fieldOfStudy")?.value).toBe("Computer Science");
+    expect(of("education-153--lastYearAttended")?.value).toBe("2019");
+    expect(of("education-153--gradeAverage")?.status).toBe("skip");
+    // Visible skills only, searched one by one.
+    expect(of("skills--skills")).toMatchObject({ status: "fill", value: ["React", "TypeScript"] });
+    expect(of("socialNetworkAccounts--linkedInAccount")?.source).toBe("resume:linkedin");
+    expect(of("resumeAttachments--attachments")?.source).toBe("jobops:tailored-pdf");
+  });
+
+  it("My Experience without entries: Add one per job and degree on your resume", () => {
+    const page: WorkdayPage = {
+      step: "My Experience",
+      fields: [],
+      sections: [
+        { id: "Work-Experience-section", label: "Work Experience", entries: 0 },
+        { id: "Education-section", label: "Education", entries: 1 },
+        { id: "Certifications-section", label: "Certifications", entries: 0 },
+      ],
+    };
+    expect(entriesToAdd(page, resumeFacts(fakeDesignResume))).toEqual([
+      { section: "Work-Experience-section", count: 2 },
+      { section: "Education-section", count: 1 },
     ]);
-    expect(plan.entries[3]?.source).toBe("jobops:tailored-pdf");
   });
 
   it("Voluntary Disclosures: the terms checkbox is consent; gender declines without an answer", () => {

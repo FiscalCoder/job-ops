@@ -56,13 +56,72 @@ const myInformation = '<h2>My Information</h2>' +
   '<input id="name--legalName--firstName" aria-required="true"></div>' +
   '<div class="field" data-automation-id="formField-acceptTermsAndAgreements" data-fkit-id="termsAndConditions--acceptTermsAndAgreements"><label for="terms">I consent to the terms<abbr>*</abbr></label>' +
   '<input type="checkbox" id="terms"></div>';
-// My Experience's own Resume/CV upload (its container's data-automation-id is just "formField-"),
-// as on Guidehouse; Workday shows "Successfully Uploaded!" once a file is attached.
+// My Experience as on Walmart (Apply Manually): Work Experience and Education start empty with
+// an Add button, Skills is a search, and the Resume/CV upload is a field of its own (its
+// container's data-automation-id is just "formField-"); "Successfully Uploaded!" once attached.
 const myExperience = '<h2>My Experience</h2>' +
-  '<div class="field" data-automation-id="formField-jobTitle" data-fkit-id="workExperience-1--jobTitle"><label><span>Job Title<abbr>*</abbr></span></label><input id="workExperience-1--jobTitle"></div>' +
+  '<div role="group" aria-labelledby="Work-Experience-section"><h4 id="Work-Experience-section">Work Experience</h4><div id="we-list"></div><button type="button" data-automation-id="add-button" id="we-add">Add</button></div>' +
+  '<div role="group" aria-labelledby="Education-section"><h4 id="Education-section">Education</h4><div id="ed-list"></div><button type="button" data-automation-id="add-button" id="ed-add">Add</button></div>' +
+  '<div role="group" aria-labelledby="Skills-section"><h4 id="Skills-section">Skills</h4>' +
+  '<div class="field" data-automation-id="formField-skills" data-fkit-id="skills--skills"><label for="skills--skills">Type to Add Skills</label>' +
+  '<div data-automation-id="multiSelectContainer"><ul data-automation-id="selectedItemList"></ul><input id="skills--skills" placeholder="Search"></div></div></div>' +
   '<div class="field" data-automation-id="formField-" data-fkit-id="resumeAttachments--attachments"><label><span>Upload a file (5MB max)<abbr>*</abbr></span></label>' +
   '<div data-automation-id="file-upload-drop-zone"><button type="button" data-automation-id="select-files" id="resumeAttachments--attachments">Select files</button>' +
   '<input data-automation-id="file-upload-input-ref" type="file" style="display:none"></div><div id="uploaded"></div></div>';
+const field = (id, key, label, control) =>
+  '<div class="field" data-automation-id="formField-' + key + '" data-fkit-id="' + id + '--' + key + '"><label for="' + id + '--' + key + '"><span>' + label + '</span></label>' + control + '</div>';
+const text = (id, key, label) => field(id, key, label + '<abbr>*</abbr>', '<input id="' + id + '--' + key + '">');
+// A date: month and year spin buttons, each showing what was typed.
+const date = (id, key, label) =>
+  '<div class="field" data-automation-id="formField-' + key + '" data-fkit-id="' + id + '--' + key + '"><fieldset><legend><label>' + label + '<abbr>*</abbr></label></legend>' +
+  '<div data-automation-id="dateInputWrapper"><div data-automation-id="dateSectionMonth-display">MM</div><input role="spinbutton" data-automation-id="dateSectionMonth-input">/' +
+  '<div data-automation-id="dateSectionYear-display">YYYY</div><input role="spinbutton" data-automation-id="dateSectionYear-input"></div></fieldset></div>';
+const search = (id, key, label) => field(id, key, label + '<abbr>*</abbr>',
+  '<div data-automation-id="multiSelectContainer"><ul data-automation-id="selectedItemList"></ul><input id="' + id + '--' + key + '" placeholder="Search"></div>');
+let nextId = 200;
+function addJob() {
+  const n = $("#we-list").children.length + 1, id = "workExperience-" + nextId++;
+  $("#we-list").insertAdjacentHTML("beforeend", '<div role="group" aria-labelledby="Work-Experience-' + n + '-panel"><h5 id="Work-Experience-' + n + '-panel">Work Experience ' + n + '</h5>' +
+    text(id, "jobTitle", "Job Title") + text(id, "companyName", "Company") +
+    field(id, "currentlyWorkHere", "I currently work here", '<input type="checkbox" id="' + id + '--currentlyWorkHere">') +
+    date(id, "startDate", "From") + date(id, "endDate", "To") +
+    field(id, "roleDescription", "Role Description<abbr>*</abbr>", '<textarea id="' + id + '--roleDescription"></textarea>') + '</div>');
+}
+function addDegree() {
+  const n = $("#ed-list").children.length + 1, id = "education-" + nextId++;
+  $("#ed-list").insertAdjacentHTML("beforeend", '<div role="group" aria-labelledby="Education-' + n + '-panel"><h5 id="Education-' + n + '-panel">Education ' + n + '</h5>' +
+    search(id, "school", "School or University") +
+    field(id, "degree", "Degree<abbr>*</abbr>", '<button aria-haspopup="listbox" type="button" id="' + id + '--degree">Select One</button><input type="text" hidden>') + '</div>');
+}
+// What each search field finds (by the end of its id).
+const RESULTS = {
+  source: ["LinkedIn", "LinkedIn Learning", "Indeed", "Referral"],
+  school: ["Some Institute of Technology", "Some School"],
+  skills: ["React", "React Native", "TypeScript"],
+};
+document.addEventListener("input", (e) => {
+  const display = e.target.previousElementSibling;
+  if (e.target.getAttribute("role") === "spinbutton" && display) display.textContent = e.target.value;
+});
+document.addEventListener("click", (e) => {
+  if (e.target.id === "we-add") addJob();
+  if (e.target.id === "ed-add") addDegree();
+  const degree = e.target.closest("[id$='--degree']");
+  if (degree) openList(degree, ["Select One", "Diploma", "Bachelor's Degree"], (label) => { degree.textContent = label; });
+});
+document.addEventListener("keydown", (e) => {
+  const input = e.target;
+  if (e.key !== "Enter" || !input.closest?.("[data-automation-id=multiSelectContainer]")) return;
+  const typed = input.value.toLowerCase();
+  const results = RESULTS[input.id.split("--").pop()].filter((r) => r.toLowerCase().includes(typed));
+  openList(input, results, (label) => {
+    const pill = document.createElement("li");
+    pill.setAttribute("data-automation-id", "selectedItem");
+    pill.textContent = label;
+    input.closest("[data-automation-id=multiSelectContainer]").querySelector("[data-automation-id=selectedItemList]").append(pill);
+    input.value = "";
+  });
+});
 const review = '<h2>Review</h2><p>Check your application.</p><button id="submit">Submit</button>';
 const STEPS = ["My Information", "My Experience", "Review"];
 const PAGES = { "My Information": () => myInformation, "My Experience": () => myExperience, Review: () => review };
@@ -95,19 +154,6 @@ function fill(step) {
     const others = Array.from({ length: 248 }, (_, i) => "Country " + i);
     openList(country, ["Select One", "India", "United States of America", ...others], (label) => { country.textContent = label; });
   });
-  const search = $("#source--source");
-  search.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
-    const typed = search.value.toLowerCase();
-    const results = ["LinkedIn", "LinkedIn Learning", "Indeed", "Referral"].filter((r) => r.toLowerCase().includes(typed));
-    openList(search, results, (label) => {
-      const pill = document.createElement("li");
-      pill.setAttribute("data-automation-id", "selectedItem");
-      pill.textContent = label;
-      $("[data-automation-id=selectedItemList]").append(pill);
-      search.value = "";
-    });
-  });
 }
 $("#next").addEventListener("click", () => {
   const at = STEPS.indexOf($("#step").textContent.replace(/^current step \d+ of \d+ /, ""));
@@ -123,6 +169,25 @@ const VALUES = {
   "legalName--firstName": "Testy",
   acceptTermsAndAgreements: "I consent to the terms",
 };
+
+// My Experience, from the resume: the n-th entry on the page gets the n-th job / degree.
+const JOBS = [
+  { jobTitle: "Senior Engineer", companyName: "Acme", currentlyWorkHere: "I currently work here", startDate: "09/2023", roleDescription: "Built the platform." },
+  { jobTitle: "Engineer", companyName: "Beta", startDate: "01/2020", endDate: "08/2023", roleDescription: "Built features." },
+];
+const DEGREES = [{ school: "Some Institute of Technology", degree: "Bachelor's Degree" }];
+/** The stub's answer for one field (the server maps entries the same way). */
+function valueFor(field, order) {
+  const entry = /^(workExperience|education)-(\d+)--/.exec(field.ref);
+  if (entry) {
+    const list = entry[1] === "workExperience" ? JOBS : DEGREES;
+    const index = order.filter((o) => o.startsWith(entry[1])).indexOf(entry[0]);
+    return list[index]?.[field.key] ?? null;
+  }
+  // Kafka isn't in Workday's list: the skills the list has are enough.
+  if (field.key === "skills") return ["React", "TypeScript", "Kafka"];
+  return VALUES[field.key] ?? null;
+}
 
 const posted = [];
 const runCalls = [];
@@ -157,10 +222,22 @@ function stubServer(route, url) {
   if (url.pathname === "/plans/stub/page") {
     const page = req.postDataJSON();
     posted.push(page);
+    const order = [
+      ...new Set(
+        page.fields
+          .map((f) => /^(workExperience|education)-\d+--/.exec(f.ref)?.[0])
+          .filter(Boolean),
+      ),
+    ];
+    const add = (page.sections ?? []).flatMap((s) => {
+      const wanted = { "Work-Experience-section": JOBS.length, "Education-section": DEGREES.length }[s.id] ?? 0;
+      return wanted > s.entries ? [{ section: s.id, count: wanted - s.entries }] : [];
+    });
     return ok(route, {
       schemaHash: "x",
       jobCountry: null,
       summary: {},
+      add,
       entries: page.fields.map((f) =>
         f.kind === "file"
           ? {
@@ -179,17 +256,29 @@ function stubServer(route, url) {
               ref: f.ref,
               label: f.label,
               section: "main",
-              type: f.kind === "text" ? "text" : "select",
+              type: f.key === "skills" ? "multiselect" : ["text", "date", "textarea"].includes(f.kind) ? "text" : "select",
               required: f.required,
               actionClass: "auto",
-              status: VALUES[f.key] ? "fill" : "skip",
-              value: VALUES[f.key] ?? null,
+              status: valueFor(f, order) ? "fill" : "skip",
+              value: valueFor(f, order),
               optionValues: null,
               source: "bank:stub",
             },
       ),
     });
   }
+  if (url.pathname === "/kit/stub")
+    return ok(route, {
+      job: {
+        jobId: "stub",
+        title: "Engineer",
+        employer: "Acme",
+        location: null,
+        applyUrl: APPLY_PAGE,
+        tailoredSummary: null,
+      },
+      groups: [],
+    });
   if (url.pathname === "/runs" && req.method() === "POST")
     return ok(route, { id: "stub-run" });
   if (url.pathname.startsWith("/runs/")) {
@@ -250,7 +339,14 @@ try {
   });
   await fill.waitFor({ timeout: 15_000 });
   check("Fill this page offered on the Workday application", true);
-  await fill.click();
+  // The Apply kit (which opened the application) starts it too.
+  await panel.locator("#here").getByRole("button", { name: "Apply kit" }).click();
+  const kitFill = panel
+    .locator("#kit-box")
+    .getByRole("button", { name: "Fill this page" });
+  await kitFill.waitFor({ timeout: 15_000 });
+  check("Fill this page offered in the Apply kit", true);
+  await kitFill.click();
 
   await panel
     .getByText('Check "My Information" on the page', { exact: false })
@@ -304,11 +400,60 @@ try {
       !second.fields.some((f) => f.key === "legalName--firstName"),
     JSON.stringify(second?.fields.map((f) => f.ref)),
   );
-  const uploaded = await form.evaluate(() => window.uploaded);
+  check(
+    "empty sections reported, then planned again once entries were added",
+    JSON.stringify(second?.sections.map((s) => [s.id, s.entries])) ===
+      JSON.stringify([["Work-Experience-section", 0], ["Education-section", 0]]) &&
+      posted[2]?.sections.map((s) => s.entries).join() === "2,1",
+    JSON.stringify(posted.slice(1).map((p) => p.sections)),
+  );
+  const experience = await form.evaluate(() => {
+    const shown = (panel, key) =>
+      [...panel.querySelectorAll(`[data-fkit-id$="--${key}"] [data-automation-id$="-display"]`)]
+        .map((d) => d.textContent)
+        .join("/");
+    const jobs = [...document.querySelectorAll("#we-list > [role=group]")].map((panel) => ({
+      title: panel.querySelector("[id$='--jobTitle']").value,
+      company: panel.querySelector("[id$='--companyName']").value,
+      current: panel.querySelector("[id$='--currentlyWorkHere']").checked,
+      from: shown(panel, "startDate"),
+      to: shown(panel, "endDate"),
+      description: panel.querySelector("textarea").value,
+    }));
+    const pills = (s) =>
+      [...document.querySelectorAll(`${s} [data-automation-id=selectedItem]`)].map((p) => p.textContent).join(",");
+    return {
+      jobs,
+      school: pills("#ed-list [data-fkit-id$='--school']"),
+      degree: document.querySelector("#ed-list [id$='--degree']")?.textContent,
+      skills: pills("[data-fkit-id='skills--skills']"),
+      uploaded: window.uploaded,
+    };
+  });
+  check(
+    "a work experience entry added and filled per job",
+    JSON.stringify(experience.jobs) ===
+      JSON.stringify([
+        { title: "Senior Engineer", company: "Acme", current: true, from: "09/2023", to: "MM/YYYY", description: "Built the platform." },
+        { title: "Engineer", company: "Beta", current: false, from: "01/2020", to: "08/2023", description: "Built features." },
+      ]),
+    JSON.stringify(experience.jobs),
+  );
+  check(
+    "an education entry added and filled",
+    experience.school === "Some Institute of Technology" &&
+      experience.degree === "Bachelor's Degree",
+    `${experience.school} / ${experience.degree}`,
+  );
+  check(
+    "skills added one by one (those Workday has)",
+    experience.skills === "React,TypeScript",
+    experience.skills,
+  );
   check(
     "resume attached to the page's own upload field",
-    uploaded?.[0]?.startsWith("Resume.pdf:"),
-    JSON.stringify(uploaded),
+    experience.uploaded?.[0]?.startsWith("Resume.pdf:"),
+    JSON.stringify(experience.uploaded),
   );
   await form.locator("#next").click();
   await panel
@@ -316,7 +461,7 @@ try {
     .waitFor({ timeout: 30_000 });
   check(
     "Review page not planned (nothing to fill)",
-    posted.length === 2,
+    posted.length === 3,
     `${posted.length} plans`,
   );
 
@@ -330,7 +475,7 @@ try {
     runCalls.join(" | "),
   );
   const steps = runCalls.filter((c) => c.includes("/actions")).length;
-  check("every filled step logged", steps === 6, `${steps} logged`);
+  check("every filled step logged", steps === 19, `${steps} logged`);
   check("no side panel errors", errors.length === 0, errors.join(" | "));
 } catch (error) {
   failures.push(String(error));

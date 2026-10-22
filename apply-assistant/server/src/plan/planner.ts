@@ -6,7 +6,11 @@ import { type ActionClass, classifyField, type FieldRule } from "./classify.js";
 import { countryOf } from "./country.js";
 import type { FieldType, FormField, FormSchema } from "./gh-schema.js";
 import { findDeclineOption, pickOption, pickOptions } from "./options.js";
-import type { DegreeLevel, ResumeFacts } from "./resume-facts.js";
+import type {
+  DegreeLevel,
+  ResumeFacts,
+  YearMonth,
+} from "./resume-facts.js";
 
 /**
  * Builds a fill plan: for every field, the proposed value, where it came from, its action class
@@ -271,6 +275,76 @@ function resolveEducation(
     : missing("resume:education", `No ${part} on your resume`);
 }
 
+/** A resume month as Workday types it: "09/2025" (null when the month isn't known). */
+const monthYear = (point: YearMonth | null) =>
+  point?.month ? `${String(point.month).padStart(2, "0")}/${point.year}` : null;
+
+/** One part of the n-th job / degree on your resume; "skip" when it doesn't apply. */
+function resolveHistory(
+  rule: Extract<FieldRule, { kind: "history" }>,
+  field: FormField,
+  resume: ResumeFacts,
+): Resolved | "skip" {
+  const source = `resume:${rule.section}.${rule.index}.${rule.part}`;
+  const answer = (value: string | null | undefined): Resolved | "skip" =>
+    value ? { value, source } : field.required ? missing(source, `No ${field.label.toLowerCase()} on your resume`) : "skip";
+  if (rule.section === "experience") {
+    const job = resume.experience[rule.index];
+    // More entries on the page than jobs on your resume: those are yours.
+    if (!job) return "skip";
+    switch (rule.part) {
+      case "jobTitle":
+        return answer(job.title);
+      case "companyName":
+        return answer(job.company);
+      case "location":
+        return answer(job.location);
+      case "currentlyWorkHere":
+        return job.current ? answer(field.options[0]?.label ?? field.label) : "skip";
+      case "startDate":
+        return answer(monthYear(job.start));
+      case "endDate":
+        return job.current ? "skip" : answer(monthYear(job.end));
+      case "roleDescription":
+        return answer(job.description);
+      default:
+        return "skip";
+    }
+  }
+  const degree = resume.education[rule.index];
+  if (!degree) return "skip";
+  switch (rule.part) {
+    case "school":
+      return answer(degree.school);
+    case "degree":
+      return degree.level
+        ? { value: DEGREE_LABEL[degree.level], alternatives: [degree.degree], source }
+        : answer(degree.degree);
+    case "fieldOfStudy":
+      return answer(degree.area);
+    case "firstYearAttended":
+      return answer(degree.startYear ? String(degree.startYear) : null);
+    case "lastYearAttended":
+      return answer(degree.endYear ? String(degree.endYear) : null);
+    default:
+      return "skip";
+  }
+}
+
+/** Skills to add one by one: each skill group's keywords (or its name when it has none). */
+const MAX_SKILLS = 20;
+
+function resolveSkills(resume: ResumeFacts): Resolved {
+  const skills = [
+    ...new Set(
+      resume.skills.flatMap((s) => (s.keywords.length ? s.keywords : [s.name])),
+    ),
+  ].filter(Boolean);
+  return skills.length
+    ? { value: skills.slice(0, MAX_SKILLS), source: "resume:skills" }
+    : missing("resume:skills", "No skills on your Job Ops resume");
+}
+
 function resolveRule(
   rule: FieldRule,
   field: FormField,
@@ -340,6 +414,10 @@ function resolveRule(
     }
     case "fixed":
       return { value: rule.value, source: "rule:fixed" };
+    case "history":
+      return resolveHistory(rule, field, input.resume);
+    case "skills":
+      return resolveSkills(input.resume);
     case "located-in":
       return resolveLocatedIn(rule.place, field, input, jobCountry);
     case "question":
@@ -482,6 +560,9 @@ function fitToField(field: FormField, resolved: Resolved): Typed {
 
   if (field.type === "multiselect") {
     const wanted = Array.isArray(value) ? value : splitList(value as string);
+    // Search-and-pick fields (Workday) list nothing up front: each is searched for on the page.
+    if (field.options.length === 0)
+      return { status: "fill", value: wanted, optionValues: null };
     const { picked, missing: unplaced } = pickOptions(field.options, wanted);
     if (picked.length === 0)
       return {

@@ -22,7 +22,7 @@ import {
   startRun,
 } from "./supervisor";
 import { type FormDriver, type ResumeFile, sleep } from "./trusted";
-import { WorkdayDriver } from "./workday-driver";
+import { type EntriesToAdd, WorkdayDriver } from "./workday-driver";
 
 /**
  * Runs one supervised application from the side panel: opens the posting, drives the
@@ -130,11 +130,13 @@ async function planWorkdayPage(
   driver: WorkdayDriver,
 ): Promise<PlanEntry[]> {
   if (FINAL_STEP.test(await driver.step())) return [];
-  const page = await driver.readPage();
-  const { entries } = (await client.planPage(jobId, page)) as {
-    entries: PlanEntry[];
-  };
-  return entries;
+  type PagePlan = { entries: PlanEntry[]; add?: EntriesToAdd[] };
+  const plan = (await client.planPage(jobId, await driver.readPage())) as PagePlan;
+  if (!plan.add?.length) return plan.entries;
+  // My Experience: one entry per job and degree on your resume, then the page is planned again.
+  await driver.addEntries(plan.add);
+  const again = (await client.planPage(jobId, await driver.readPage())) as PagePlan;
+  return again.entries;
 }
 
 /** Only the job's own site and Greenhouse; anything else pauses the run. */

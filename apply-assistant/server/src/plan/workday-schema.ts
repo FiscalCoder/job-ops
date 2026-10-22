@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { FieldType, FormField, FormSchema } from "./form-schema.js";
 import { schemaHash } from "./form-schema.js";
+import type { ResumeFacts } from "./resume-facts.js";
 
 /**
  * Workday (PHASE1_GREENHOUSE_PLAN.md §12G): its application form only exists after you sign
@@ -38,6 +39,18 @@ export const workdayPageSchema = z.object({
       }),
     )
     .max(200),
+  /** My Experience's sections with an Add button, and how many entries each has now. */
+  sections: z
+    .array(
+      z.object({
+        /** The section's heading id ("Work-Experience-section"). */
+        id: z.string().max(200),
+        label: z.string().max(200),
+        entries: z.number().int().min(0).max(100),
+      }),
+    )
+    .max(30)
+    .optional(),
 });
 
 export type WorkdayPage = z.infer<typeof workdayPageSchema>;
@@ -55,18 +68,51 @@ const CANONICAL: Record<string, string> = {
   country: "country",
   city: "location",
   candidateIsPreviousWorker: "worked_here",
+  // Search-and-pick, one skill at a time: from your Job Ops resume.
+  skills: "skills",
 };
 
-/** Filled by Workday from your resume, or optional extras: left to Workday and you. */
+/** Optional extras, left to you. */
 const LEFT_ALONE =
-  /^(legalName--\w+Local|legalName--middleName|preferredCheck|extension|jobTitle|companyName|location|currentlyWorkHere|startDate|endDate|roleDescription|schoolName|school|degree|fieldOfStudy|gradeAverage|firstYearAttended|lastYearAttended|skills|websites?|url|linkedInAccount|certification\w*|language\w*)$/;
+  /^(legalName--\w+Local|legalName--middleName|preferredCheck|extension|websites?|url|certification\w*|language\w*)$/;
 
-/** Fields inside a repeated section (work history, education, ...) are Workday's to fill. */
-const REPEATED = /^(workExperience|education|certification|language|website)-/i;
+/**
+ * Work history and education entries ("workExperience-129--jobTitle"): the n-th entry on the
+ * page is filled from the n-th on your Job Ops resume (most recent job, highest degree first).
+ */
+const HISTORY = /^(workExperience|education)-([^-]+)--/;
+/** Other repeated sections (certifications, languages, websites): left to you. */
+const REPEATED = /^(certification|language|website)s?-/i;
 
-function typeOf(field: PageField): FieldType {
-  if (REPEATED.test(field.ref) || field.kind === "date") return "hidden";
-  if (LEFT_ALONE.test(field.key) && !CANONICAL[field.key]) return "hidden";
+/** "history.experience.0.jobTitle" for each work history / education field, by entry order. */
+function historyNames(fields: readonly PageField[]): Map<string, string> {
+  const entries = new Map<string, number>();
+  const names = new Map<string, string>();
+  for (const field of fields) {
+    const match = HISTORY.exec(field.ref);
+    if (!match) continue;
+    const section = match[1] === "workExperience" ? "experience" : "education";
+    const entry = `${match[1]}-${match[2]}`;
+    if (!entries.has(entry))
+      entries.set(
+        entry,
+        [...entries.keys()].filter((e) => e.startsWith(`${match[1]}-`)).length,
+      );
+    names.set(
+      field.ref,
+      `history.${section}.${entries.get(entry)}.${field.ref.slice(match[0].length)}`,
+    );
+  }
+  return names;
+}
+
+function typeOf(field: PageField, history: boolean): FieldType {
+  if (REPEATED.test(field.ref)) return "hidden";
+  // Dates are typed ("09/2025", "2019"), but only work history and education have answers.
+  if (field.kind === "date") return history ? "text" : "hidden";
+  if (!history && LEFT_ALONE.test(field.key) && !CANONICAL[field.key])
+    return "hidden";
+  if (field.key === "skills") return "multiselect";
   switch (field.kind) {
     case "textarea":
       return "textarea";
@@ -88,9 +134,11 @@ const SECTION: Record<string, FormField["section"]> = {
 };
 
 export function parseWorkdayPage(page: WorkdayPage, title: string): FormSchema {
+  const history = historyNames(page.fields);
   const fields: FormField[] = page.fields.map((f) => {
-    const type = typeOf(f);
-    const canonical = f.kind === "file" ? "resume" : CANONICAL[f.key];
+    const type = typeOf(f, history.has(f.ref));
+    const canonical =
+      f.kind === "file" ? "resume" : (history.get(f.ref) ?? CANONICAL[f.key]);
     return {
       ref: f.ref,
       ...(canonical ? { canonical } : {}),
@@ -116,4 +164,24 @@ export function parseWorkdayPage(page: WorkdayPage, title: string): FormSchema {
     fields,
     hash: schemaHash({ step: page.step, fields }),
   };
+}
+
+/** Workday's section headings for the entries your resume has. */
+const SECTION_IDS: readonly [RegExp, (resume: ResumeFacts) => number][] = [
+  [/^work-experience-section$/i, (r) => r.experience.length],
+  [/^education-section$/i, (r) => r.education.length],
+];
+/** Never add more than this many entries to one section. */
+const MAX_ADDED = 10;
+
+/** Entries to add (Add button clicks) so each section has one per entry on your resume. */
+export function entriesToAdd(
+  page: WorkdayPage,
+  resume: ResumeFacts,
+): { section: string; count: number }[] {
+  return (page.sections ?? []).flatMap((section) => {
+    const wanted = SECTION_IDS.find(([id]) => id.test(section.id))?.[1](resume);
+    const count = Math.min((wanted ?? 0) - section.entries, MAX_ADDED);
+    return count > 0 ? [{ section: section.id, count }] : [];
+  });
 }

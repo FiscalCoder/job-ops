@@ -31,6 +31,15 @@ export type FieldRule =
   | { kind: "located-in"; place: string }
   /** Always the same answer (Workday's "Phone Device Type": Mobile). */
   | { kind: "fixed"; value: string }
+  /** One part of the n-th job / degree on your resume (Workday's work history and education). */
+  | {
+      kind: "history";
+      section: "experience" | "education";
+      index: number;
+      part: string;
+    }
+  /** Your resume's skills (Workday's "Type to Add Skills"). */
+  | { kind: "skills" }
   | { kind: "hidden" }
   | { kind: "question" };
 
@@ -75,6 +84,7 @@ const BY_REF: Record<string, FieldRule> = {
   // Workday ("Have you worked for <company>...?", "Phone Device Type").
   worked_here: bank("history.worked_at_company"),
   phone_type: { kind: "fixed", value: "Mobile" },
+  skills: { kind: "skills" },
   // Extra links (Lever): never filled with your website again; required ones go to Claude/you.
   other_link: { kind: "question" },
   twitter: { kind: "question" },
@@ -187,8 +197,18 @@ function answersYesNo(rule: FieldRule): boolean {
   }
 }
 
+const HISTORY_NAME = /^history\.(experience|education)\.(\d+)\.(\w+)$/;
+
 function ruleFor(field: FormField): FieldRule {
   if (field.type === "hidden") return { kind: "hidden" };
+  const history = HISTORY_NAME.exec(field.canonical ?? "");
+  if (history)
+    return {
+      kind: "history",
+      section: history[1] as "experience" | "education",
+      index: Number(history[2]),
+      part: history[3] ?? "",
+    };
   const byRef = BY_REF[field.canonical ?? field.ref];
   if (byRef) return byRef;
 

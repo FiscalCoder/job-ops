@@ -49,9 +49,23 @@ export interface WorkdayField {
   readonly options: readonly string[];
 }
 
+/** A section with an Add button (Work Experience, Education, ...) and its entries so far. */
+export interface WorkdaySection {
+  readonly id: string;
+  readonly label: string;
+  readonly entries: number;
+}
+
 export interface WorkdayPage {
   readonly step: string;
   readonly fields: readonly WorkdayField[];
+  readonly sections: readonly WorkdaySection[];
+}
+
+/** Entries to add before filling: Add clicks per section (the server's answer). */
+export interface EntriesToAdd {
+  readonly section: string;
+  readonly count: number;
 }
 
 export const RESUME_REF = "file-upload-input-ref";
@@ -167,7 +181,24 @@ export function readWorkdayPage(): WorkdayPage {
       required: false,
       options: [],
     });
-  return { step, fields };
+  // Sections you add entries to (Work Experience, Education, ...): how many each has now.
+  const sections = [
+    ...document.querySelectorAll<HTMLElement>(
+      "[role='group'][aria-labelledby$='-section']",
+    ),
+  ]
+    .filter((group) => group.querySelector("[data-automation-id='add-button']"))
+    .map((group) => {
+      const id = group.getAttribute("aria-labelledby") ?? "";
+      return {
+        id,
+        label: text(document.getElementById(id)),
+        entries: group.querySelectorAll(
+          "[role='group'][aria-labelledby$='-panel']",
+        ).length,
+      };
+    });
+  return { step, fields, sections };
 }
 
 /** What kind of control a field container holds; runs inside the page. */
@@ -180,6 +211,7 @@ function controlKind(box: Element | null): WorkdayFieldKind | null {
     return "search";
   if (box.querySelector("input[type=radio]")) return "radio";
   if (box.querySelector("input[type=checkbox]")) return "checkbox";
+  if (box.querySelector("[data-automation-id^='dateSection']")) return "date";
   if (box.querySelector("textarea")) return "textarea";
   if (box.querySelector("input")) return "text";
   return null;
@@ -195,6 +227,14 @@ function shownValue(box: Element | null): string {
     const shown = text(button);
     return /^select one$/i.test(shown) ? "" : shown;
   }
+  // A date shows "09" / "2025" (or "MM" / "YYYY" while empty) in its spin buttons.
+  const parts = [
+    ...box.querySelectorAll(
+      "[data-automation-id='dateSectionMonth-display'], [data-automation-id='dateSectionYear-display']",
+    ),
+  ].map(text);
+  if (parts.length)
+    return parts.some((p) => !/^\d+$/.test(p)) ? "" : parts.join("/");
   const multi = box.querySelector("[data-automation-id='multiSelectContainer']");
   if (multi)
     return [...multi.querySelectorAll("[data-automation-id='selectedItem']")]
@@ -295,7 +335,7 @@ export class WorkdayDriver extends TrustedDriver {
           .slice(0, MAX_OPTIONS),
       });
     }
-    return { step: page.step, fields };
+    return { step: page.step, fields, sections: page.sections };
   }
 
   /** The open listbox's choices (labels and handles), once they stop changing. */
@@ -378,7 +418,7 @@ export class WorkdayDriver extends TrustedDriver {
         case "checkbox":
           return await this.choose(entry.ref, wanted);
         case "date":
-          return { ok: false, reason: "Dates are left to you" };
+          return await this.date(entry.ref, first);
         default: {
           const input = await this.frame.$(
             `:is(${box}) :is(textarea, input:not([type=hidden]))`,
@@ -442,13 +482,69 @@ export class WorkdayDriver extends TrustedDriver {
       if (chosen) picked.push(chosen);
     }
     const shown = await this.readBackRef(ref);
-    const missing = picked.filter((p) => !selectionMatches(shown, p));
-    if (picked.length === 0 || missing.length)
+    const kept = picked.filter((p) => selectionMatches(shown, p));
+    if (kept.length === 0 || (wanted.length === 1 && kept.length < picked.length))
       return {
         ok: false,
         reason: `No result matching "${wanted.join(", ")}" was kept`,
       };
-    return { ok: true, result: `picked "${shown}"` };
+    // Several (skills): Workday's list may not have every one; what it has is enough.
+    const notFound = wanted.length - kept.length;
+    return {
+      ok: true,
+      result: `picked "${shown}"${notFound ? ` (${notFound} not in Workday's list)` : ""}`,
+    };
+  }
+
+  /** Types a date into its spin buttons: "09/2025" (month and year) or "2019" (year only). */
+  private async date(ref: string, wanted: string): Promise<FillOutcome> {
+    const [month, year] = wanted.includes("/")
+      ? wanted.split("/")
+      : [null, wanted];
+    const box = `:is(${boxOf(ref)})`;
+    const parts: [string, string | null | undefined][] = [
+      ["dateSectionMonth-input", month],
+      ["dateSectionYear-input", year],
+    ];
+    for (const [part, digits] of parts) {
+      if (!digits) continue;
+      const input = await this.frame.$(
+        `${box} [data-automation-id='${part}']`,
+      );
+      if (!input) return { ok: false, reason: "Date box not found" };
+      await input.click();
+      await this.page.keyboard.type(digits);
+      await sleep(150);
+    }
+    await this.page.keyboard.press("Tab");
+    const shown = await this.readBackRef(ref);
+    const same = (a: string) => a.replace(/^0/, "").replace(/\/0/, "/");
+    return same(shown) === same(wanted)
+      ? { ok: true, result: `set to ${shown}` }
+      : { ok: false, reason: `Date shows "${shown || "empty"}"` };
+  }
+
+  /** Clicks Add in each section until it has as many entries as asked for. */
+  async addEntries(add: readonly EntriesToAdd[]): Promise<void> {
+    for (const { section, count } of add) {
+      const group = `[role='group'][aria-labelledby="${clean(section)}"]`;
+      const entries = () =>
+        this.frame
+          .$$eval(`${group} [role='group'][aria-labelledby$='-panel']`, (l) => l.length)
+          .catch(() => 0);
+      for (let i = 0; i < count; i++) {
+        const buttons = await this.frame.$$(
+          `${group} [data-automation-id='add-button']`,
+        );
+        const button = buttons.at(-1);
+        if (!button) break;
+        const before = await entries();
+        await button.click();
+        const deadline = Date.now() + OPTION_WAIT_MS;
+        while ((await entries()) <= before && Date.now() < deadline)
+          await sleep(POLL_MS * 2);
+      }
+    }
   }
 
   private async choose(

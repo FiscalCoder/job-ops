@@ -23,7 +23,19 @@ import {
 import { normalizeQuestion } from "./question-norm.js";
 import { type ResumeFacts, resumeFacts } from "./resume-facts.js";
 import { parseFormSchema } from "./schemas.js";
-import { parseWorkdayPage, type WorkdayPage } from "./workday-schema.js";
+import {
+  entriesToAdd,
+  parseWorkdayPage,
+  type WorkdayPage,
+} from "./workday-schema.js";
+
+/**
+ * A Workday page's plan, plus the entries to add first: the extension clicks Add that many
+ * times in each section, reads the page again and asks for its plan once more.
+ */
+export type WorkdayPagePlan = FillPlan & {
+  readonly add: readonly { section: string; count: number }[];
+};
 
 /**
  * Builds and stores fill plans. Inputs: the matched Greenhouse posting's stored form, your Job
@@ -274,7 +286,7 @@ export function createPlans(deps: PlansDeps) {
       token: string,
       jobId: string,
       page: WorkdayPage,
-    ): Promise<FillPlan> {
+    ): Promise<WorkdayPagePlan> {
       const [job, resume] = await Promise.all([
         jobOps.getJob(token, jobId),
         loadResume(token),
@@ -288,10 +300,13 @@ export function createPlans(deps: PlansDeps) {
         bankMap(),
       );
       const { summary } = plan;
+      const add = entriesToAdd(page, resume);
       trace({
         jobId,
         kind: "plan",
-        message: `Plan built for Workday page "${page.step}": ${summary.fill} to fill, ${summary.needsYou} need you`,
+        message: add.length
+          ? `Workday page "${page.step}": adding ${add.map((a) => `${a.count} to ${a.section.replace(/-section$/, "").replace(/-/g, " ")}`).join(", ")} for your resume first`
+          : `Plan built for Workday page "${page.step}": ${summary.fill} to fill, ${summary.needsYou} need you`,
         data: {
           ats: "workday",
           step: page.step,
@@ -300,9 +315,10 @@ export function createPlans(deps: PlansDeps) {
             ? { claudeProblem: fromClaude.claudeProblem }
             : {}),
           claudeAnswers: fromClaude.claude?.size ?? 0,
+          ...(add.length ? { add } : {}),
         },
       });
-      return plan;
+      return { ...plan, add };
     },
 
     async build(token: string, jobId: string): Promise<FillPlan> {

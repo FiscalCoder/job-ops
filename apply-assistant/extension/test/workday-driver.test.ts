@@ -132,6 +132,24 @@ describe("readWorkdayPage", () => {
     ).toMatchObject({ kind: "dropdown", required: true });
   });
 
+  it("Walmart My Experience (Apply Manually): empty sections to add to, skills, LinkedIn", () => {
+    load("walmart-my-experience");
+    const page = readWorkdayPage();
+    expect(page.step).toBe("My Experience");
+    expect(page.sections.map((s) => [s.id, s.label, s.entries])).toEqual([
+      ["Work-Experience-section", "Work Experience", 0],
+      ["Education-section", "Education", 0],
+      ["Certifications-section", "Certifications", 0],
+      ["Languages-section", "Languages", 0],
+      ["Websites-section", "Websites", 0],
+    ]);
+    expect(page.fields.map((f) => [f.ref, f.kind])).toEqual([
+      ["skills--skills", "search"],
+      // The resume was attached already.
+      ["socialNetworkAccounts--linkedInAccount", "text"],
+    ]);
+  });
+
   it("Review: nothing to fill", () => {
     load("review");
     expect(readWorkdayPage()).toMatchObject({ step: "Review", fields: [] });

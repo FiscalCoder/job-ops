@@ -52,6 +52,11 @@ export interface KitViewOptions {
   readonly onBack: () => void;
   /** Present when the job has a fill plan: starts the supervised fill from the kit. */
   readonly onFill?: () => void;
+  /**
+   * Fills the application in the tab you're on (Workday, planned page by page); resolves to
+   * why it can't when that tab isn't one, else null.
+   */
+  readonly onFillHere?: () => Promise<string | null>;
   /** After "I applied" / "Skip job": back to the queue with a note of what was done. */
   readonly onDone?: (note: string) => void;
 }
@@ -62,7 +67,7 @@ const DONE_PAUSE_MS = 900;
 /** Shows the kit in `box`; returns a function that ends the kit session. */
 export async function showKit(
   box: HTMLElement,
-  { client, job, onBack, onFill, onDone }: KitViewOptions,
+  { client, job, onBack, onFill, onFillHere, onDone }: KitViewOptions,
 ): Promise<() => Promise<void>> {
   const trace = new TraceRecorder(client, job.jobId);
   const close = async () => {
@@ -260,6 +265,17 @@ export async function showKit(
       )
     : null;
 
+  const fillHereButton =
+    onFillHere && !fillButton
+      ? button("Fill this page", async () => {
+          fillHereButton?.setAttribute("disabled", "");
+          const why = await onFillHere();
+          fillHereButton?.removeAttribute("disabled");
+          if (why) say(why, "error");
+          else void close();
+        })
+      : null;
+
   box.replaceChildren(
     el("div", { class: "row" }, el("strong", {}, "Apply kit"), back),
     el("p", { class: "muted" }, `${kit.job.title} · ${kit.job.employer}`),
@@ -267,6 +283,7 @@ export async function showKit(
       "div",
       { class: "controls" },
       ...(fillButton ? [fillButton] : []),
+      ...(fillHereButton ? [fillHereButton] : []),
       openButton,
       saveButton,
       attachButton,

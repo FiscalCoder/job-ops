@@ -471,6 +471,11 @@ Live result: ElevenLabs (a Ready job) is matched on Ashby and planned. Its 2 nee
      - *Application Questions* was read before Workday swapped the fields in (the step name changes first). The page is now read once its fields differ from the last page's and are the same on two reads; the side panel says it's reading meanwhile.
      - Classifier: "available to work in shifts", "how much notice … current employer" and "What are your total years of … experience" were matched wrongly or not at all.
      - Guidehouse's pages are fixtures (`guidehouse-*.html`, personal details replaced).
+   - **My Experience from your Job Ops resume (after the Walmart run, 2026-10-22).** With "Apply Manually", Work Experience and Education start empty behind an Add button, and attaching the resume there doesn't make Workday read it. Now:
+     - the page read lists the sections with an Add button and their entries; the server answers how many to add (one per job / degree on your resume, at most 10), the extension clicks Add and the page is planned again;
+     - the n-th entry is filled from the n-th job (most recent first) or degree (highest first): title, company, location, "I currently work here", From/To typed into Workday's month/year spin buttons, role description; school, degree, field of study, years;
+     - skills are searched one by one (first 20 from the resume), keeping the ones Workday's list has; LinkedIn is filled from the resume;
+     - the Apply kit has "Fill this page" for the Workday tab you're on.
 4. **W3:** Workday lookups (posting liveness) from the public job-board API.
 
 Your Job Ops has 10 Workday jobs: FactSet and Hitachi (applied); Capital One, LPL, Visa, Genpact, ModMed, Candescent and insightsoftware (Discovered). FactSet's manual application predates W0, so only its kit actions were recorded.

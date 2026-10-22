@@ -158,6 +158,16 @@ async function openKit(item: QueueItem) {
           },
         }
       : {}),
+    // The application you opened from the kit (Workday: after you sign in), filled in place.
+    onFillHere: async () => {
+      const tab = await activeTab();
+      if (tab?.id === undefined || !isWorkdayApply(tab.url ?? ""))
+        return "Open the application in this window (on Workday, sign in and start it), then click Fill this page there.";
+      closeKit = null;
+      box.hidden = true;
+      void startFill(item, tab.id, true);
+      return null;
+    },
   });
 }
 
