@@ -81,6 +81,15 @@ export const BANK_KEYS: readonly BankKeyDef[] = [
   }),
   def("location.state", "State / region", "Location", "text", "Tamil Nadu"),
   def(
+    "location.address_line1",
+    "Street address (line 1)",
+    "Location",
+    "text",
+    "12 Main Road, Adyar",
+    { hint: "For forms that ask for your address; never put on your resume." },
+  ),
+  def("location.postal_code", "Postal / PIN code", "Location", "text", "600020"),
+  def(
     "location.current_country",
     "Current country",
     "Location",
@@ -165,6 +174,13 @@ export const BANK_KEYS: readonly BankKeyDef[] = [
     { hint: "Usually No; you can change it on a single application." },
   ),
   def(
+    "history.restrictive_covenants",
+    "Bound by a non-compete or other restrictive covenant?",
+    "History",
+    "yesno",
+    "No",
+  ),
+  def(
     "profile.years_experience",
     "Years of professional experience",
     "Profile",
@@ -177,6 +193,13 @@ export const BANK_KEYS: readonly BankKeyDef[] = [
     "Profile",
     "list",
     "English, Tamil",
+  ),
+  def(
+    "profile.github",
+    "GitHub or code samples (when your resume has no GitHub link)",
+    "Profile",
+    "text",
+    "My repositories are private",
   ),
   def(
     "misc.heard_about",

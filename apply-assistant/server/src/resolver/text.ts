@@ -57,17 +57,39 @@ const ENTITIES: Record<string, string> = {
 };
 
 /** Greenhouse returns job content as escaped HTML; turn it (or plain HTML) into plain text. */
-export function htmlToText(html: string): string {
+const decode = (html: string): string => {
   let decoded = html;
   for (let i = 0; i < 2; i++)
     decoded = decoded.replace(
       /&(lt|gt|quot|#39|nbsp|amp);/g,
       (m) => ENTITIES[m] ?? m,
     );
-  return decoded
+  return decoded;
+};
+
+export function htmlToText(html: string): string {
+  return decode(html)
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * A resume entry's description as its points, one per line: a bullet list numbered
+ * ("1. …"), paragraphs as they are.
+ */
+export function htmlToPoints(html: string): string {
+  const decoded = decode(html);
+  const items = [...decoded.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)]
+    .map((m) => htmlToText(m[1] ?? ""))
+    .filter(Boolean);
+  if (items.length > 1)
+    return items.map((item, i) => `${i + 1}. ${item}`).join("\n");
+  return decoded
+    .split(/<\/p>|<br\s*\/?>|<\/li>/i)
+    .map(htmlToText)
+    .filter(Boolean)
+    .join("\n");
 }
 
 const SHINGLE = 3;

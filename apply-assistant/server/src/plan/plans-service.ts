@@ -256,7 +256,7 @@ export function createPlans(deps: PlansDeps) {
   ): Promise<TellAnswer> {
     const answer = await claude.tell(
       { ref: "choose", label: ask.label, type: "select", options: ask.options },
-      `My answer is "${ask.wanted}", but the form doesn't list it. Pick the choice that means the same or is closest to it.`,
+      `My answer is "${ask.wanted}", but the form doesn't list it. Pick the choice that means the same or is closest to it. A school, college, university or company must be the same one: when it isn't listed, pick the "Other" choice if there is one, never a different institution.`,
       {
         job: {
           title: job.title,

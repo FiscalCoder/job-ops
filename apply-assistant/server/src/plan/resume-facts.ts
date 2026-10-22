@@ -1,6 +1,6 @@
 import { isValid, parse } from "date-fns";
 import { z } from "zod";
-import { htmlToText } from "../resolver/text.js";
+import { htmlToPoints, htmlToText } from "../resolver/text.js";
 
 /**
  * Turns Job Ops' design resume (the same source as the tailored PDF) into the facts a form asks
@@ -209,7 +209,7 @@ export function resumeFacts(designResume: unknown): ResumeFacts {
       company: e.company,
       title: e.position,
       location: e.location,
-      description: htmlToText(e.description),
+      description: htmlToPoints(e.description),
       ...parsePeriod(e.period),
     }))
     .sort((a, b) => startOf(b) - startOf(a));

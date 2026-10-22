@@ -54,10 +54,14 @@ const plan = (fields: FormField[], withBank = bank) =>
 describe("Yes/No questions", () => {
   it("never take a value rule (a company name, a country, a city)", () => {
     expect(
+      ruleOf("Is your current employer a client of ours?"),
+    ).toEqual({ kind: "question" });
+    // Its own Yes/No answer, not the employer's name.
+    expect(
       ruleOf(
         "Are you subject to any employment agreements and/or post-employment restrictions with your current employer or a past employer?",
       ),
-    ).toEqual({ kind: "question" });
+    ).toEqual({ kind: "bank", key: "history.restrictive_covenants" });
     expect(ruleOf("Is your current country of residence in the EU?")).toEqual({
       kind: "question",
     });
@@ -99,7 +103,7 @@ describe("Yes/No questions", () => {
     expect(answer("india")).toMatchObject({
       status: "fill",
       value: "Yes",
-      actionClass: "confirm",
+      actionClass: "auto",
     });
     expect(answer("us")).toMatchObject({ status: "fill", value: "No" });
     expect(answer("city")).toMatchObject({ status: "fill", value: "Yes" });

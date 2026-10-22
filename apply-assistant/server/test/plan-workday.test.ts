@@ -346,7 +346,7 @@ describe("POST /plans/:jobId/page", () => {
     const page: WorkdayPage = {
       step: "Application Questions",
       fields: [
-        field("q18", "Are you 18 or older?", "dropdown", {
+        field("q18", "Are you comfortable working with Kafka?", "dropdown", {
           required: true,
           options: ["Yes", "No"],
         }),
@@ -364,7 +364,7 @@ describe("POST /plans/:jobId/page", () => {
     });
     // Optional questions aren't sent to Claude.
     const prompt = String(create.mock.calls[0]?.[0].messages[0]?.content);
-    expect(prompt).toContain("18 or older");
+    expect(prompt).toContain("working with Kafka");
     expect(prompt).not.toContain("FINRA");
 
     const bad = await call("/plans/job-1/page", { step: "x" });

@@ -150,3 +150,62 @@ describe("classifyField on real Greenhouse forms", () => {
     );
   });
 });
+
+describe("age questions", () => {
+  it("'Are you at least 18?' is always Yes", () => {
+    for (const label of [
+      "Are you at least 18 years of age?",
+      "Are you over the age of 18 ?",
+      "Are you 18 years of age or older?",
+    ])
+      expect(
+        classifyField({
+          ref: "q",
+          label,
+          type: "select",
+          required: true,
+          options: [
+            { label: "Yes", value: "1" },
+            { label: "No", value: "0" },
+          ],
+          section: "main",
+          description: null,
+        } as never).rule,
+        label,
+      ).toEqual({ kind: "fixed", value: "Yes" });
+  });
+});
+
+describe("address, postal code, covenants", () => {
+  const ruleOf = (label: string, options: string[] = []) =>
+    classifyField({
+      ref: "q",
+      label,
+      type: options.length ? "select" : "text",
+      required: true,
+      options: options.map((o) => ({ label: o, value: o })),
+      section: "main",
+      description: null,
+    } as never).rule;
+
+  it("go to their answer bank questions", () => {
+    expect(ruleOf("Address Line 1")).toEqual(bank("location.address_line1"));
+    expect(ruleOf("Street Address")).toEqual(bank("location.address_line1"));
+    expect(ruleOf("Address Line 2")).not.toEqual(bank("location.address_line1"));
+    expect(ruleOf("Email Address")).not.toEqual(bank("location.address_line1"));
+    expect(ruleOf("Postal Code")).toEqual(bank("location.postal_code"));
+    expect(ruleOf("PIN code")).toEqual(bank("location.postal_code"));
+    expect(
+      ruleOf(
+        "Are you subject to any employment agreements and/or post-employment restrictions with your current employer or a past employer?",
+        ["Yes", "No"],
+      ),
+    ).toEqual(bank("history.restrictive_covenants"));
+    expect(
+      ruleOf("Are you bound by any restrictive covenants (non-compete, non-solicitation)?", [
+        "Yes",
+        "No",
+      ]),
+    ).toEqual(bank("history.restrictive_covenants"));
+  });
+});

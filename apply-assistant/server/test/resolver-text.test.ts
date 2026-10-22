@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   descriptionSimilarity,
   employerKey,
+  htmlToPoints,
   htmlToText,
   titleScore,
 } from "../src/resolver/text.js";
@@ -81,5 +82,19 @@ describe("descriptionSimilarity", () => {
 
   it("is 0 when either side is empty", () => {
     expect(descriptionSimilarity("", base)).toBe(0);
+  });
+});
+
+describe("htmlToPoints", () => {
+  it("numbers a bullet list one point per line, keeps paragraphs apart", () => {
+    expect(
+      htmlToPoints("<ul><li><p>Led the <strong>EKS</strong> migration</p></li><li>Cut p95 by 40%</li></ul>"),
+    ).toBe("1. Led the EKS migration\n2. Cut p95 by 40%");
+    // Stored escaped, as the design resume sometimes is.
+    expect(htmlToPoints("&lt;ul&gt;&lt;li&gt;One&lt;/li&gt;&lt;li&gt;Two&lt;/li&gt;&lt;/ul&gt;")).toBe(
+      "1. One\n2. Two",
+    );
+    expect(htmlToPoints("<p>First.</p><p>Second.</p>")).toBe("First.\nSecond.");
+    expect(htmlToPoints("Plain text")).toBe("Plain text");
   });
 });

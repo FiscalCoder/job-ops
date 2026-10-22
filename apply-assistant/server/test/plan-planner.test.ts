@@ -94,9 +94,10 @@ describe("buildPlan", () => {
       bank: fullBank,
     });
     expect(india.jobCountry).toBe("India");
+    // Your saved answer: filled without a click.
     expect(entry(india, "question_18984074008")).toMatchObject({
       value: "Yes",
-      actionClass: "protected",
+      actionClass: "auto",
     });
     expect(entry(india, "question_18984075008")).toMatchObject({ value: "No" });
 
@@ -131,7 +132,7 @@ describe("buildPlan", () => {
     });
   });
 
-  it("fills education from the resume, proposes consent and EEO decline for your click", () => {
+  it("fills education from the resume; consent and EEO decline wait for your click", () => {
     const plan = buildPlan({
       schema: parseGreenhouseSchema(newrelic),
       resume,
@@ -139,7 +140,7 @@ describe("buildPlan", () => {
     });
     expect(entry(plan, "school--0")).toMatchObject({
       value: "Some Institute of Technology",
-      actionClass: "confirm",
+      actionClass: "auto",
     });
     expect(entry(plan, "degree--0")).toMatchObject({
       value: "Bachelor's Degree",
@@ -205,7 +206,7 @@ describe("buildPlan", () => {
     });
   });
 
-  it("uses the most recent job for employer/title and keeps protected salary from the bank", () => {
+  it("uses the most recent job for employer/title and salary from the bank", () => {
     const plan = buildPlan({
       schema: parseGreenhouseSchema(celonis),
       resume,
@@ -219,7 +220,7 @@ describe("buildPlan", () => {
     });
     expect(entry(plan, "question_31995637003")).toMatchObject({
       value: "30 LPA",
-      actionClass: "protected",
+      actionClass: "auto",
     });
   });
 

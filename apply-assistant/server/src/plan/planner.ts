@@ -156,7 +156,11 @@ function resolveBank(
   );
 }
 
-function resolveProfile(fact: string, resume: ResumeFacts): Resolved {
+function resolveProfile(
+  fact: string,
+  resume: ResumeFacts,
+  bank: PlanInput["bank"],
+): Resolved {
   const recent = resume.experience[0];
   const values: Record<string, string | null | undefined> = {
     email: resume.email,
@@ -168,8 +172,11 @@ function resolveProfile(fact: string, resume: ResumeFacts): Resolved {
     recent_title: recent?.title,
   };
   const value = values[fact];
-  return value
-    ? { value, source: `resume:${fact}` }
+  if (value) return { value, source: `resume:${fact}` };
+  // No GitHub on your resume: what you say instead ("my repositories are private").
+  const instead = fact === "github" ? bank.get("profile.github")?.trim() : "";
+  return instead
+    ? { value: instead, source: "bank:profile.github" }
     : missing(`resume:${fact}`, "Not on your Job Ops resume");
 }
 
@@ -387,7 +394,7 @@ function resolveRule(
           );
     }
     case "profile":
-      return resolveProfile(rule.fact, input.resume);
+      return resolveProfile(rule.fact, input.resume, input.bank);
     case "work-auth":
       return resolveWorkAuth(rule.ask, input, jobCountry);
     case "resume-file":
@@ -603,6 +610,9 @@ function fitToField(field: FormField, resolved: Resolved): Typed {
   };
 }
 
+/** Answers that are yours: your answer bank, remembered answers, resume, Job Ops' tailored PDF. */
+const YOURS = /^(bank|learned|resume|jobops|rule:fixed)\b/
+
 function planField(
   field: FormField,
   input: PlanInput,
@@ -629,10 +639,14 @@ function planField(
     };
 
   const typed = fitToField(field, resolved);
-  const finalClass = resolved.actionClass ?? actionClass;
   // An optional field we can't answer is left empty rather than asking you.
   const status =
     typed.status === "needs-you" && !field.required ? "skip" : typed.status;
+  // Your own answers go in without a click; Claude's (and a consent) wait for you.
+  const finalClass =
+    status === "fill" && YOURS.test(resolved.source)
+      ? "auto"
+      : (resolved.actionClass ?? actionClass);
   return {
     ...base,
     actionClass: finalClass,

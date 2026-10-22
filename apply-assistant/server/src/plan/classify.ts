@@ -97,7 +97,23 @@ const CONSENT_OBJECT =
 
 /** Ordered label rules: the first match wins. */
 const LABEL_RULES: readonly [RegExp, FieldRule][] = [
+  // "Are you at least 18 years of age?", "Are you over the age of 18?": you are.
+  [
+    /\b(at least|over|above|older than)( the age of)? 18\b|\b18 (years )?(of age )?or (older|above)|\bage of 18\b/,
+    { kind: "fixed", value: "Yes" },
+  ],
   [/sponsor/, { kind: "work-auth", ask: "sponsorship" }],
+  // Before "current employer": "...employment agreements and/or post-employment restrictions with
+  // your current employer...".
+  [
+    /restrictive covenant|non-?compete|non-?solicit|post-employment restriction|employment agreements?/,
+    bank("history.restrictive_covenants"),
+  ],
+  [
+    /^(street address|address( line)? ?1|address|mailing address)\s*\*?$/,
+    bank("location.address_line1"),
+  ],
+  [/postal code|\bzip( code)?\b|\bpin ?code\b|postcode/, bank("location.postal_code")],
   [
     /(authori[sz]ed to work|work authori[sz]ation|legally (authori[sz]ed|eligible|allowed|permitted)|right to work|eligible to work|work permit)/,
     { kind: "work-auth", ask: "authorized" },
@@ -192,6 +208,8 @@ function answersYesNo(rule: FieldRule): boolean {
       return true;
     case "bank":
       return bankKeyDef(rule.key)?.kind === "yesno";
+    case "fixed":
+      return /^(yes|no)$/i.test(rule.value);
     default:
       return false;
   }

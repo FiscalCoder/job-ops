@@ -498,9 +498,7 @@ export class WorkdayDriver extends TrustedDriver {
         `:is(${boxOf(ref)}) [data-automation-id='multiSelectContainer'] input`,
       );
       if (!input) return { ok: false, reason: "Search box not found" };
-      const open = await this.results(input, item);
-      let chosen = open ? await this.pickResult(ref, open, item) : null;
-      await this.page.keyboard.press("Escape");
+      let chosen = await this.searchAndPick(ref, input, item, wanted.length === 1);
       // One answer (Field of Study, School) that the list words differently: Claude picks.
       if (!chosen && wanted.length === 1 && this.chooser) {
         chosen = await this.pickWithClaude(ref, input, label, item);
@@ -572,7 +570,8 @@ export class WorkdayDriver extends TrustedDriver {
       ),
     ].slice(0, MAX_SEARCH_WORDS);
     const found = new Set<string>();
-    for (const word of words) {
+    // "Other" too: a school or employer that isn't listed is entered as Other.
+    for (const word of [...words, "Other"]) {
       const open = await this.results(input, word);
       await this.page.keyboard.press("Escape");
       for (const l of open?.labels ?? []) if (!NOT_A_CHOICE.test(l)) found.add(l);
@@ -580,10 +579,25 @@ export class WorkdayDriver extends TrustedDriver {
     if (found.size === 0 || !this.chooser) return null;
     const choice = await this.chooser(label, wanted, [...found].slice(0, 300));
     if (!choice) return null;
-    const open = await this.results(input, choice);
-    const picked = open ? await this.pickResult(ref, open, choice) : null;
+    return this.searchAndPick(ref, input, choice, true);
+  }
+
+  /**
+   * Searches and picks the best result. `single`: a field holding one answer, which Workday
+   * picks by itself on Enter when the search has exactly one match (no list opens).
+   */
+  private async searchAndPick(
+    ref: string,
+    input: ElementHandle,
+    text: string,
+    single: boolean,
+  ): Promise<string | null> {
+    const open = await this.results(input, text);
+    const picked = open ? await this.pickResult(ref, open, text) : null;
     await this.page.keyboard.press("Escape");
-    return picked;
+    if (picked || !single) return picked;
+    const shown = await this.readBackRef(ref);
+    return selectionMatches(shown, text) ? shown : null;
   }
 
   /**
