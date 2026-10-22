@@ -15,6 +15,7 @@ import { createClaudeAnswersRepo } from "../store/claude-answers-repo.js";
 import { createFillPlansRepo } from "../store/fill-plans-repo.js";
 import { createFormSchemasRepo } from "../store/form-schemas-repo.js";
 import { createCompanyLimitsRepo } from "../store/company-limits-repo.js";
+import { createSiteRecipesRepo } from "../store/site-recipes-repo.js";
 import { createLearnedAnswersRepo } from "../store/learned-answers-repo.js";
 import { createRunsRepo } from "../store/runs-repo.js";
 import { createTraceStore, type TraceStore } from "../store/trace-store.js";
@@ -24,6 +25,7 @@ import { createCaptureRoutes } from "./capture-routes.js";
 import { sendError, sendOk } from "./envelope.js";
 import { createKitRoutes } from "./kit-routes.js";
 import { createCompanyRoutes } from "./company-routes.js";
+import { createSiteRoutes } from "./site-routes.js";
 import { createLearnedRoutes } from "./learned-routes.js";
 import { createLookupRoutes } from "./lookup-routes.js";
 import { createPlanRoutes } from "./plan-routes.js";
@@ -131,6 +133,10 @@ export function createApp({
   app.use(requireUser, createAnswerBankRoutes(answers));
   app.use(requireUser, createCompanyRoutes(limits));
   app.use(requireUser, createPlanRoutes(plans));
+  app.use(
+    requireUser,
+    createSiteRoutes({ plans, recipes: createSiteRecipesRepo(db), trace: record }),
+  );
   const runs = createRunsRepo(db);
   app.use(
     requireUser,

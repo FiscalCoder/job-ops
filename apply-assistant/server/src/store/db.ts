@@ -177,6 +177,19 @@ export const MIGRATIONS: readonly string[] = [
      ('amazon', 'Amazon', 1, 183, 'Yours: one application every 6 months'),
      ('elevenlabs', 'ElevenLabs', 1, 183, 'Yours: one application every 6 months'),
      ('google', 'Google', 3, 30, 'Widely reported, not confirmed by Google: 3 applications in 30 days');`,
+  // Steps that set a field on a company's own form, kept per site and question ("{value}" for
+  // your answer), with how often they worked: replayed before Claude is asked again.
+  `create table site_recipes (
+     host text not null,
+     label_key text not null,
+     label text not null,
+     steps_json text not null,
+     worked integer not null default 0,
+     failed integer not null default 0,
+     created_at text not null default (datetime('now')),
+     updated_at text not null default (datetime('now')),
+     primary key (host, label_key)
+   );`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

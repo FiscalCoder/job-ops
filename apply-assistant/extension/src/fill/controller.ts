@@ -22,7 +22,17 @@ import {
   startRun,
 } from "./supervisor";
 import { type FormDriver, type ResumeFile, sleep } from "./trusted";
-import { type EntriesToAdd, WorkdayDriver } from "./workday-driver";
+import { GenericDriver, type GenericHelp, labelKey } from "./generic-driver";
+import {
+  type Chooser,
+  type EntriesToAdd,
+  WorkdayDriver,
+} from "./workday-driver";
+
+/** A form filled page by page as you reach each page: Workday, or any company's own site. */
+type PagedDriver = WorkdayDriver | GenericDriver;
+const isPaged = (driver: FormDriver): driver is PagedDriver =>
+  driver instanceof WorkdayDriver || driver instanceof GenericDriver;
 
 /**
  * Runs one supervised application from the side panel: opens the posting, drives the
@@ -37,8 +47,15 @@ export interface RunView {
   readonly busy: boolean;
   readonly notice: string | null;
   readonly problems: readonly string[];
-  /** Workday: the wizard page being filled, and whether it's the last (Review). */
-  readonly page: { readonly step: string; readonly last: boolean } | null;
+  /**
+   * Filled page by page (Workday, any company's site): the page being filled, whether it's the
+   * last (Workday's Review), and which kind of site.
+   */
+  readonly page: {
+    readonly step: string;
+    readonly last: boolean;
+    readonly system: "workday" | "generic";
+  } | null;
 }
 
 const REVIEW_POLL_MS = 2_000;
@@ -123,13 +140,14 @@ const FINAL_STEP = /^review$/i;
 /** Workday swaps a page's content in place: give the new one a moment to finish. */
 const PAGE_SETTLE_MS = 1_500;
 
-/** The server's plan for the Workday page on screen (none on the final Review page). */
-async function planWorkdayPage(
+/** The server's plan for the page on screen (none on Workday's final Review page). */
+async function planPagedPage(
   client: ApplyClient,
   jobId: string,
-  driver: WorkdayDriver,
+  driver: PagedDriver,
 ): Promise<PlanEntry[]> {
-  if (FINAL_STEP.test(await driver.step())) return [];
+  if (driver.system === "workday" && FINAL_STEP.test(await driver.step()))
+    return [];
   type PagePlan = { entries: PlanEntry[]; add?: EntriesToAdd[] };
   const plan = (await client.planPage(jobId, await driver.readPage())) as PagePlan;
   if (!plan.add?.length) return plan.entries;
@@ -233,38 +251,51 @@ export class RunController {
   }
 
   /**
-   * Workday: fills the application in the tab you're on (you've signed in and opened it), one
-   * page at a time: each page is planned when it opens, and you click Save and Continue.
+   * Fills the application in the tab you're on (Workday after you sign in, or any company's own
+   * page), one page at a time: each page is planned when it opens, and you continue yourself.
    */
-  static async startWorkday(
-    options: StartOptions & { tabId: number },
+  static async startPaged(
+    options: StartOptions & { tabId: number; system: "workday" | "generic" },
   ): Promise<RunController> {
-    const { client, job, tabId } = options;
+    const { client, job, tabId, system } = options;
     const url = (await chrome.tabs.get(tabId)).url ?? "";
     const trace = new TraceRecorder(client, job.jobId);
-    const context = { url, ats: "workday" };
-    trace.event("run-starting", `Filling the Workday application: ${url}`, {
-      data: context,
-    });
+    const context = { url, ats: system };
+    trace.event(
+      "run-starting",
+      `Filling the ${system === "workday" ? "Workday application" : "application on the company's site"}: ${url}`,
+      { data: context },
+    );
     await chrome.tabs.update(tabId, { active: true });
+    const chooser: Chooser = async (label, wanted, choices) => {
+      const answer = await client
+        .choose(job.jobId, { label, wanted, options: choices })
+        .catch(() => null);
+      const value = answer?.value;
+      return (typeof value === "string" ? value : value?.[0]) ?? null;
+    };
     return RunController.launch({
       ...options,
       trace,
       context,
       attach: async (page) => {
-        const driver = await WorkdayDriver.attach(page);
-        if (driver)
-          driver.chooser = async (label, wanted, options) => {
-            const answer = await client
-              .choose(job.jobId, { label, wanted, options })
-              .catch(() => null);
-            const value = answer?.value;
-            return (typeof value === "string" ? value : value?.[0]) ?? null;
-          };
+        if (system === "workday") {
+          const driver = await WorkdayDriver.attach(page);
+          if (driver) driver.chooser = chooser;
+          return driver;
+        }
+        const driver = await GenericDriver.attach(page);
+        if (driver) {
+          driver.chooser = chooser;
+          driver.help = await siteHelp(
+            client,
+            job.jobId,
+            new URL(page.url()).host,
+          );
+        }
         return driver;
       },
-      plan: (driver) =>
-        planWorkdayPage(client, job.jobId, driver as WorkdayDriver),
+      plan: (driver) => planPagedPage(client, job.jobId, driver as PagedDriver),
       // Workday fills My Experience from the resume, so it goes before anything typed.
       resumeFirst: true,
     });
@@ -347,8 +378,7 @@ export class RunController {
       trace,
       page,
     );
-    if (driver instanceof WorkdayDriver)
-      controller.pageStep = await driver.step();
+    if (isPaged(driver)) controller.pageStep = await driver.step();
     void controller.snapshot("start");
     void controller.loop();
     return controller;
@@ -363,13 +393,19 @@ export class RunController {
       notice: this.notice,
       problems: this.problems,
       page: this.wizard
-        ? { step: this.pageStep, last: FINAL_STEP.test(this.pageStep) }
+        ? {
+            step: this.pageStep,
+            last:
+              this.wizard.system === "workday" &&
+              FINAL_STEP.test(this.pageStep),
+            system: this.wizard.system,
+          }
         : null,
     };
   }
 
-  private get wizard(): WorkdayDriver | null {
-    return this.driver instanceof WorkdayDriver ? this.driver : null;
+  private get wizard(): PagedDriver | null {
+    return isPaged(this.driver) ? this.driver : null;
   }
 
   /** Your controls from the side panel. */
@@ -483,9 +519,11 @@ export class RunController {
       case "review":
         await this.driver.highlight(
           null,
-          this.morePages()
-            ? "Apply Copilot: check this page, then click Save and Continue"
-            : "Apply Copilot: review the form, then click Submit yourself",
+          this.wizard?.system === "generic"
+            ? "Apply Copilot: check this page, then continue or submit yourself"
+            : this.morePages()
+              ? "Apply Copilot: check this page, then click Save and Continue"
+              : "Apply Copilot: review the form, then click Submit yourself",
         );
         this.problems = [
           ...(await this.driver.problems()),
@@ -529,9 +567,11 @@ export class RunController {
     return empty;
   }
 
-  /** Workday, before its final page: you continue to the next page yourself. */
+  /** Page by page, before Workday's final page: you continue to the next page yourself. */
   private morePages(): boolean {
-    return this.wizard !== null && !FINAL_STEP.test(this.pageStep);
+    const wizard = this.wizard;
+    if (!wizard) return false;
+    return wizard.system === "generic" || !FINAL_STEP.test(this.pageStep);
   }
 
   /** Workday moved to another page: the step you're on now, when it changed. */
@@ -572,7 +612,7 @@ export class RunController {
     });
     try {
       await sleep(PAGE_SETTLE_MS);
-      const entries = await planWorkdayPage(
+      const entries = await planPagedPage(
         this.client,
         this.job.jobId,
         wizard,
@@ -580,7 +620,7 @@ export class RunController {
       this.state = begin(entries);
       this.trace.event(
         "page",
-        `On Workday page "${step}" with ${entries.length} plan entries`,
+        `On ${wizard.system === "workday" ? "Workday page" : "page"} "${step}" with ${entries.length} plan entries`,
         { data: { step, entries: entries.length } },
       );
       void this.snapshot(`page: ${step}`);
@@ -711,13 +751,14 @@ export class RunController {
 
   private async checkSubmitted() {
     if (this.tabClosed || nextAction(this.state).kind !== "review") return;
-    const moved = await this.movedTo();
-    if (moved) return this.nextPage(moved);
+    // The confirmation page first: after you submit, it's a new page that isn't a form.
     if (await this.driver.submitted()) {
       this.apply({ type: "submitted" });
       void this.loop();
       return;
     }
+    const moved = await this.movedTo();
+    if (moved) return this.nextPage(moved);
     this.timer = setTimeout(() => void this.checkSubmitted(), REVIEW_POLL_MS);
   }
 
@@ -797,5 +838,30 @@ function toLogEntry(step: Step) {
     decision: step.decision ?? "approved",
     decidedBy: step.decidedBy ?? "you",
     result: step.result ?? step.state,
+  };
+}
+
+/** This site's saved steps and Claude, for fields the generic driver can't fill by itself. */
+async function siteHelp(
+  client: ApplyClient,
+  jobId: string,
+  host: string,
+): Promise<GenericHelp> {
+  const saved = await client.recipes(host).catch(() => []);
+  const recipes = new Map(saved.map((r) => [r.labelKey, r]));
+  return {
+    recipes,
+    act: async (ask) => (await client.act(jobId, ask)).steps,
+    record: async (label, steps, ok) => {
+      await client.recordRecipe({ host, label, steps, ok, jobId });
+      const key = labelKey(label);
+      const before = recipes.get(key);
+      recipes.set(key, {
+        labelKey: key,
+        steps: ok ? steps : (before?.steps ?? steps),
+        worked: (before?.worked ?? 0) + (ok ? 1 : 0),
+        failed: (before?.failed ?? 0) + (ok ? 0 : 1),
+      });
+    },
   };
 }

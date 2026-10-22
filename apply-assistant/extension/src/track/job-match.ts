@@ -64,6 +64,30 @@ export function isJobPage(url: string): boolean {
   }
 }
 
+/**
+ * Job boards and LinkedIn: never filled (LinkedIn is copy-only; the boards only link onwards).
+ * Their own Apply leads to the company's page, which is.
+ */
+const NOT_FILLED =
+  /(^|\.)(linkedin|naukri|indeed|glassdoor|monster|foundit|shine|instahyre|wellfound|remotive|arbeitnow|workingnomads|startup)\.(com|co\.in|in|ch|jobs)$/i;
+
+/**
+ * How a page of a queued job is filled in place, page by page: Workday's apply flow, any other
+ * company page (read generically, Claude for what it can't fill), or not at all.
+ */
+export function pagedFill(url: string): "workday" | "generic" | null {
+  if (isWorkdayApply(url)) return "workday";
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "https:" || NOT_FILLED.test(u.hostname)) return null;
+    // Workday before you start applying (its job page): nothing to fill yet.
+    if (/(^|\.)(myworkdayjobs|myworkdaysite)\.com$/i.test(u.hostname)) return null;
+    return "generic";
+  } catch {
+    return null;
+  }
+}
+
 /** A Workday application in progress (".../apply/applyManually", ".../apply/autofillWithResume"). */
 export function isWorkdayApply(url: string): boolean {
   try {

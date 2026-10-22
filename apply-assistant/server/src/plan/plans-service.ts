@@ -2,6 +2,7 @@ import { ATS_NAMES } from "../ats.js";
 import type { QuestionAnswerer } from "../claude/answerer.js";
 import type { ClaudeAnswer } from "../claude/questions.js";
 import { isAnswerable, toQuestion } from "../claude/questions.js";
+import type { ActAnswer, ActRequest } from "../claude/act.js";
 import type { TellAnswer } from "../claude/tell.js";
 import { traceUsage } from "../claude/usage-trace.js";
 import type { JobOpsApi } from "../jobops/client.js";
@@ -24,6 +25,7 @@ import {
 import { normalizeQuestion } from "./question-norm.js";
 import { type ResumeFacts, resumeFacts } from "./resume-facts.js";
 import { parseFormSchema } from "./schemas.js";
+import { parseGenericPage } from "./generic-schema.js";
 import {
   entriesToAdd,
   parseWorkdayPage,
@@ -356,6 +358,32 @@ export function createPlans(deps: PlansDeps) {
     },
 
     /**
+     * Any company's own form: steps that set a field the extension couldn't fill by itself.
+     * Traced with your answer replaced by "{value}".
+     */
+    async act(jobId: string, request: ActRequest): Promise<ActAnswer> {
+      if (!answerer)
+        throw new NotPlannableError(
+          jobId,
+          "Claude isn't set up on the server (no Anthropic key)",
+        );
+      const answer = await answerer.act(request, traceUsage(trace, jobId));
+      const masked = answer.steps.map((s) => ({
+        ...s,
+        value: request.wanted ? s.value.split(request.wanted).join("{value}") : s.value,
+      }));
+      trace({
+        jobId,
+        kind: "act",
+        message: answer.steps.length
+          ? `Claude worked out ${answer.steps.length} step(s) for "${request.label.slice(0, 80)}"`
+          : `Claude found no way to set "${request.label.slice(0, 80)}": ${answer.why}`,
+        data: { label: request.label, failure: request.failure, steps: masked, why: answer.why },
+      });
+      return answer;
+    },
+
+    /**
      * Workday: a field whose choices differ by company (Field of Study, Degree) and none of
      * which matches your answer as such: Claude picks the closest of the choices found.
      */
@@ -389,7 +417,10 @@ export function createPlans(deps: PlansDeps) {
         jobOps.getJob(token, jobId),
         loadResume(token),
       ]);
-      const schema = parseWorkdayPage(page, job.title);
+      const generic = page.system === "generic";
+      const schema = generic
+        ? parseGenericPage(page, job.title)
+        : parseWorkdayPage(page, job.title);
       const { plan: planned, fromClaude } = await planSchema(
         jobId,
         schema,
@@ -399,15 +430,15 @@ export function createPlans(deps: PlansDeps) {
       );
       const plan = await withClosestChoices(jobId, schema, planned, job, resume);
       const { summary } = plan;
-      const add = entriesToAdd(page, resume);
+      const add = generic ? [] : entriesToAdd(page, resume);
       trace({
         jobId,
         kind: "plan",
         message: add.length
           ? `Workday page "${page.step}": adding ${add.map((a) => `${a.count} to ${a.section.replace(/-section$/, "").replace(/-/g, " ")}`).join(", ")} for your resume first`
-          : `Plan built for Workday page "${page.step}": ${summary.fill} to fill, ${summary.needsYou} need you`,
+          : `Plan built for ${generic ? "page" : "Workday page"} "${page.step}": ${summary.fill} to fill, ${summary.needsYou} need you`,
         data: {
-          ats: "workday",
+          ats: generic ? "generic" : "workday",
           step: page.step,
           summary,
           ...(fromClaude.claudeProblem

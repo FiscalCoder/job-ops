@@ -13,6 +13,8 @@ import type { ResumeFacts } from "./resume-facts.js";
  */
 
 export const workdayPageSchema = z.object({
+  /** Workday, or any company's own page read generically (absent: Workday). */
+  system: z.enum(["workday", "generic"]).optional(),
   /** The wizard step ("My Information", "Application Questions", ...). */
   step: z.string().max(200),
   fields: z

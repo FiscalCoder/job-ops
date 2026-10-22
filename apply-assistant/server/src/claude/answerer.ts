@@ -16,6 +16,14 @@ import {
   type QuestionContext,
 } from "./questions.js";
 import {
+  ACT_SCHEMA,
+  ACT_SYSTEM,
+  type ActAnswer,
+  type ActRequest,
+  actPrompt,
+  checkActReply,
+} from "./act.js";
+import {
   checkTellReply,
   TELL_SCHEMA,
   TELL_SYSTEM,
@@ -46,6 +54,8 @@ export interface QuestionAnswerer {
     context: QuestionContext,
     onUsage?: UsageListener,
   ): Promise<TellAnswer>;
+  /** Any company's form: steps that set one field the extension couldn't fill by itself. */
+  act(request: ActRequest, onUsage?: UsageListener): Promise<ActAnswer>;
 }
 
 /** The one SDK call used (the real client's `messages`, or a fake in tests). */
@@ -180,6 +190,24 @@ export function createClaudeAnswerer(
   }
 
   return {
+    async act(request, onUsage = () => {}) {
+      // Reading a widget's markup is harder than answering: the drafting model.
+      const message = await messages.create({
+        model: draftModel,
+        max_tokens: DRAFT_MAX_TOKENS,
+        system: ACT_SYSTEM,
+        messages: [{ role: "user", content: actPrompt(request) }],
+        output_config: {
+          effort: "low",
+          format: { type: "json_schema", schema: ACT_SCHEMA },
+        },
+      });
+      usage("worked out steps for 1 field", message, onUsage);
+      if (message.stop_reason === "refusal")
+        throw new TellRejectedError("Claude declined to operate this field");
+      return checkActReply(replyText(message), draftModel);
+    },
+
     async tell(question, instruction, context, onUsage = () => {}) {
       // Long-answer fields get the drafting model; everything else the quick one.
       const model = question.type === "textarea" ? draftModel : mapModel;

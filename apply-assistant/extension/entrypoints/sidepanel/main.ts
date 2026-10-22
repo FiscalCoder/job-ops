@@ -10,7 +10,7 @@ import {
 } from "../../src/lib/settings";
 import type { RunSummary } from "../../src/lib/worker";
 import { looksSubmitted } from "../../src/track/confirm";
-import { isWorkdayApply } from "../../src/track/job-match";
+import { pagedFill } from "../../src/track/job-match";
 import { resolveTab } from "../../src/track/tabs";
 import { renderHere } from "./here-view";
 import { showKit } from "./kit-view";
@@ -75,7 +75,11 @@ function countdownPicker(current: number): HTMLElement {
  * `tabId`: fill that open tab (you're on the application already) instead of a new one;
  * `workday`: that tab is a Workday application, filled page by page.
  */
-async function startFill(item: QueueItem, tabId?: number, workday = false) {
+async function startFill(
+  item: QueueItem,
+  tabId?: number,
+  paged: "workday" | "generic" | null = null,
+) {
   if (!client || activeRun) return;
   if (!confirmLimit(item)) return;
   const box = $("run-box");
@@ -109,8 +113,8 @@ async function startFill(item: QueueItem, tabId?: number, workday = false) {
         ),
     };
     activeRun =
-      workday && tabId !== undefined
-        ? await RunController.startWorkday({ ...options, tabId })
+      paged && tabId !== undefined
+        ? await RunController.startPaged({ ...options, tabId, system: paged })
         : await RunController.start({
             ...options,
             ...(tabId === undefined ? {} : { tabId }),
@@ -164,11 +168,12 @@ async function openKit(item: QueueItem) {
     // The application you opened from the kit (Workday: after you sign in), filled in place.
     onFillHere: async () => {
       const tab = await activeTab();
-      if (tab?.id === undefined || !isWorkdayApply(tab.url ?? ""))
-        return "Open the application in this window (on Workday, sign in and start it), then click Fill this page there.";
+      const paged = pagedFill(tab?.url ?? "");
+      if (tab?.id === undefined || !paged)
+        return "Open the application form in this window (on Workday, sign in and start it), then click Fill this page there.";
       closeKit = null;
       box.hidden = true;
-      void startFill(item, tab.id, true);
+      void startFill(item, tab.id, paged);
       return null;
     },
   });
@@ -575,7 +580,9 @@ async function checkTab() {
   const submitted =
     !dismissed.has(seenKey) && (await looksSubmitted(tab)) === true;
   if (turn !== checking) return;
-  const workday = isWorkdayApply(tab.url ?? "");
+  // A job's posting with a plan is filled from its plan; any other page of it page by page.
+  const paged =
+    match.how === "posting" && match.item.plan ? null : pagedFill(tab.url ?? "");
   renderHere(
     box,
     match,
@@ -584,7 +591,7 @@ async function checkTab() {
     kitButton,
     fill: () => {
       box.hidden = true;
-      void startFill(match.item, tabId, workday);
+      void startFill(match.item, tabId, paged);
     },
     markApplied: async () => {
       await (client as ApplyClient).kitOutcome(match.item.jobId, "applied");
@@ -599,7 +606,7 @@ async function checkTab() {
       void checkTab();
     },
     },
-    workday,
+    paged,
   );
 }
 

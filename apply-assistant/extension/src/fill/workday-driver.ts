@@ -282,6 +282,7 @@ export type Chooser = (
 ) => Promise<string | null>;
 
 export class WorkdayDriver extends TrustedDriver {
+  readonly system = "workday" as const;
   /** Set by the run: used when a search finds nothing worded like your answer. */
   chooser: Chooser | null = null;
 

@@ -51,11 +51,13 @@ export function renderHere(
   match: JobMatch,
   submitted: boolean,
   actions: HereActions,
-  /** A Workday application page: filled page by page, with no plan made in advance. */
-  workday = false,
+  /** Filled page by page in place (Workday, any company page), with no plan made in advance. */
+  paged: "workday" | "generic" | null = null,
 ): void {
   const { item, how } = match;
-  const fillable = workday || (how === "posting" && item.plan !== null);
+  const fillable =
+    (how === "posting" && item.plan !== null) ||
+    (paged !== null && how !== "linkedin");
   const confirm = submitted
     ? (() => {
         const mark = button(
@@ -103,7 +105,7 @@ export function renderHere(
       fillable ? button("Fill this page", actions.fill, !submitted) : null,
       actions.kitButton(item),
     ),
-    how === "posting" && !item.plan && !workday
+    how === "posting" && !item.plan && !paged
       ? el("p", { class: "muted" }, "No fill plan yet (Run now builds one).")
       : null,
   ];

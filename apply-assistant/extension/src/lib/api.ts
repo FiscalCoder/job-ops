@@ -156,6 +156,46 @@ export class ApplyClient implements TraceApi {
     return this.request(`/plans/${encodeURIComponent(jobId)}/choose`, ask);
   }
 
+  /** Any company's form: Claude's steps for a field the extension couldn't fill. */
+  act(
+    jobId: string,
+    ask: { label: string; wanted: string; html: string; failure: string },
+  ): Promise<{
+    steps: readonly {
+      action: "click" | "type" | "press" | "pick" | "wait";
+      value: string;
+    }[];
+    why: string;
+  }> {
+    return this.request(`/plans/${encodeURIComponent(jobId)}/act`, ask);
+  }
+
+  /** A site's saved steps, by question. */
+  recipes(host: string): Promise<
+    readonly {
+      labelKey: string;
+      steps: readonly {
+        action: "click" | "type" | "press" | "pick" | "wait";
+        value: string;
+      }[];
+      worked: number;
+      failed: number;
+    }[]
+  > {
+    return this.request(`/recipes?host=${encodeURIComponent(host)}`);
+  }
+
+  /** How a site's steps did (Claude's steps that worked become its recipe). */
+  recordRecipe(result: {
+    host: string;
+    label: string;
+    steps: readonly { action: string; value: string }[];
+    ok: boolean;
+    jobId: string;
+  }): Promise<unknown> {
+    return this.request("/recipes", result);
+  }
+
   startRun(jobId: string): Promise<{ id: string }> {
     return this.request("/runs", { jobId });
   }

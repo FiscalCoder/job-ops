@@ -480,6 +480,22 @@ Live result: ElevenLabs (a Ready job) is matched on Ashby and planned. Its 2 nee
 
 Your Job Ops has 10 Workday jobs: FactSet and Hitachi (applied); Capital One, LPL, Visa, Genpact, ModMed, Candescent and insightsoftware (Discovered). FactSet's manual application predates W0, so only its kit actions were recorded.
 
+## 12H. Any company's own site, and company limits (2026-10-22)
+
+**Company limits + grouped queue.** Some companies take only so many applications (Amazon, ElevenLabs: one per six months), so you pick your one best role there.
+- apply-assistant `company_limits` is seeded with Amazon and ElevenLabs (yours: 1 per 183 days) and Google (3 per 30 days; reported, not confirmed). A limit covers a company's divisions and legal names.
+- The queue shows, for each limited company, your applications inside the window (from Job Ops' applied jobs), whether it's used up and when it opens again.
+- The side panel groups the queue by company, shows posted dates, has Limit… / Remove limit, and asks before you apply where the window is used up.
+
+**Daily search.** Job Ops runs saved search "Remote+onsite v1" daily at 01:00 UTC (06:30 IST), set by `DAILY_SEARCH_PRESET` / `DAILY_SEARCH_HOUR` in the server `.env`. Closed listings are expired by the existing liveness sweep.
+
+**Generic filler (AI first, rules over time).** "Fill this page" works on any page of a queued job that isn't LinkedIn or a job board, from the "You're on…" banner or the Apply kit.
+- `GenericDriver` reads the page's fields generically (text, select, radio, checkbox, file, searchable and custom dropdowns), with refs that find them again. The server plans them (`POST /plans/:jobId/page`, `system: "generic"`): labels get the shared meanings (name, email, phone, resume, cover letter, diversity questions), then rules → answer bank → remembered answers → Claude.
+- Each field is filled with trusted input and read back. If that fails, the driver tries this site's recipe for the question, then Claude: `POST /plans/:jobId/act` gets the field's HTML (marked `data-ac-target`) and returns at most 8 steps (click inside the field's surroundings, type, an allowed key, pick an option, a short wait). Steps never click submit / continue / save / delete; the field must show the value afterwards.
+- Steps that worked are kept per site and question with your answer as `{value}` (`site_recipes`, `GET/POST /recipes`, with worked/failed counts) and replayed before Claude next time. Every use is in the job's trail (`act`, `recipe` events).
+- Page by page as on Workday: when the page changes it's read and planned again; after you submit, the confirmation ends the run.
+- Tests: `server/test/generic-site.test.ts`, `extension/test/generic-driver.test.ts`, `extension/e2e/generic.e2e.mjs` (fake careers page: a custom dropdown filled by Claude's stubbed steps, then by its recipe without Claude; a Submit click refused).
+
 ## 12F. Phase 1 status (2026-10-21)
 
 Everything planned for Phase 1 is built and live:

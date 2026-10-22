@@ -268,7 +268,9 @@ export function renderRun(
     body = el(
       "p",
       { class: "muted" },
-      `Reading "${view.page.step || "the next page"}" and planning it…`,
+      view.page.system === "generic"
+        ? "Reading this page and planning it…"
+        : `Reading "${view.page.step || "the next page"}" and planning it…`,
     );
   else if (action.kind === "review" && view.page && !view.page.last)
     body = el(
@@ -277,12 +279,16 @@ export function renderRun(
       el(
         "strong",
         {},
-        `Check "${view.page.step || "this page"}" on the page, then click Save and Continue there.`,
+        view.page.system === "generic"
+          ? "Check this page, then continue or submit it there yourself."
+          : `Check "${view.page.step || "this page"}" on the page, then click Save and Continue there.`,
       ),
       el(
         "p",
         { class: "muted" },
-        "The next page is read and filled when it opens. On Review, you submit.",
+        view.page.system === "generic"
+          ? "If another page opens, it's read and filled too. Fields Apply Copilot couldn't fill were tried with this site's saved steps, then Claude."
+          : "The next page is read and filled when it opens. On Review, you submit.",
       ),
     );
   else if (action.kind === "review")

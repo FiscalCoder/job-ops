@@ -25,6 +25,11 @@ describe("driver helpers", () => {
     expect(rankOption("India +91", "India")).toBe(1);
     expect(rankOption("Republic of India", "India")).toBe(2);
     expect(rankOption("Indiana", "Indi")).toBe(1);
+    // Another word after your answer is another place; punctuation after it, the place itself.
+    expect(rankOption("Bengaluru Rural", "Bengaluru")).toBe(1.5);
+    expect(
+      bestOption(["Bengaluru Rural", "Bengaluru, Karnataka"], "Bengaluru"),
+    ).toBe(1);
     expect(rankOption("Germany", "India")).toBe(9);
   });
 

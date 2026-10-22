@@ -47,13 +47,17 @@ export const FORM_WAIT_MS = 15_000;
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export const digits = (s: string) => s.replace(/\D/g, "");
 
-/** Dropdown option ranking: exact > starts-with > whole word > contains. */
+/**
+ * Dropdown option ranking: exact > starts-with > whole word > contains. Among options starting
+ * with your answer, one where it's followed by punctuation ("Bengaluru, Karnataka", "India +91")
+ * is the place itself; one where another word follows ("Bengaluru Rural") ranks just below.
+ */
 export function rankOption(label: string, wanted: string): number {
   const s = label.toLowerCase().replace(/\s+/g, " ").trim();
   const w = wanted.toLowerCase().replace(/\s+/g, " ").trim();
   if (!w) return 9;
   if (s === w) return 0;
-  if (s.startsWith(w)) return 1;
+  if (s.startsWith(w)) return /^ [\p{L}\p{N}]/u.test(s.slice(w.length)) ? 1.5 : 1;
   const words = (t: string) => ` ${t.replace(/[^a-z0-9]+/g, " ").trim()} `;
   if (words(s).includes(words(w))) return 2;
   if (s.includes(w)) return 3;
