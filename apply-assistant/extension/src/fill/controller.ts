@@ -21,8 +21,14 @@ import {
   type Step,
   startRun,
 } from "./supervisor";
-import { type FormDriver, type ResumeFile, sleep } from "./trusted";
-import { GenericDriver, type GenericHelp, labelKey } from "./generic-driver";
+import {
+  type FormDriver,
+  type ResumeFile,
+  sleep,
+  TrustedDriver,
+} from "./trusted";
+import { GenericDriver } from "./generic-driver";
+import { labelKey, recipeHost, type SiteHelp } from "./site-help";
 import {
   type Chooser,
   type EntriesToAdd,
@@ -285,14 +291,7 @@ export class RunController {
           return driver;
         }
         const driver = await GenericDriver.attach(page);
-        if (driver) {
-          driver.chooser = chooser;
-          driver.help = await siteHelp(
-            client,
-            job.jobId,
-            new URL(page.url()).host,
-          );
-        }
+        if (driver) driver.chooser = chooser;
         return driver;
       },
       plan: (driver) => planPagedPage(client, job.jobId, driver as PagedDriver),
@@ -324,6 +323,9 @@ export class RunController {
     });
     const [page] = await browser.pages();
     const driver = page ? await options.attach(page) : null;
+    // Any system: this site's saved steps and Claude, for fields the driver can't fill itself.
+    if (page && driver instanceof TrustedDriver)
+      driver.help = await siteHelp(client, job.jobId, recipeHost(page.url()));
     if (!page || !driver) {
       const error = await failStart(
         trace,
@@ -716,11 +718,17 @@ export class RunController {
       }, STALL_MS);
       if (step.entry.type === "file" && !this.resume)
         this.resume = await this.client.resumePdf(this.job.jobId);
-      const outcome = await this.driver.fill(
+      let outcome = await this.driver.fill(
         step.entry,
         step.value,
         this.resume ?? undefined,
       );
+      // Not filled the usual way: this site's saved steps, then Claude's.
+      if (!outcome.ok)
+        outcome =
+          (await this.driver
+            .rescue?.(step.entry, step.value, outcome.reason)
+            .catch(() => null)) ?? outcome;
       this.problems = await this.driver.problems();
       if (outcome.ok)
         this.trace.event(
@@ -841,12 +849,12 @@ function toLogEntry(step: Step) {
   };
 }
 
-/** This site's saved steps and Claude, for fields the generic driver can't fill by itself. */
+/** This site's saved steps and Claude, for fields a driver can't fill by itself. */
 async function siteHelp(
   client: ApplyClient,
   jobId: string,
   host: string,
-): Promise<GenericHelp> {
+): Promise<SiteHelp> {
   const saved = await client.recipes(host).catch(() => []);
   const recipes = new Map(saved.map((r) => [r.labelKey, r]));
   return {

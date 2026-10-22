@@ -1,17 +1,14 @@
 import type {
-  ElementHandle,
   Frame,
   Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
+import { pickOpenChoice, showsValue } from "./site-help";
 import type { PlanEntry } from "./supervisor";
 import {
   bestOption,
-  digits,
   type FillOutcome,
   FORM_WAIT_MS,
   failed,
-  OPTION_WAIT_MS,
-  POLL_MS,
   type ResumeFile,
   selectionMatches,
   sleep,
@@ -22,9 +19,8 @@ import type { Chooser } from "./workday-driver";
 /**
  * Any company's own application page (no known system). Fields are read generically (labels,
  * kinds, choices), planned like every other form, and filled with trusted input. A field it
- * can't fill by itself goes to this site's saved steps (a recipe), then to Claude, who sees the
- * field's HTML and replies with a few steps (click, type, press, pick). Steps that worked are
- * kept for the site, so it relies on Claude less each time.
+ * can't fill by itself goes to this site's saved steps, then Claude (site-help.ts), like on
+ * every other system.
  */
 
 export type GenericKind =
@@ -52,58 +48,6 @@ export interface GenericPage {
   readonly fields: readonly GenericField[];
   readonly sections: readonly never[];
 }
-
-export interface ActStep {
-  readonly action: "click" | "type" | "press" | "pick" | "wait";
-  readonly value: string;
-}
-
-export interface SiteRecipe {
-  readonly labelKey: string;
-  readonly steps: readonly ActStep[];
-  readonly worked: number;
-  readonly failed: number;
-}
-
-/** The server's help for fields the driver can't fill by itself (set by the run). */
-export interface GenericHelp {
-  /** Claude's steps for one field, from its HTML. */
-  act(ask: {
-    label: string;
-    wanted: string;
-    html: string;
-    failure: string;
-  }): Promise<readonly ActStep[]>;
-  /** This site's saved steps, by question. */
-  readonly recipes: ReadonlyMap<string, SiteRecipe>;
-  /** How a recipe (or Claude's steps, which become one) did. */
-  record(label: string, steps: readonly ActStep[], ok: boolean): Promise<void>;
-}
-
-/** "Date of birth *" and "date of birth" are the same question (as the server keys them). */
-export const labelKey = (label: string) =>
-  label
-    .toLowerCase()
-    .replace(/\*/g, "")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim()
-    .slice(0, 200);
-
-const ALLOWED_KEYS = new Set([
-  "Enter",
-  "Tab",
-  "Escape",
-  "ArrowDown",
-  "ArrowUp",
-  "Backspace",
-]);
-/** Nothing Claude's steps click may submit, move on or delete. */
-const FORBIDDEN_CLICK =
-  /\b(submit|apply|save|continue|next|send|finish|delete|remove|upload)\b/i;
-const MAX_WAIT_MS = 1_500;
-/** Visible choices of a list that's open somewhere on the page (lists often open in a portal). */
-const OPEN_CHOICES =
-  "[role='option'], [role='listbox'] li, li[class*='option' i], div[class*='option' i]:not([class*='options' i])";
 
 /** The page's step: where you are and its heading; runs inside the page. */
 export function genericStep(): string {
@@ -314,47 +258,12 @@ export function shownValue(selector: string): string {
   return "";
 }
 
-/**
- * The field's HTML for Claude: the field marked data-ac-target="1" and the markup around it
- * (marked data-ac-box="1", what its steps may click in), cleaned of scripts, styles and long
- * attribute values. Runs inside the page.
- */
-function fieldHtml(selector: string, limit: number): string {
-  for (const el of document.querySelectorAll("[data-ac-target], [data-ac-box]")) {
-    el.removeAttribute("data-ac-target");
-    el.removeAttribute("data-ac-box");
-  }
-  const el = document.querySelector(selector);
-  if (!el) return "";
-  el.setAttribute("data-ac-target", "1");
-  let box: Element = el;
-  for (let depth = 0; depth < 6; depth++) {
-    const parent: Element | null = box.parentElement;
-    if (!parent || parent === document.body || parent.outerHTML.length > limit) break;
-    box = parent;
-  }
-  box.setAttribute("data-ac-box", "1");
-  const copy = box.cloneNode(true) as Element;
-  for (const junk of copy.querySelectorAll("script, style, svg, img, iframe, noscript"))
-    junk.remove();
-  for (const node of [copy, ...copy.querySelectorAll("*")])
-    for (const attr of [...node.attributes]) {
-      if (/^on/i.test(attr.name) || attr.name === "style") node.removeAttribute(attr.name);
-      else if (attr.value.length > 120) node.setAttribute(attr.name, `${attr.value.slice(0, 120)}…`);
-    }
-  return copy.outerHTML.slice(0, limit);
-}
-
-const MAX_HTML_CHARS = 8_000;
-
 export class GenericDriver extends TrustedDriver {
   readonly system = "generic" as const;
   protected readonly errorSelector =
     "[role='alert'], .error-message, .field-error, .invalid-feedback, [class*='errorMessage' i]";
   /** Set by the run: a search that finds nothing worded like your answer. */
   chooser: Chooser | null = null;
-  /** Set by the run: recipes and Claude, for fields filled no other way. */
-  help: GenericHelp | null = null;
 
   /** Attaches to the frame with the most form fields (forms are often in an iframe). */
   static async attach(page: Page): Promise<GenericDriver | null> {
@@ -395,8 +304,6 @@ export class GenericDriver extends TrustedDriver {
   ): Promise<FillOutcome> {
     if (value === null) return { ok: false, reason: "Nothing to fill" };
     const wanted = Array.isArray(value) ? value : [value as string];
-    const first = wanted[0] ?? "";
-    let outcome: FillOutcome;
     try {
       const kind = await this.frame.$eval(entry.ref, domKind).catch(() => null);
       if (!kind)
@@ -405,13 +312,10 @@ export class GenericDriver extends TrustedDriver {
         return resume
           ? await this.attachFile(entry.ref, resume)
           : { ok: false, reason: "Tailored PDF not loaded" };
-      outcome = await this.fillKind(entry, kind, wanted);
+      return await this.fillKind(entry, kind, wanted);
     } catch (error) {
-      outcome = failed(error);
+      return failed(error);
     }
-    if (outcome.ok || !this.help || !first) return outcome;
-    // Not filled the usual way: this site's saved steps, then Claude's.
-    return (await this.byHelp(entry, wanted.join(", "), outcome.reason)) ?? outcome;
   }
 
   private async fillKind(
@@ -513,7 +417,7 @@ export class GenericDriver extends TrustedDriver {
     });
     await this.page.keyboard.press("Backspace");
     await this.page.keyboard.sendCharacter(wanted.slice(0, 80));
-    const picked = await this.pickOpen(wanted);
+    const picked = await pickOpenChoice(this.frame, wanted);
     if (!picked) await this.page.keyboard.press("Enter");
     await sleep(200);
     return this.verify(ref, picked ?? wanted);
@@ -526,7 +430,7 @@ export class GenericDriver extends TrustedDriver {
     if (selectionMatches(await this.readBackRef(ref), wanted))
       return { ok: true, result: "already set" };
     await handle.click();
-    const picked = await this.pickOpen(wanted);
+    const picked = await pickOpenChoice(this.frame, wanted);
     if (!picked) {
       await this.page.keyboard.press("Escape");
       return { ok: false, reason: `No choice matching "${wanted}"` };
@@ -534,132 +438,11 @@ export class GenericDriver extends TrustedDriver {
     return this.verify(ref, picked);
   }
 
-  /** Clicks the best-matching choice of a list open anywhere on the page. */
-  private async pickOpen(wanted: string): Promise<string | null> {
-    const deadline = Date.now() + OPTION_WAIT_MS;
-    while (Date.now() < deadline) {
-      await sleep(POLL_MS * 2);
-      const handles: ElementHandle[] = [];
-      const labels: string[] = [];
-      for (const option of await this.frame.$$(OPEN_CHOICES)) {
-        const label = await option.evaluate((el) =>
-          (el as HTMLElement).offsetParent === null
-            ? null
-            : (el.textContent ?? "").replace(/\s+/g, " ").trim(),
-        );
-        if (!label) continue;
-        handles.push(option);
-        labels.push(label);
-      }
-      if (!labels.length) continue;
-      const index = bestOption(labels, wanted);
-      if (index === null) return null;
-      await handles[index]?.click();
-      await sleep(250);
-      return labels[index] ?? null;
-    }
-    return null;
-  }
-
   private async verify(ref: string, expected: string): Promise<FillOutcome> {
     const shown = await this.readBackRef(ref);
-    const same =
-      selectionMatches(shown, expected) ||
-      (digits(expected).length > 5 && digits(shown).endsWith(digits(expected)));
-    return same
+    return showsValue(shown, expected)
       ? { ok: true, result: `set to "${shown.slice(0, 60)}"` }
       : { ok: false, reason: `Shows "${shown.slice(0, 40) || "nothing"}" instead` };
-  }
-
-  /** This site's saved steps for the question, else Claude's; null when neither sets it. */
-  private async byHelp(
-    entry: PlanEntry,
-    wanted: string,
-    failure: string,
-  ): Promise<FillOutcome | null> {
-    const help = this.help;
-    if (!help) return null;
-    const recipe = help.recipes.get(labelKey(entry.label));
-    if (recipe && recipe.worked > recipe.failed) {
-      const ok = await this.runSteps(entry.ref, recipe.steps, wanted);
-      await help.record(entry.label, recipe.steps, ok).catch(() => {});
-      if (ok) return { ok: true, result: "filled with this site's saved steps" };
-    }
-    const html = await this.frame
-      .evaluate(fieldHtml, entry.ref, MAX_HTML_CHARS)
-      .catch(() => "");
-    if (!html) return null;
-    const steps = await help
-      .act({ label: entry.label, wanted, html, failure })
-      .catch(() => [] as ActStep[]);
-    if (!steps.length) return null;
-    // Kept without your answer: "{value}" in its place.
-    const general = steps.map((s) => ({
-      ...s,
-      value: s.value.split(wanted).join("{value}"),
-    }));
-    const ok = await this.runSteps(entry.ref, general, wanted);
-    await help.record(entry.label, general, ok).catch(() => {});
-    return ok
-      ? { ok: true, result: `filled with Claude's steps (${steps.length})` }
-      : { ok: false, reason: `${failure}; Claude's steps didn't set it either` };
-  }
-
-  /**
-   * Runs steps with trusted input: clicks only inside the field's surroundings (never a
-   * submit / continue / delete button), allowed keys only, short waits. True when the field
-   * then shows the value.
-   */
-  private async runSteps(
-    ref: string,
-    steps: readonly ActStep[],
-    wanted: string,
-  ): Promise<boolean> {
-    await this.frame.evaluate(fieldHtml, ref, MAX_HTML_CHARS).catch(() => "");
-    for (const step of steps) {
-      const value = step.value.split("{value}").join(wanted);
-      switch (step.action) {
-        case "click": {
-          const target = await this.frame
-            .$(`[data-ac-box="1"] :is(${value}), [data-ac-box="1"]:is(${value})`)
-            .catch(() => null);
-          if (!target) return false;
-          const blocked = await target.evaluate(
-            (el, pattern) =>
-              (el as HTMLInputElement).type === "submit" ||
-              new RegExp(pattern, "i").test(
-                `${el.textContent ?? ""} ${(el as HTMLInputElement).value ?? ""} ${el.getAttribute("aria-label") ?? ""}`,
-              ),
-            FORBIDDEN_CLICK.source,
-          );
-          if (blocked) return false;
-          await target
-            .click()
-            .catch(() => target.evaluate((el) => (el as HTMLElement).click()));
-          break;
-        }
-        case "type":
-          await this.page.keyboard.sendCharacter(value.slice(0, 2_000));
-          break;
-        case "press":
-          if (!ALLOWED_KEYS.has(value)) return false;
-          await this.page.keyboard.press(value as "Enter");
-          break;
-        case "pick":
-          if (!(await this.pickOpen(value))) return false;
-          break;
-        case "wait":
-          await sleep(Math.min(Number(value) || 0, MAX_WAIT_MS));
-          break;
-      }
-      await sleep(150);
-    }
-    await sleep(200);
-    const shown = await this.readBackRef(ref);
-    return (
-      selectionMatches(shown, wanted) ||
-      (digits(wanted).length > 5 && digits(shown).endsWith(digits(wanted)))
-    );
   }
 
   private readBackRef(ref: string): Promise<string> {

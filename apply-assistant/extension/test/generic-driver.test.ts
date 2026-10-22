@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { labelKey, readGenericPage, shownValue } from "../src/fill/generic-driver";
+import { readGenericPage, shownValue } from "../src/fill/generic-driver";
+import { labelKey } from "../src/fill/site-help";
 import { isSupportedPosting, pagedFill } from "../src/track/job-match";
 
 /** Any company's own application page, read generically. */

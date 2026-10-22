@@ -4,6 +4,8 @@ import type {
   Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import { captureDom, type DomCapture, MAX_DOM_CHARS } from "../trace/dom";
+import { digits, sleep } from "./options";
+import { type SiteHelp, rescueField } from "./site-help";
 import type { PlanEntry } from "./supervisor";
 
 /**
@@ -38,58 +40,24 @@ export interface FormDriver {
   submitted(): Promise<boolean>;
   /** The form's frame as markup with current values, for the run trace. */
   dom(): Promise<DomCapture>;
+  /** A field fill() couldn't set: other ways to set it (saved steps, Claude); null if none ran. */
+  rescue?(
+    entry: PlanEntry,
+    value: string | readonly string[] | null,
+    failure: string,
+  ): Promise<FillOutcome | null>;
 }
 
-export const OPTION_WAIT_MS = 5_000;
-export const POLL_MS = 120;
-export const FORM_WAIT_MS = 15_000;
-
-export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-export const digits = (s: string) => s.replace(/\D/g, "");
-
-/**
- * Dropdown option ranking: exact > starts-with > whole word > contains. Among options starting
- * with your answer, one where it's followed by punctuation ("Bengaluru, Karnataka", "India +91")
- * is the place itself; one where another word follows ("Bengaluru Rural") ranks just below.
- */
-export function rankOption(label: string, wanted: string): number {
-  const s = label.toLowerCase().replace(/\s+/g, " ").trim();
-  const w = wanted.toLowerCase().replace(/\s+/g, " ").trim();
-  if (!w) return 9;
-  if (s === w) return 0;
-  if (s.startsWith(w)) return /^ [\p{L}\p{N}]/u.test(s.slice(w.length)) ? 1.5 : 1;
-  const words = (t: string) => ` ${t.replace(/[^a-z0-9]+/g, " ").trim()} `;
-  if (words(s).includes(words(w))) return 2;
-  if (s.includes(w)) return 3;
-  return 9;
-}
-
-export function bestOption(
-  labels: readonly string[],
-  wanted: string,
-): number | null {
-  const ranked = labels
-    .map((label, index) => ({ index, rank: rankOption(label, wanted) }))
-    .filter((r) => r.rank < 9)
-    .sort(
-      (a, b) =>
-        a.rank - b.rank ||
-        (labels[a.index]?.length ?? 0) - (labels[b.index]?.length ?? 0),
-    );
-  return ranked[0]?.index ?? null;
-}
-
-/**
- * Read-back for a dropdown: some widgets show only part of the chosen option (the phone
- * country picker shows "+91" for "India +91"), so either containing the other counts.
- */
-export function selectionMatches(shown: string, picked: string): boolean {
-  const a = shown.trim().toLowerCase();
-  const b = picked.trim().toLowerCase();
-  // Nothing shown means nothing was chosen (e.g. text typed but the menu never closed).
-  if (!a) return false;
-  return a === b || b.includes(a) || a.includes(b);
-}
+export {
+  bestOption,
+  digits,
+  FORM_WAIT_MS,
+  OPTION_WAIT_MS,
+  POLL_MS,
+  rankOption,
+  selectionMatches,
+  sleep,
+} from "./options";
 
 export const failed = (error: unknown): FillOutcome => ({
   ok: false,
@@ -121,6 +89,26 @@ export abstract class TrustedDriver implements FormDriver {
 
   /** When set, the outline goes on the field's nearest matching wrapper instead of the field. */
   protected readonly boxClosest: string | null = null;
+
+  /** Set by the run: this site's saved steps and Claude, for fields filled no other way. */
+  help: SiteHelp | null = null;
+
+  /** A field fill() couldn't set: this site's saved steps, then Claude's; null if neither ran. */
+  async rescue(
+    entry: PlanEntry,
+    value: string | readonly string[] | null,
+    failure: string,
+  ): Promise<FillOutcome | null> {
+    const wanted = (Array.isArray(value) ? value : [value]).filter(Boolean).join(", ");
+    if (!this.help || !wanted || entry.type === "file") return null;
+    const target = {
+      page: this.page,
+      frame: this.frame,
+      selector: this.boxFor(entry.ref),
+      readBack: () => this.readBack(entry),
+    };
+    return rescueField(target, this.help, entry, wanted, failure);
+  }
 
   /** Outlines the field being worked on and shows a small badge on the page. */
   async highlight(ref: string | null, badge: string): Promise<void> {

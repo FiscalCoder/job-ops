@@ -54,6 +54,8 @@ const myInformation = '<h2>My Information</h2>' +
   '<input id="pw1" name="pw" type="radio" value="true"><label for="pw1">Yes</label><input id="pw2" name="pw" type="radio" value="false"><label for="pw2">No</label></fieldset>' +
   '<div class="field" data-automation-id="formField-country" data-fkit-id="country--country"><label for="country--country"><span>Country<abbr>*</abbr></span></label>' +
   '<button aria-haspopup="listbox" type="button" id="country--country" aria-label="Country Select One Required">Select One</button><input type="text" hidden></div>' +
+  '<div class="field" data-automation-id="formField-contactMethod" data-fkit-id="contact--contactMethod"><label for="contact--contactMethod"><span>Preferred Contact Method<abbr>*</abbr></span></label>' +
+  '<button aria-haspopup="listbox" type="button" id="contact--contactMethod">Select One</button><span class="chevron" role="button" aria-label="Open list">v</span></div>' +
   '<div class="field" data-automation-id="formField-legalName--firstName" data-fkit-id="name--legalName--firstName"><label for="name--legalName--firstName"><span>Given Name(s)<abbr>*</abbr></span></label>' +
   '<input id="name--legalName--firstName" aria-required="true"></div>' +
   '<div class="field" data-automation-id="formField-acceptTermsAndAgreements" data-fkit-id="termsAndConditions--acceptTermsAndAgreements"><label for="terms">I consent to the terms<abbr>*</abbr></label>' +
@@ -112,6 +114,11 @@ document.addEventListener("click", (e) => {
   if (e.target.matches("[data-automation-id$='-display']")) e.target.nextElementSibling?.focus();
   if (e.target.id === "we-add") addJob();
   if (e.target.id === "ed-add") addDegree();
+  // Preferred Contact Method opens only from its chevron.
+  if (e.target.closest(".chevron")) {
+    const button = e.target.closest(".field").querySelector("button");
+    openList(button, ["Select One", "Email", "Phone"], (label) => { button.textContent = label; });
+  }
   const degree = e.target.closest("[id$='--degree']");
   if (degree) openList(degree, ["Select One", "Diploma", "Bachelor's Degree"], (label) => { degree.textContent = label; });
 });
@@ -177,6 +184,7 @@ const VALUES = {
   source: "LinkedIn",
   candidateIsPreviousWorker: "No",
   country: "India",
+  contactMethod: "Email",
   "legalName--firstName": "Testy",
   acceptTermsAndAgreements: "I consent to the terms",
 };
@@ -204,6 +212,8 @@ function valueFor(field, order) {
 
 const posted = [];
 const chooseAsks = [];
+const actAsks = [];
+const recipeCalls = [];
 const runCalls = [];
 const ok = (route, data) =>
   route.fulfill({
@@ -288,6 +298,24 @@ function stubServer(route, url) {
       value: ask.options.includes("Information Systems") ? "Information Systems" : ask.options[0],
       why: "stub",
     });
+  }
+  // "Claude": open the list from its chevron, then pick the value.
+  if (url.pathname === "/plans/stub/act") {
+    const ask = req.postDataJSON();
+    actAsks.push(ask);
+    return ok(route, {
+      steps: [
+        { action: "click", value: ".chevron" },
+        { action: "pick", value: ask.wanted },
+      ],
+      why: "stub",
+    });
+  }
+  if (url.pathname === "/recipes") {
+    recipeCalls.push(
+      req.method() === "GET" ? { host: url.searchParams.get("host") } : req.postDataJSON(),
+    );
+    return ok(route, req.method() === "GET" ? [] : {});
   }
   if (url.pathname === "/kit/stub")
     return ok(route, {
@@ -391,6 +419,7 @@ try {
   );
   const shown = await form.evaluate(() => ({
     country: document.querySelector("#country--country")?.textContent,
+    contact: document.querySelector("#contact--contactMethod")?.textContent,
     source: [...document.querySelectorAll("[data-automation-id=selectedItem]")]
       .map((p) => p.textContent)
       .join(","),
@@ -400,6 +429,27 @@ try {
     listsOpen: document.querySelectorAll("[role=listbox][data-popup]").length,
   }));
   check("dropdown filled", shown.country === "India", shown.country);
+  check(
+    "a dropdown the driver couldn't open filled with Claude's steps from its HTML",
+    shown.contact === "Email" &&
+      actAsks.length === 1 &&
+      actAsks[0].label.startsWith("Preferred Contact Method") &&
+      actAsks[0].html.includes('data-ac-target="1"'),
+    `${shown.contact}; ${actAsks.length} asks`,
+  );
+  const saved = recipeCalls.find((c) => c.label);
+  check(
+    "steps that worked saved for every Workday site, without your answer",
+    recipeCalls[0]?.host === "myworkdayjobs.com" &&
+      saved?.host === "myworkdayjobs.com" &&
+      saved.ok === true &&
+      JSON.stringify(saved.steps) ===
+        JSON.stringify([
+          { action: "click", value: ".chevron" },
+          { action: "pick", value: "{value}" },
+        ]),
+    JSON.stringify(recipeCalls),
+  );
   check("search picked once", shown.source === "LinkedIn", shown.source);
   check("radio chosen", shown.worked === true);
   check("text typed", shown.name === "Testy", shown.name);
@@ -510,7 +560,7 @@ try {
     runCalls.join(" | "),
   );
   const steps = runCalls.filter((c) => c.includes("/actions")).length;
-  check("every filled step logged", steps === 20, `${steps} logged`);
+  check("every filled step logged", steps === 21, `${steps} logged`);
   check("no side panel errors", errors.length === 0, errors.join(" | "));
 } catch (error) {
   failures.push(String(error));

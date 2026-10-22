@@ -500,12 +500,9 @@ Your Job Ops has 10 Workday jobs: FactSet and Hitachi (applied); Capital One, LP
 
 **Users (done, 7601404 + dc4ed6c).** Every apply-assistant request runs as the signed-in Job Ops user (`store/owner.ts`). Everything a user saves, looks up or learns has a `user_id`: answer bank, remembered answers, company limits, runs, traces, captures, company boards, form definitions, Claude's cached answers, site steps. Per-job routes need the job to be the user's in Job Ops (`http/ownership.ts`). Rows from before users belong to Job Ops' admin. Claude uses each user's own Anthropic key (side panel → "Your Claude key"), or for the admin the server's key; without one, Claude is off for that user.
 
-**Where a failed field goes today.**
-- Greenhouse / Ashby / Lever: no Claude fallback. A field that doesn't take a value waits for you.
-- Workday: Claude only picks among search results it found (Field of Study, School). Anything else that fails waits for you.
-- Company sites: this site's recipe, then Claude's DOM steps (field HTML → at most 8 steps), then you.
+**Where a failed field goes now ((a) done, 2026-10-23).** On every system (Greenhouse, Ashby, Lever, Workday, company sites): the driver's own fill, then this site's saved steps for the question, then Claude's DOM steps (field HTML → at most 8 steps: click / type / press / pick / wait), then you. The run calls `driver.rescue()` after a failed fill (`extension/src/fill/site-help.ts`). Steps that worked are saved per site, with your answer replaced by `{value}`. All Workday tenants share one set of steps (host `myworkdayjobs.com`). Workday's own Claude pick among search results (School, Field of Study) still comes first.
 
-Claude only ever reads the HTML. It never sees the page or works it like a person.
+Claude only reads the HTML so far. It doesn't see the page or work it like a person; that's (b).
 
 **Plan: "Let Claude do it" with the computer toolset** (`computer_toolset_20260801`, GA on the Claude API; Sonnet 5.5 / Opus 5.5 accept only the toolset).
 
@@ -521,6 +518,7 @@ Claude only ever reads the HTML. It never sees the page or works it like a perso
    - the server calls Claude and returns its `tool_use` calls;
    - the extension carries them out and sends back `tool_result`s, with a screenshot for `screenshot` / `zoom` and "OK" for the rest.
    - The session state lives on the server, keyed by run.
+   - **Screenshot plus outline (hybrid).** A screenshot alone misses what isn't visible (scrolled-off options, exact values), its clicks are a few pixels off on small targets, and a coordinate can't be saved as a step. So every turn also sends a short outline of the field's area: each element's role, label, value, state (open / checked / disabled), on-screen box and a ref, about 1–3k tokens. Claude acts on refs first (an `element` tool: click / type / pick by ref), precise and saveable as a step. The toolset's pixel actions are the fallback for what the outline can't reach (canvas widgets, cross-site frames). A pixel click is hit-tested too, and the element it landed on is recorded so it can be saved.
 3. **Goals, smallest first.**
    - Per field: "Set the field labelled X (marked) to V; act only inside it."
    - Per page, when the reader finds nothing it can use or a widget-heavy step fails: "Fill these fields with these answers: …"
@@ -538,9 +536,9 @@ Claude only ever reads the HTML. It never sees the page or works it like a perso
    - Workday and Greenhouse get the same recipe layer;
    - the trail keeps every action with its screenshot.
 6. **Escalation order for a failed field:** the driver's own fill → this site's recipe → Claude's DOM steps (cheap) → Claude operating the page (screenshots) → you. Automatic within the per-application budget, or behind a "Let Claude do it" button (a setting).
-7. **Cost (estimate).** A screenshot is about 1.5k input tokens. A field takes about 3–6 turns, so about 10–20k tokens on Sonnet 5.5, roughly $0.03–0.05 per field, with the system prompt and tools cached.
+7. **Cost (estimate).** A screenshot is about 1.5k input tokens, plus 1–3k for the outline. A field takes about 3–6 turns (fewer than with screenshots alone, since Claude doesn't guess and retry clicks), so about 10–25k tokens on Sonnet 5.5, roughly $0.03–0.05 per field, with the system prompt and tools cached.
 8. **Order of work.**
-   - (a) DOM-steps fallback and recipes for Workday and Greenhouse (cheap, closes most gaps);
+   - (a) DOM-steps fallback and recipes for Workday and Greenhouse (cheap, closes most gaps): **done 2026-10-23**, on all systems;
    - (b) per-field operate on all three drivers, behind the button;
    - (c) automatic escalation with the budget;
    - (d) page mode;
