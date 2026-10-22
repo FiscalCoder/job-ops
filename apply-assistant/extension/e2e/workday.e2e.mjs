@@ -71,11 +71,12 @@ const myExperience = '<h2>My Experience</h2>' +
 const field = (id, key, label, control) =>
   '<div class="field" data-automation-id="formField-' + key + '" data-fkit-id="' + id + '--' + key + '"><label for="' + id + '--' + key + '"><span>' + label + '</span></label>' + control + '</div>';
 const text = (id, key, label) => field(id, key, label + '<abbr>*</abbr>', '<input id="' + id + '--' + key + '">');
-// A date: month and year spin buttons, each showing what was typed.
+// A date: month and year spin buttons, each showing what was typed. As on Workday, the inputs
+// have no size: clicking the "MM" / "YYYY" shown focuses them.
 const date = (id, key, label) =>
   '<div class="field" data-automation-id="formField-' + key + '" data-fkit-id="' + id + '--' + key + '"><fieldset><legend><label>' + label + '<abbr>*</abbr></label></legend>' +
-  '<div data-automation-id="dateInputWrapper"><div data-automation-id="dateSectionMonth-display">MM</div><input role="spinbutton" data-automation-id="dateSectionMonth-input">/' +
-  '<div data-automation-id="dateSectionYear-display">YYYY</div><input role="spinbutton" data-automation-id="dateSectionYear-input"></div></fieldset></div>';
+  '<div data-automation-id="dateInputWrapper"><div data-automation-id="dateSectionMonth-display">MM</div><input role="spinbutton" style="width:0;height:0;padding:0;border:0" data-automation-id="dateSectionMonth-input">/' +
+  '<div data-automation-id="dateSectionYear-display">YYYY</div><input role="spinbutton" style="width:0;height:0;padding:0;border:0" data-automation-id="dateSectionYear-input"></div></fieldset></div>';
 const search = (id, key, label) => field(id, key, label + '<abbr>*</abbr>',
   '<div data-automation-id="multiSelectContainer"><ul data-automation-id="selectedItemList"></ul><input id="' + id + '--' + key + '" placeholder="Search"></div>');
 let nextId = 200;
@@ -104,6 +105,8 @@ document.addEventListener("input", (e) => {
   if (e.target.getAttribute("role") === "spinbutton" && display) display.textContent = e.target.value;
 });
 document.addEventListener("click", (e) => {
+  // Clicking the "MM" / "YYYY" shown focuses its input.
+  if (e.target.matches("[data-automation-id$='-display']")) e.target.nextElementSibling?.focus();
   if (e.target.id === "we-add") addJob();
   if (e.target.id === "ed-add") addDegree();
   const degree = e.target.closest("[id$='--degree']");

@@ -503,16 +503,23 @@ export class WorkdayDriver extends TrustedDriver {
       : [null, wanted];
     const box = `:is(${boxOf(ref)})`;
     const parts: [string, string | null | undefined][] = [
-      ["dateSectionMonth-input", month],
-      ["dateSectionYear-input", year],
+      ["dateSectionMonth", month],
+      ["dateSectionYear", year],
     ];
     for (const [part, digits] of parts) {
       if (!digits) continue;
+      // The spin button's input has no size: you click the "MM" / "YYYY" it shows instead.
       const input = await this.frame.$(
-        `${box} [data-automation-id='${part}']`,
+        `${box} [data-automation-id='${part}-input']`,
+      );
+      const display = await this.frame.$(
+        `${box} [data-automation-id='${part}-display']`,
       );
       if (!input) return { ok: false, reason: "Date box not found" };
-      await input.click();
+      await display?.click().catch(() => undefined);
+      await input.evaluate((el) => {
+        if (document.activeElement !== el) (el as HTMLElement).focus();
+      });
       await this.page.keyboard.type(digits);
       await sleep(150);
     }
