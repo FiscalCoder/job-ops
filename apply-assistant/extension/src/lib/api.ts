@@ -118,6 +118,14 @@ export class ApplyClient implements TraceApi {
     return this.request(`/plans/${encodeURIComponent(jobId)}/page`, page);
   }
 
+  /** Workday: Claude picks the closest of a field's choices to your answer. */
+  choose(
+    jobId: string,
+    ask: { label: string; wanted: string; options: readonly string[] },
+  ): Promise<{ value: string | readonly string[]; why: string }> {
+    return this.request(`/plans/${encodeURIComponent(jobId)}/choose`, ask);
+  }
+
   startRun(jobId: string): Promise<{ id: string }> {
     return this.request("/runs", { jobId });
   }

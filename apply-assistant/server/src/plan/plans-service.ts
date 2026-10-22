@@ -19,6 +19,7 @@ import {
   hasRememberedAnswer,
   locationSettles,
   type PlanInput,
+  summarise,
 } from "./planner.js";
 import { normalizeQuestion } from "./question-norm.js";
 import { type ResumeFacts, resumeFacts } from "./resume-facts.js";
@@ -232,6 +233,82 @@ export function createPlans(deps: PlansDeps) {
   const loadResume = async (token: string) =>
     resumeFacts(await jobOps.getDesignResume(token));
 
+  /** Claude picks the closest of a field's choices to your answer (traced). */
+  async function closest(
+    claude: NonNullable<typeof answerer>,
+    jobId: string,
+    job: Awaited<ReturnType<JobOpsApi["getJob"]>>,
+    resume: ResumeFacts,
+    ask: { label: string; wanted: string; options: readonly string[] },
+  ): Promise<TellAnswer> {
+    const answer = await claude.tell(
+      { ref: "choose", label: ask.label, type: "select", options: ask.options },
+      `My answer is "${ask.wanted}", but the form doesn't list it. Pick the choice that means the same or is closest to it.`,
+      {
+        job: {
+          title: job.title,
+          employer: job.employer,
+          description: job.jobDescription,
+        },
+        resume,
+        bank: bankMap(),
+      },
+      traceUsage(trace, jobId),
+    );
+    trace({
+      jobId,
+      kind: "choose",
+      message: `Claude picked "${String(answer.value).slice(0, 80)}" for "${ask.label.slice(0, 80)}" (your answer: "${ask.wanted.slice(0, 80)}")`,
+      data: { ...ask, options: ask.options.length, answer },
+    });
+    return answer;
+  }
+
+  /**
+   * Workday: a dropdown answered from your resume (Degree) whose choices word it differently
+   * ("B.com" vs "Bachelors of Commerce"): Claude picks the closest choice, for you to confirm.
+   */
+  async function withClosestChoices(
+    jobId: string,
+    schema: FormSchema,
+    plan: FillPlan,
+    job: Awaited<ReturnType<JobOpsApi["getJob"]>>,
+    resume: ResumeFacts,
+  ): Promise<FillPlan> {
+    const claude = answerer;
+    if (!claude) return plan;
+    const fields = new Map(schema.fields.map((f) => [f.ref, f]));
+    const entries = await Promise.all(
+      plan.entries.map(async (entry) => {
+        const field = fields.get(entry.ref);
+        const wanted = entry.value;
+        if (
+          entry.status !== "needs-you" ||
+          !entry.source.startsWith("resume:") ||
+          typeof wanted !== "string" ||
+          !field?.options.length
+        )
+          return entry;
+        const answer = await closest(claude, jobId, job, resume, {
+          label: field.label,
+          wanted,
+          options: field.options.map((o) => o.label),
+        }).catch(() => null);
+        const option = field.options.find((o) => o.label === answer?.value);
+        if (!option) return entry;
+        return {
+          ...entry,
+          status: "fill" as const,
+          value: option.label,
+          optionValues: [option.value],
+          actionClass: "confirm" as const,
+          reason: `Claude picked the closest to "${wanted}"`,
+        };
+      }),
+    );
+    return { ...plan, entries, summary: summarise(entries) };
+  }
+
   return {
     /** "Tell agent": Claude's proposal for one field, following your instruction. */
     async tell(
@@ -279,6 +356,27 @@ export function createPlans(deps: PlansDeps) {
     },
 
     /**
+     * Workday: a field whose choices differ by company (Field of Study, Degree) and none of
+     * which matches your answer as such: Claude picks the closest of the choices found.
+     */
+    async choose(
+      token: string,
+      jobId: string,
+      ask: { label: string; wanted: string; options: readonly string[] },
+    ): Promise<TellAnswer> {
+      if (!answerer)
+        throw new NotPlannableError(
+          jobId,
+          "Claude isn't set up on the server (no Anthropic key)",
+        );
+      const [job, resume] = await Promise.all([
+        jobOps.getJob(token, jobId),
+        loadResume(token),
+      ]);
+      return closest(answerer, jobId, job, resume, ask);
+    },
+
+    /**
      * Workday: plans the one page you're on from the fields the extension read there (its form
      * only exists after you sign in). Not stored: each page is planned as you reach it.
      */
@@ -292,13 +390,14 @@ export function createPlans(deps: PlansDeps) {
         loadResume(token),
       ]);
       const schema = parseWorkdayPage(page, job.title);
-      const { plan, fromClaude } = await planSchema(
+      const { plan: planned, fromClaude } = await planSchema(
         jobId,
         schema,
         job,
         resume,
         bankMap(),
       );
+      const plan = await withClosestChoices(jobId, schema, planned, job, resume);
       const { summary } = plan;
       const add = entriesToAdd(page, resume);
       trace({

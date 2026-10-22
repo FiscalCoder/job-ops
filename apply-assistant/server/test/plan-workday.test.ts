@@ -400,3 +400,87 @@ describe("POST /plans/:jobId/page", () => {
     expect(planEvent.message).toContain('Workday page "Application Questions"');
   });
 });
+
+describe("POST /plans/:jobId/choose", () => {
+  it("Claude picks the closest of the choices found; one the form lacks is refused", async () => {
+    let reply = { answer: ["Information Systems"], why: "Same field" };
+    const create = vi.fn<MessagesApi["create"]>(
+      async () =>
+        ({
+          model: "claude-haiku-5-5",
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: JSON.stringify(reply) }],
+          usage: { input_tokens: 500, output_tokens: 20 },
+        }) as unknown as Anthropic.Message,
+    );
+    const server = createApp({
+      jobOps,
+      db: openStore(":memory:"),
+      authCacheSeconds: 60,
+      claude: {
+        messages: { create },
+        mapModel: "claude-haiku-5-5",
+        draftModel: "claude-sonnet-5-5",
+      },
+    }).listen(0);
+    await new Promise((r) => server.once("listening", r));
+    close = () => server.close();
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const choose = async (body: unknown) => {
+      const res = await fetch(`${base}/plans/job-1/choose`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer good",
+        },
+        body: JSON.stringify(body),
+      });
+      return { status: res.status, body: (await res.json()) as any };
+    };
+    const ask = {
+      label: "Field of Study",
+      wanted: "Information System Management",
+      options: ["Information Systems", "Management", "Computer Science"],
+    };
+    const picked = await choose(ask);
+    expect(picked.status).toBe(200);
+    expect(picked.body.data.value).toBe("Information Systems");
+    const prompt = String(create.mock.calls[0]?.[0].messages[0]?.content);
+    expect(prompt).toContain("Information System Management");
+    expect(prompt).toContain("Computer Science");
+
+    reply = { answer: ["Information Technology"], why: "Close" };
+    expect((await choose(ask)).status).toBe(422);
+    expect((await choose({ ...ask, options: [] })).status).toBe(400);
+
+    // A Degree dropdown wording none of its choices like your degree: Claude picks one while
+    // the page is planned, and you confirm it.
+    reply = { answer: ["Engineering Degree (4 years)"], why: "B.Tech" };
+    const res = await fetch(`${base}/plans/job-1/page`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer good",
+      },
+      body: JSON.stringify({
+        step: "My Experience",
+        fields: [
+          {
+            ref: "education-1--degree",
+            key: "degree",
+            label: "Degree",
+            kind: "dropdown",
+            required: true,
+            options: ["Certificate", "Engineering Degree (4 years)", "Diploma"],
+          },
+        ],
+      }),
+    });
+    const degree = ((await res.json()) as any).data.entries[0];
+    expect(degree).toMatchObject({
+      status: "fill",
+      value: "Engineering Degree (4 years)",
+      actionClass: "confirm",
+    });
+  });
+});

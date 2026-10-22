@@ -81,6 +81,13 @@ const NEW_PAGE_WAIT_MS = 10_000;
  */
 const OPEN_OPTIONS =
   "[role='listbox']:not([data-automation-id='selectedItemList']) [role='option']";
+/** Workday's placeholder choice, and what a search shows when it finds nothing. */
+const NOT_A_CHOICE = /^(select one|no items\.?|no results?( found)?\.?)$/i;
+/** Words not worth searching for on their own. */
+const STOP_WORDS = /^(and|the|for|with|of|in)$/i;
+/** How many of an answer's words are searched for when the whole answer finds nothing. */
+const MAX_SEARCH_WORDS = 4;
+
 /** Workday's placeholder choice in every dropdown. */
 const PLACEHOLDER = /^select one$/i;
 
@@ -267,7 +274,17 @@ function shownValue(box: Element | null): string {
   return input?.value ?? "";
 }
 
+/** Picks the closest of a field's choices to your answer (Claude, on the server), or null. */
+export type Chooser = (
+  label: string,
+  wanted: string,
+  options: readonly string[],
+) => Promise<string | null>;
+
 export class WorkdayDriver extends TrustedDriver {
+  /** Set by the run: used when a search finds nothing worded like your answer. */
+  chooser: Chooser | null = null;
+
   protected readonly errorSelector =
     "[data-automation-id='errorMessage'], [data-automation-id='errorBanner'] li, [data-automation-id='inputAlert']";
 
@@ -419,7 +436,7 @@ export class WorkdayDriver extends TrustedDriver {
         case "dropdown":
           return await this.dropdown(entry.ref, first);
         case "search":
-          return await this.search(entry.ref, wanted);
+          return await this.search(entry.ref, wanted, entry.label);
         case "radio":
         case "checkbox":
           return await this.choose(entry.ref, wanted);
@@ -467,8 +484,10 @@ export class WorkdayDriver extends TrustedDriver {
   private async search(
     ref: string,
     wanted: readonly string[],
+    label: string,
   ): Promise<FillOutcome> {
     const picked: string[] = [];
+    const notes: string[] = [];
     for (const item of wanted) {
       if (selectionMatches(await this.readBackRef(ref), item)) {
         picked.push(item);
@@ -478,42 +497,115 @@ export class WorkdayDriver extends TrustedDriver {
         `:is(${boxOf(ref)}) [data-automation-id='multiSelectContainer'] input`,
       );
       if (!input) return { ok: false, reason: "Search box not found" };
-      await this.focusAndClear(input);
-      await this.page.keyboard.sendCharacter(item.slice(0, 60));
-      await this.page.keyboard.press("Enter");
-      let chosen = await this.pickOpen(item);
-      if (chosen && !selectionMatches(await this.readBackRef(ref), chosen))
-        chosen = (await this.pickOpen(item)) ?? chosen;
+      const open = await this.results(input, item);
+      let chosen = open ? await this.pickResult(ref, open, item) : null;
       await this.page.keyboard.press("Escape");
+      // One answer (Field of Study, School) that the list words differently: Claude picks.
+      if (!chosen && wanted.length === 1 && this.chooser) {
+        chosen = await this.pickWithClaude(ref, input, label, item);
+        if (chosen) notes.push(`Claude picked the closest to "${item}"`);
+      }
       // Nothing found: don't leave the text for the next search to be typed onto.
       if (!chosen) await this.focusAndClear(input);
       if (chosen) picked.push(chosen);
     }
     const shown = await this.readBackRef(ref);
     const kept = picked.filter((p) => selectionMatches(shown, p));
-    if (kept.length === 0 || (wanted.length === 1 && kept.length < picked.length))
+    if (
+      kept.length === 0 ||
+      (wanted.length === 1 && kept.length < picked.length)
+    )
       return {
         ok: false,
         reason: `No result matching "${wanted.join(", ")}" was kept`,
       };
     // Several (skills): Workday's list may not have every one; what it has is enough.
     const notFound = wanted.length - kept.length;
+    if (notFound) notes.push(`${notFound} not in Workday's list`);
     return {
       ok: true,
-      result: `picked "${shown}"${notFound ? ` (${notFound} not in Workday's list)` : ""}`,
+      result: `picked "${shown}"${notes.length ? ` (${notes.join("; ")})` : ""}`,
     };
   }
 
-  /** Puts the cursor in a search box (the click can land on its frame) and empties it. */
+  /** Types text into a search box, presses Enter and waits for its results. */
+  private async results(input: ElementHandle, text: string) {
+    await this.focusAndClear(input);
+    await this.page.keyboard.sendCharacter(text.slice(0, 60));
+    await this.page.keyboard.press("Enter");
+    return this.openChoices();
+  }
+
+  /** Clicks the result that best matches; a category opens its own list, so picks again there. */
+  private async pickResult(
+    ref: string,
+    open: { labels: string[]; handles: ElementHandle[] },
+    wanted: string,
+  ): Promise<string | null> {
+    const usable = open.labels.map((l) => (NOT_A_CHOICE.test(l) ? "" : l));
+    const index = bestOption(usable, wanted);
+    if (index === null) return null;
+    await open.handles[index]?.click();
+    await sleep(300);
+    const chosen = open.labels[index] ?? null;
+    if (chosen && !selectionMatches(await this.readBackRef(ref), chosen))
+      return (await this.pickOpen(wanted)) ?? chosen;
+    return chosen;
+  }
+
+  /**
+   * Your answer isn't in the list as such (Field of Study differs by company): searches its
+   * main words, has Claude pick the closest of everything found, and picks that.
+   */
+  private async pickWithClaude(
+    ref: string,
+    input: ElementHandle,
+    label: string,
+    wanted: string,
+  ): Promise<string | null> {
+    const words = [
+      ...new Set(
+        wanted
+          .split(/[^\p{L}\p{N}+#.]+/u)
+          .filter((w) => w.length > 2 && !STOP_WORDS.test(w)),
+      ),
+    ].slice(0, MAX_SEARCH_WORDS);
+    const found = new Set<string>();
+    for (const word of words) {
+      const open = await this.results(input, word);
+      await this.page.keyboard.press("Escape");
+      for (const l of open?.labels ?? []) if (!NOT_A_CHOICE.test(l)) found.add(l);
+    }
+    if (found.size === 0 || !this.chooser) return null;
+    const choice = await this.chooser(label, wanted, [...found].slice(0, 300));
+    if (!choice) return null;
+    const open = await this.results(input, choice);
+    const picked = open ? await this.pickResult(ref, open, choice) : null;
+    await this.page.keyboard.press("Escape");
+    return picked;
+  }
+
+  /**
+   * Puts the cursor in a search box (the click can land on its frame) and empties it: its
+   * text is selected directly, since Ctrl+A doesn't select it on Workday.
+   */
   private async focusAndClear(input: ElementHandle): Promise<void> {
     await input.click().catch(() => undefined);
-    await input.evaluate((el) => {
-      if (document.activeElement !== el) (el as HTMLElement).focus();
+    const left = await input.evaluate((el) => {
+      const box = el as HTMLInputElement;
+      if (document.activeElement !== box) box.focus();
+      box.select();
+      return box.value.length;
     });
-    await this.page.keyboard.down("Control");
-    await this.page.keyboard.press("a");
-    await this.page.keyboard.up("Control");
+    if (left === 0) return;
     await this.page.keyboard.press("Backspace");
+    // Still text (the selection didn't hold): delete it from the end, one key at a time.
+    const still = await input.evaluate((el) => {
+      const box = el as HTMLInputElement;
+      box.setSelectionRange(box.value.length, box.value.length);
+      return box.value.length;
+    });
+    for (let i = 0; i < still; i++) await this.page.keyboard.press("Backspace");
   }
 
   /** Types a date into its spin buttons: "09/2025" (month and year) or "2019" (year only). */

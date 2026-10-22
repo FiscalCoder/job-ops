@@ -251,7 +251,18 @@ export class RunController {
       ...options,
       trace,
       context,
-      attach: (page) => WorkdayDriver.attach(page),
+      attach: async (page) => {
+        const driver = await WorkdayDriver.attach(page);
+        if (driver)
+          driver.chooser = async (label, wanted, options) => {
+            const answer = await client
+              .choose(job.jobId, { label, wanted, options })
+              .catch(() => null);
+            const value = answer?.value;
+            return (typeof value === "string" ? value : value?.[0]) ?? null;
+          };
+        return driver;
+      },
       plan: (driver) =>
         planWorkdayPage(client, job.jobId, driver as WorkdayDriver),
       // Workday fills My Experience from the resume, so it goes before anything typed.

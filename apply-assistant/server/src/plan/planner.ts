@@ -647,7 +647,7 @@ function planField(
 
 const MINUTES = { base: 1, needsYou: 0.75, confirm: 0.15, auto: 0.05 };
 
-function summarise(entries: readonly PlanEntry[]): PlanSummary {
+export function summarise(entries: readonly PlanEntry[]): PlanSummary {
   const filled = entries.filter((e) => e.status === "fill");
   const count = (cls: ActionClass) =>
     filled.filter((e) => e.actionClass === cls).length;

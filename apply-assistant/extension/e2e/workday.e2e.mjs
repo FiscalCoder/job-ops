@@ -100,7 +100,7 @@ function addDegree() {
 const RESULTS = {
   source: ["LinkedIn", "LinkedIn Learning", "Indeed", "Referral"],
   school: ["Some Institute of Technology", "Some School"],
-  fieldOfStudy: ["Computer Science", "Computer Engineering"],
+  fieldOfStudy: ["Computer Science", "Information Systems", "Management Studies"],
   skills: ["React", "React Native", "TypeScript"],
 };
 document.addEventListener("input", (e) => {
@@ -117,10 +117,13 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   const input = e.target;
+  // As on Workday, Ctrl+A doesn't select a search box's text.
+  if (e.ctrlKey && e.key === "a" && input.closest?.("[data-automation-id=multiSelectContainer]")) e.preventDefault();
   if (e.key !== "Enter" || !input.closest?.("[data-automation-id=multiSelectContainer]")) return;
   const typed = input.value.toLowerCase();
-  const results = RESULTS[input.id.split("--").pop()].filter((r) => r.toLowerCase().includes(typed));
-  openList(input, results, (label) => {
+  const found = RESULTS[input.id.split("--").pop()].filter((r) => r.toLowerCase().includes(typed));
+  openList(input, found.length ? found : ["No Items."], (label) => {
+    if (label === "No Items.") return;
     const pill = document.createElement("li");
     // As on Workday, a picked tag is an option of a listbox ("selectedItemList").
     pill.setAttribute("role", "option");
@@ -183,7 +186,8 @@ const JOBS = [
   { jobTitle: "Senior Engineer", companyName: "Acme", currentlyWorkHere: "I currently work here", startDate: "09/2023", roleDescription: "Built the platform." },
   { jobTitle: "Engineer", companyName: "Beta", startDate: "01/2020", endDate: "08/2023", roleDescription: "Built features." },
 ];
-const DEGREES = [{ school: "Some Institute of Technology", fieldOfStudy: "Computer Science", degree: "Bachelor's Degree" }];
+// "Information System Management" isn't in the list as such: Claude picks the closest.
+const DEGREES = [{ school: "Some Institute of Technology", fieldOfStudy: "Information System Management", degree: "Bachelor's Degree" }];
 /** The stub's answer for one field (the server maps entries the same way). */
 function valueFor(field, order) {
   const entry = /^(workExperience|education)-(\d+)--/.exec(field.ref);
@@ -199,6 +203,7 @@ function valueFor(field, order) {
 }
 
 const posted = [];
+const chooseAsks = [];
 const runCalls = [];
 const ok = (route, data) =>
   route.fulfill({
@@ -274,6 +279,14 @@ function stubServer(route, url) {
               source: "bank:stub",
             },
       ),
+    });
+  }
+  if (url.pathname === "/plans/stub/choose") {
+    const ask = req.postDataJSON();
+    chooseAsks.push(ask);
+    return ok(route, {
+      value: ask.options.includes("Information Systems") ? "Information Systems" : ask.options[0],
+      why: "stub",
     });
   }
   if (url.pathname === "/kit/stub")
@@ -454,9 +467,18 @@ try {
   check(
     "an education entry added and filled",
     experience.school === "Some Institute of Technology" &&
-      experience.study === "Computer Science" &&
+      experience.study === "Information Systems" &&
       experience.degree === "Bachelor's Degree",
     `${experience.school} / ${experience.study} / ${experience.degree}`,
+  );
+  check(
+    "Field of Study not in the list as such: Claude picked from what its words found",
+    chooseAsks.length === 1 &&
+      chooseAsks[0].wanted === "Information System Management" &&
+      chooseAsks[0].options.includes("Information Systems") &&
+      chooseAsks[0].options.includes("Management Studies") &&
+      !chooseAsks[0].options.includes("No Items."),
+    JSON.stringify(chooseAsks),
   );
   check(
     "skills added one by one (those Workday has)",

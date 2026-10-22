@@ -12,6 +12,13 @@ const tellBody = z.object({
   instruction: z.string().trim().min(2).max(500),
 });
 
+/** Workday: the choices found for a field none of which matches your answer as such. */
+const chooseBody = z.object({
+  label: z.string().trim().min(1).max(500),
+  wanted: z.string().trim().min(1).max(500),
+  options: z.array(z.string().trim().min(1).max(300)).min(1).max(300),
+});
+
 /** Fill plans: one per job with a matched, fetched form, and "Tell agent" for one field. */
 export function createPlanRoutes(plans: PlansService) {
   const router = Router();
@@ -25,6 +32,35 @@ export function createPlanRoutes(plans: PlansService) {
       sendJobOpsFailure(res, error);
     }
   });
+
+  /** Workday: Claude picks the closest of a field's choices to your answer. */
+  router.post(
+    "/plans/:jobId/choose",
+    async (req: AuthedRequest, res: Response) => {
+      const body = chooseBody.safeParse(req.body);
+      if (!body.success) {
+        sendError(res, 400, "INVALID_REQUEST", "The field and its choices are needed");
+        return;
+      }
+      try {
+        sendOk(res, await plans.choose(tokenOf(req), String(req.params.jobId), body.data));
+      } catch (error) {
+        if (error instanceof NotPlannableError) {
+          sendError(res, 409, "NOT_PLANNABLE", error.message);
+          return;
+        }
+        if (error instanceof TellRejectedError) {
+          sendError(res, 422, "NO_ANSWER", error.message);
+          return;
+        }
+        if (error instanceof JobOpsError) {
+          sendJobOpsFailure(res, error);
+          return;
+        }
+        sendError(res, 502, "CLAUDE_FAILED", "Claude couldn't be reached; try again");
+      }
+    },
+  );
 
   /** "Tell agent": Claude proposes one field's value from your instruction (nothing is filled). */
   router.post(
