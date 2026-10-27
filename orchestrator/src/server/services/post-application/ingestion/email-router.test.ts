@@ -81,6 +81,7 @@ describe("classifyWithSmartRouter", () => {
     expect(prompt).toContain("job board alerts");
     expect(prompt).toContain("course/learning platforms");
     expect(prompt).toContain("one-time security/verification codes");
+    expect(prompt).toContain('application was viewed" notifications');
     expect(prompt).toContain("MUST be 0 when bestMatchIndex is null");
     expect(prompt).toContain("When unsure, use isRelevant=false");
     expect(prompt).toContain("ServiceNow: Sr Software Engineer");

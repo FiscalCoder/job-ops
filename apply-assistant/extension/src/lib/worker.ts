@@ -29,6 +29,8 @@ export interface WorkerDeps {
   readonly now: () => Date;
   /** Keys of tasks that failed recently (persisted by the caller). */
   readonly recentFailures: Map<string, number>;
+  /** Only this job's lookups (Fill on a posting just captured), not the whole queue. */
+  readonly onlyJobId?: string;
 }
 
 const MAX_ROUNDS = 3;
@@ -50,6 +52,8 @@ export async function runLookups(deps: WorkerDeps): Promise<RunSummary> {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const now = deps.now().getTime();
       const pending = (await deps.client.pending()).filter((p) => {
+        if (deps.onlyJobId !== undefined && p.jobId !== deps.onlyJobId)
+          return false;
         const failedAt = deps.recentFailures.get(taskKey(p));
         const wait = failedAt !== undefined && now - failedAt < RETRY_AFTER_MS;
         if (wait && round === 0) skipped++;

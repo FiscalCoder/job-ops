@@ -530,6 +530,22 @@ describe("runLookups", () => {
     expect(summary).toMatchObject({ lines: [], skipped: 1 });
   });
 
+  it("with onlyJobId, runs that job's lookups and leaves the rest of the queue", async () => {
+    const task = { type: "follow-short-link", url: "https://grnh.se/broken" } as const;
+    const { client } = server([
+      [pending(task), { ...pending(task, "Other Co"), jobId: "j2" }],
+    ]);
+    const summary = await runLookups({
+      client,
+      fetch: fakeWeb({}).fetchImpl,
+      pause: async () => {},
+      now: () => new Date("2026-10-20T10:00:00Z"),
+      recentFailures: new Map(),
+      onlyJobId: "j2",
+    });
+    expect(summary.lines.map((l) => l.employer)).toEqual(["Other Co"]);
+  });
+
   it("reports a server problem instead of throwing", async () => {
     const client = new ApplyClient("https://apply.test", "bad", (async () =>
       json(

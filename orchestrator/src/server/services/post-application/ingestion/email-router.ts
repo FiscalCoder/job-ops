@@ -190,6 +190,7 @@ MATCHING:
 
 OTHER FIELDS:
 - stageTarget must be one of: ${POST_APPLICATION_ROUTER_STAGE_TARGETS.join("|")}. Use no_change for irrelevant emails.
+- "Your application was viewed" notifications (e.g. LinkedIn) are no_change: nobody has contacted the user. Use recruiter_screen only when a recruiter actually reaches out to talk or schedule a screen.
 - stageEventPayload should be minimal structured data or null.
 
 Active jobs (index. company: title):

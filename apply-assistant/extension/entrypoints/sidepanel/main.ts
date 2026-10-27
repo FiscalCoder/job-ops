@@ -172,7 +172,15 @@ async function matchPosting(
   for (;;) {
     const current = queueItems.find((i) => i.jobId === item.jobId) ?? item;
     const linkSaved = pageKey(current.applicationLink ?? "") === here;
-    await chrome.runtime.sendMessage({ type: "run-lookups" }).catch(() => null);
+    // This job's lookups only, and never past the deadline: a slow site can't hold the run.
+    await Promise.race([
+      chrome.runtime
+        .sendMessage({ type: "run-lookups", jobId: item.jobId })
+        .catch(() => null),
+      new Promise((resolve) =>
+        setTimeout(resolve, Math.max(0, deadline - Date.now())),
+      ),
+    ]);
     await loadQueue();
     const matched = jobForTab(url, queueItems);
     if (matched?.jobId === item.jobId && matched.plan) return matched;

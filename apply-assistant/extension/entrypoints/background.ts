@@ -18,7 +18,7 @@ const PAUSE_MS = 400;
 
 let running: Promise<RunSummary | null> | null = null;
 
-async function runOnce(): Promise<RunSummary | null> {
+async function runOnce(onlyJobId?: string): Promise<RunSummary | null> {
   const settings = await loadSettings();
   if (!settings.token) return null;
   const failures = await loadFailures();
@@ -28,9 +28,11 @@ async function runOnce(): Promise<RunSummary | null> {
     pause: () => new Promise((r) => setTimeout(r, PAUSE_MS)),
     now: () => new Date(),
     recentFailures: failures,
+    ...(onlyJobId === undefined ? {} : { onlyJobId }),
   });
   await saveFailures(failures);
-  await saveLastRun(summary);
+  // One job's lookups aren't a pass over the queue: the last pass's summary stays.
+  if (onlyJobId === undefined) await saveLastRun(summary);
   return summary;
 }
 
@@ -62,9 +64,12 @@ export default defineBackground(() => {
     if (alarm.name === ALARM) void runNow();
   });
   chrome.runtime.onMessage.addListener(
-    (message: { type?: string }, _sender, reply) => {
+    (message: { type?: string; jobId?: string }, _sender, reply) => {
       if (message?.type !== "run-lookups") return false;
-      runNow().then(reply, (error: unknown) => reply({ error: String(error) }));
+      // One job's lookups run beside a pass rather than waiting for the whole queue.
+      const run =
+        typeof message.jobId === "string" ? runOnce(message.jobId) : runNow();
+      run.then(reply, (error: unknown) => reply({ error: String(error) }));
       return true;
     },
   );
