@@ -88,6 +88,26 @@ describe("formatBankValue", () => {
     });
   });
 
+  it("money: a job paid in your currency gets the plain yearly amount; monthly-only fields the month", () => {
+    // Workday (J&J): a numbers-only box; "4000000 INR per year" kept only the digits.
+    expect(
+      formatBankValue(
+        "money",
+        "INR 4000000",
+        field("What is your base salary expectation (annual or monthly)?"),
+        "India",
+      ),
+    ).toEqual({ value: "4000000", alternatives: [] });
+    expect(
+      formatBankValue(
+        "money",
+        "INR 3000000",
+        field("Expected monthly salary"),
+        "India",
+      ),
+    ).toEqual({ value: "250000", alternatives: [] });
+  });
+
   it("money: never converts currencies; a job paid in another currency needs you", () => {
     expect(
       formatBankValue(

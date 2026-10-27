@@ -8,6 +8,7 @@ import {
   digits,
   OPTION_WAIT_MS,
   POLL_MS,
+  sameNumber,
   selectionMatches,
   sleep,
 } from "./options";
@@ -100,7 +101,9 @@ const OPEN_CHOICES =
  * attribute values. Runs inside the page.
  */
 function fieldHtml(selector: string, limit: number): string {
-  for (const el of document.querySelectorAll("[data-ac-target], [data-ac-box]")) {
+  for (const el of document.querySelectorAll(
+    "[data-ac-target], [data-ac-box]",
+  )) {
     el.removeAttribute("data-ac-target");
     el.removeAttribute("data-ac-box");
   }
@@ -110,17 +113,22 @@ function fieldHtml(selector: string, limit: number): string {
   let box: Element = el;
   for (let depth = 0; depth < 6; depth++) {
     const parent: Element | null = box.parentElement;
-    if (!parent || parent === document.body || parent.outerHTML.length > limit) break;
+    if (!parent || parent === document.body || parent.outerHTML.length > limit)
+      break;
     box = parent;
   }
   box.setAttribute("data-ac-box", "1");
   const copy = box.cloneNode(true) as Element;
-  for (const junk of copy.querySelectorAll("script, style, svg, img, iframe, noscript"))
+  for (const junk of copy.querySelectorAll(
+    "script, style, svg, img, iframe, noscript",
+  ))
     junk.remove();
   for (const node of [copy, ...copy.querySelectorAll("*")])
     for (const attr of [...node.attributes]) {
-      if (/^on/i.test(attr.name) || attr.name === "style") node.removeAttribute(attr.name);
-      else if (attr.value.length > 120) node.setAttribute(attr.name, `${attr.value.slice(0, 120)}…`);
+      if (/^on/i.test(attr.name) || attr.name === "style")
+        node.removeAttribute(attr.name);
+      else if (attr.value.length > 120)
+        node.setAttribute(attr.name, `${attr.value.slice(0, 120)}…`);
     }
   return copy.outerHTML.slice(0, limit);
 }
@@ -156,7 +164,10 @@ export async function pickOpenChoice(
 }
 
 /** The choices of a list open in the frame, once any show (none after waitMs). */
-export async function visibleChoices(frame: Frame, waitMs: number): Promise<string[]> {
+export async function visibleChoices(
+  frame: Frame,
+  waitMs: number,
+): Promise<string[]> {
   const deadline = Date.now() + waitMs;
   do {
     await sleep(POLL_MS * 2);
@@ -176,7 +187,7 @@ export async function visibleChoices(frame: Frame, waitMs: number): Promise<stri
 /** Shows the value (a number may show formatted: "+91 98…" for "98…"). */
 export const showsValue = (shown: string, wanted: string): boolean =>
   selectionMatches(shown, wanted) ||
-  (digits(wanted).length > 5 && digits(shown).endsWith(digits(wanted)));
+  (digits(wanted).length > 5 && sameNumber(shown, wanted));
 
 /** This site's saved steps for the question, else Claude's; null when neither sets it. */
 export async function rescueField(
@@ -223,7 +234,9 @@ async function runSteps(
   wanted: string,
 ): Promise<boolean> {
   const { page, frame } = target;
-  await frame.evaluate(fieldHtml, target.selector, MAX_HTML_CHARS).catch(() => "");
+  await frame
+    .evaluate(fieldHtml, target.selector, MAX_HTML_CHARS)
+    .catch(() => "");
   for (const step of steps) {
     const value = step.value.split("{value}").join(wanted);
     switch (step.action) {

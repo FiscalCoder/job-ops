@@ -1,10 +1,14 @@
 import { ATS_NAMES } from "../ats.js";
-import type { QuestionAnswerer } from "../claude/answerer.js";
-import type { ClaudeAnswer } from "../claude/questions.js";
-import { isAnswerable, type Question, toQuestion } from "../claude/questions.js";
 import type { ActAnswer, ActRequest } from "../claude/act.js";
-import type { TellAnswer } from "../claude/tell.js";
+import type { QuestionAnswerer } from "../claude/answerer.js";
 import { claudeOff } from "../claude/off.js";
+import type { ClaudeAnswer } from "../claude/questions.js";
+import {
+  isAnswerable,
+  type Question,
+  toQuestion,
+} from "../claude/questions.js";
+import type { TellAnswer } from "../claude/tell.js";
 import { traceUsage } from "../claude/usage-trace.js";
 import type { JobOpsApi } from "../jobops/client.js";
 import type { AnswerBankRepo } from "../store/answer-bank-repo.js";
@@ -15,6 +19,7 @@ import type { LearnedAnswersRepo } from "../store/learned-answers-repo.js";
 import type { TraceRecord } from "../store/trace-store.js";
 import { classifyField } from "./classify.js";
 import type { FormSchema } from "./form-schema.js";
+import { parseGenericPage } from "./generic-schema.js";
 import {
   buildPlan,
   type FillPlan,
@@ -26,7 +31,7 @@ import {
 import { normalizeQuestion } from "./question-norm.js";
 import { type ResumeFacts, resumeFacts } from "./resume-facts.js";
 import { parseFormSchema } from "./schemas.js";
-import { parseGenericPage } from "./generic-schema.js";
+import { tailoredFor } from "./tailored-resume.js";
 import {
   entriesToAdd,
   parseWorkdayPage,
@@ -75,6 +80,12 @@ export interface RebuildResult {
   readonly rebuilt: number;
   readonly failed: readonly { jobId: string; reason: string }[];
 }
+
+/** Questions about a fact (education, employment): matched, never re-picked by fit. */
+const FACTUAL_FIELD =
+  /\b(school|college|universit|institut|degree|field of study|major|discipline|speciali[sz]ation|qualification|company|employer)/i;
+/** What Claude replies when a fact has no matching choice (the field then waits for you). */
+const NO_MATCH = "NO MATCH";
 
 export function createPlans(deps: PlansDeps) {
   const { jobOps, targets, schemas, plans, answers } = deps;
@@ -208,11 +219,12 @@ export function createPlans(deps: PlansDeps) {
   async function buildWith(
     token: string,
     jobId: string,
-    resume: ResumeFacts,
+    baseResume: ResumeFacts,
     bank: ReadonlyMap<string, string>,
   ): Promise<FillPlan> {
     const { target, stored } = formOf(jobId);
     const job = await jobOps.getJob(token, jobId);
+    const resume = tailoredFor(baseResume, job);
     const schema = parseFormSchema(target.ats, stored.payload);
     const { plan, fromClaude } = await planSchema(
       jobId,
@@ -244,10 +256,30 @@ export function createPlans(deps: PlansDeps) {
     return plan;
   }
 
+  /** The job, and the resume as its tailored PDF has it (Claude writes from this). */
+  const jobAndResume = async (token: string, jobId: string) => {
+    const [job, base] = await Promise.all([
+      jobOps.getJob(token, jobId),
+      loadResume(token),
+    ]);
+    return { job, resume: tailoredFor(base, job) };
+  };
+
   const loadResume = async (token: string) =>
     resumeFacts(await jobOps.getDesignResume(token));
 
   /** Claude picks the closest of a field's choices to your answer (traced). */
+  /**
+   * A fact about you (school, degree, field of study, employer) is matched, never swapped for
+   * something that "fits": Accounting is no answer for an AI/ML degree. A preference (work
+   * model) may be re-picked from your saved answers when the planned answer doesn't fit.
+   */
+  function closestInstruction(ask: { label: string; wanted: string }): string {
+    if (ask.wanted && FACTUAL_FIELD.test(ask.label))
+      return `My answer is "${ask.wanted}", but the form doesn't list it. Pick the choice that means the same, or the broader field or category that contains it (e.g. "Computer Science" for "Artificial Intelligence and Machine Learning"). A school, college, university or company must be the same one. When no choice is that, pick "Other" if there is one; otherwise reply with the value "${NO_MATCH}". Never pick an unrelated choice, and never one based on a different part of my resume.`;
+    return `${ask.wanted ? `My answer is "${ask.wanted}", but the form doesn't list it. Pick the choice that means the same or is closest to it. If my answer doesn't fit these choices at all (it may answer a different question), pick the choice that fits me best from my saved answers and resume.` : "I have no saved answer for this: pick the choice that fits me best from my saved answers and resume."} A school, college, university or company must be the same one: when it isn't listed, pick the "Other" choice if there is one, never a different institution.`;
+  }
+
   async function closest(
     claude: NonNullable<typeof answerer>,
     jobId: string,
@@ -257,7 +289,7 @@ export function createPlans(deps: PlansDeps) {
   ): Promise<TellAnswer> {
     const answer = await claude.tell(
       { ref: "choose", label: ask.label, type: "select", options: ask.options },
-      `${ask.wanted ? `My answer is "${ask.wanted}", but the form doesn't list it. Pick the choice that means the same or is closest to it. If my answer doesn't fit these choices at all (it may answer a different question), pick the choice that fits me best from my saved answers and resume.` : "I have no saved answer for this: pick the choice that fits me best from my saved answers and resume."} A school, college, university or company must be the same one: when it isn't listed, pick the "Other" choice if there is one, never a different institution.`,
+      closestInstruction(ask),
       {
         job: {
           title: job.title,
@@ -335,10 +367,7 @@ export function createPlans(deps: PlansDeps) {
       const field = shown ? { ref, ...shown } : storedQuestion(jobId, ref);
       const off = claudeOff(answerer);
       if (!answerer || off) throw new NotPlannableError(jobId, off ?? "");
-      const [job, resume] = await Promise.all([
-        jobOps.getJob(token, jobId),
-        loadResume(token),
-      ]);
+      const { job, resume } = await jobAndResume(token, jobId);
       const answer = await answerer.tell(
         field,
         instruction,
@@ -372,7 +401,9 @@ export function createPlans(deps: PlansDeps) {
       const answer = await answerer.act(request, traceUsage(trace, jobId));
       const masked = answer.steps.map((s) => ({
         ...s,
-        value: request.wanted ? s.value.split(request.wanted).join("{value}") : s.value,
+        value: request.wanted
+          ? s.value.split(request.wanted).join("{value}")
+          : s.value,
       }));
       trace({
         jobId,
@@ -380,7 +411,12 @@ export function createPlans(deps: PlansDeps) {
         message: answer.steps.length
           ? `Claude worked out ${answer.steps.length} step(s) for "${request.label.slice(0, 80)}"`
           : `Claude found no way to set "${request.label.slice(0, 80)}": ${answer.why}`,
-        data: { label: request.label, failure: request.failure, steps: masked, why: answer.why },
+        data: {
+          label: request.label,
+          failure: request.failure,
+          steps: masked,
+          why: answer.why,
+        },
       });
       return answer;
     },
@@ -396,10 +432,7 @@ export function createPlans(deps: PlansDeps) {
     ): Promise<TellAnswer> {
       const off = claudeOff(answerer);
       if (!answerer || off) throw new NotPlannableError(jobId, off ?? "");
-      const [job, resume] = await Promise.all([
-        jobOps.getJob(token, jobId),
-        loadResume(token),
-      ]);
+      const { job, resume } = await jobAndResume(token, jobId);
       return closest(answerer, jobId, job, resume, ask);
     },
 
@@ -412,10 +445,7 @@ export function createPlans(deps: PlansDeps) {
       jobId: string,
       page: WorkdayPage,
     ): Promise<WorkdayPagePlan> {
-      const [job, resume] = await Promise.all([
-        jobOps.getJob(token, jobId),
-        loadResume(token),
-      ]);
+      const { job, resume } = await jobAndResume(token, jobId);
       const generic = page.system === "generic";
       const schema = generic
         ? parseGenericPage(page, job.title)
@@ -427,7 +457,13 @@ export function createPlans(deps: PlansDeps) {
         resume,
         bankMap(),
       );
-      const plan = await withClosestChoices(jobId, schema, planned, job, resume);
+      const plan = await withClosestChoices(
+        jobId,
+        schema,
+        planned,
+        job,
+        resume,
+      );
       const { summary } = plan;
       const add = generic ? [] : entriesToAdd(page, resume);
       trace({

@@ -42,6 +42,12 @@ export interface JobOpsJobDetail extends JobOpsJob {
   readonly jobDescription: string | null;
   /** The summary Job Ops wrote for this job's tailored resume (absent in older fakes). */
   readonly tailoredSummary?: string | null;
+  /** The tailored resume's headline. */
+  readonly tailoredHeadline?: string | null;
+  /** The tailored resume's skills: JSON of [{ name, keywords }]. */
+  readonly tailoredSkills?: string | null;
+  /** Projects picked for this job's resume: comma-separated design-resume ids. */
+  readonly selectedProjectIds?: string | null;
 }
 
 export interface JobUpdate {
@@ -107,7 +113,10 @@ export interface JobOpsApi {
     jobDescription: string,
   ): Promise<{ job: ImportDraft; warning: string | null }>;
   /** Manual import: adds the job (Job Ops then tailors and scores it, per your settings). */
-  importJob?(token: string, job: ImportJob): Promise<{ id: string; status: string }>;
+  importJob?(
+    token: string,
+    job: ImportJob,
+  ): Promise<{ id: string; status: string }>;
 }
 
 const errorEnvelope = z.object({
@@ -146,6 +155,9 @@ const jobDetailData = jobShape.extend({
   location: z.string().nullable().optional(),
   jobDescription: z.string().nullable().optional(),
   tailoredSummary: z.string().nullable().optional(),
+  tailoredHeadline: z.string().nullable().optional(),
+  tailoredSkills: z.string().nullable().optional(),
+  selectedProjectIds: z.string().nullable().optional(),
 });
 
 /**
@@ -215,6 +227,9 @@ export class JobOpsClient implements JobOpsApi {
       location: job.location ?? null,
       jobDescription: job.jobDescription ?? null,
       tailoredSummary: job.tailoredSummary ?? null,
+      tailoredHeadline: job.tailoredHeadline ?? null,
+      tailoredSkills: job.tailoredSkills ?? null,
+      selectedProjectIds: job.selectedProjectIds ?? null,
     };
   }
 

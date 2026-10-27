@@ -55,6 +55,15 @@ export interface ResumeFacts {
   /** Context for the question model only; never typed into a form as-is. */
   readonly summary: string;
   readonly skills: readonly SkillFact[];
+  /** The tailored resume's headline (none on the design resume). */
+  readonly headline?: string;
+  readonly projects?: readonly ProjectFact[];
+}
+
+export interface ProjectFact {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
 }
 
 export interface SkillFact {
@@ -185,6 +194,9 @@ const designResumeSchema = z.object({
         period: text,
       }),
     ),
+    projects: items(
+      z.object({ hidden, id: text, name: text, description: text }),
+    ),
   }),
 });
 
@@ -246,6 +258,11 @@ export function resumeFacts(designResume: unknown): ResumeFacts {
     skills: visible(resume.sections.skills).map((skill) => ({
       name: skill.name,
       keywords: (skill.keywords ?? []).map((k) => k.trim()).filter(Boolean),
+    })),
+    projects: visible(resume.sections.projects).map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: htmlToText(p.description),
     })),
   };
 }

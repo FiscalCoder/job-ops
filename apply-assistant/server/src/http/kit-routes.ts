@@ -1,12 +1,13 @@
-import { claudeOff } from "../claude/off.js";
 import { type Response, Router } from "express";
 import { z } from "zod";
 import type { QuestionAnswerer } from "../claude/answerer.js";
+import { claudeOff } from "../claude/off.js";
 import type { ClaudeAnswer } from "../claude/questions.js";
 import { traceUsage } from "../claude/usage-trace.js";
 import { type JobOpsApi, JobOpsError } from "../jobops/client.js";
 import { buildKit } from "../kit/kit.js";
 import { resumeFacts } from "../plan/resume-facts.js";
+import { tailoredFor } from "../plan/tailored-resume.js";
 import type { AnswerBankRepo } from "../store/answer-bank-repo.js";
 import type { ApplyTargetsRepo } from "../store/apply-targets-repo.js";
 import type { FillPlansRepo } from "../store/fill-plans-repo.js";
@@ -99,7 +100,7 @@ export function createKitRoutes(deps: KitRoutesDeps) {
             applyUrl: posting ?? job.applicationLink ?? job.jobUrl,
             tailoredSummary: job.tailoredSummary ?? null,
           },
-          resume: resumeFacts(design),
+          resume: tailoredFor(resumeFacts(design), job),
           bank: bankMap(),
           plan: planStore.get(jobId)?.plan ?? null,
         }),
@@ -213,7 +214,7 @@ export function createKitRoutes(deps: KitRoutesDeps) {
               employer: job.employer,
               description: job.jobDescription,
             },
-            resume: resumeFacts(design),
+            resume: tailoredFor(resumeFacts(design), job),
             bank,
           },
           traceUsage(trace, jobId),

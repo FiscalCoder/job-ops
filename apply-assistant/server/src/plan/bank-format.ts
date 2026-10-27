@@ -44,6 +44,9 @@ function formatDays(stored: string, field: FormField): Formatted {
 }
 
 const CURRENCY_IN_LABEL = /\b(inr|eur|usd|gbp|sgd|jpy|sek|dkk|chf)\b|[₹€$£]/i;
+/** "Monthly salary": unless the label also takes a yearly figure ("annual or monthly"). */
+const MONTHLY_ONLY = /\b(monthly|per month|a month)\b/;
+const YEARLY = /\b(annual|annually|yearly|per year|per annum|ctc|lpa)\b/;
 
 function formatMoney(
   stored: string,
@@ -62,7 +65,12 @@ function formatMoney(
     return plain(trimNumber(money.amount / 100_000));
   if (/\b(in thousands|'000|000s)\b|\(k\)/.test(label))
     return plain(trimNumber(money.amount / 1_000));
-  if (CURRENCY_IN_LABEL.test(label) || /\bctc\b/.test(label))
+  if (MONTHLY_ONLY.test(label) && !YEARLY.test(label))
+    return plain(String(Math.round(money.amount / 12)));
+  // The job is paid in this currency: the plain yearly amount, which a numbers-only box
+  // (Workday's salary questions) takes as typed. "4000000 INR per year" there kept only
+  // 4000000, and a retry typed the number a second time.
+  if (jobCurrency || CURRENCY_IN_LABEL.test(label) || /\bctc\b/.test(label))
     return plain(String(money.amount));
   return plain(`${money.amount} ${money.currency} per year`);
 }

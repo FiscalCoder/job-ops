@@ -136,7 +136,9 @@ export function readWorkdayPage(): WorkdayPage {
     ];
     const optionLabel = (input: HTMLInputElement) =>
       text(
-        input.id ? box.querySelector(`label[for="${CSS.escape(input.id)}"]`) : null,
+        input.id
+          ? box.querySelector(`label[for="${CSS.escape(input.id)}"]`)
+          : null,
       ) ||
       text(input.closest("label")) ||
       input.getAttribute("aria-label") ||
@@ -159,8 +161,7 @@ export function readWorkdayPage(): WorkdayPage {
       if (box.querySelector("[data-automation-id='file-upload-successful']"))
         continue;
       kind = "file";
-    }
-    else if (box.querySelector("textarea")) kind = "textarea";
+    } else if (box.querySelector("textarea")) kind = "textarea";
     else if (box.querySelector("input")) kind = "text";
     else continue;
     fields.push({
@@ -248,7 +249,9 @@ function shownValue(box: Element | null): string {
   ].map(text);
   if (parts.length)
     return parts.some((p) => !/^\d+$/.test(p)) ? "" : parts.join("/");
-  const multi = box.querySelector("[data-automation-id='multiSelectContainer']");
+  const multi = box.querySelector(
+    "[data-automation-id='multiSelectContainer']",
+  );
   if (multi)
     return [...multi.querySelectorAll("[data-automation-id='selectedItem']")]
       .map(text)
@@ -363,18 +366,17 @@ export class WorkdayDriver extends TrustedDriver {
   }
 
   /** The open listbox's choices (labels and handles), once they stop changing. */
-  private async openChoices(): Promise<
-    { labels: string[]; handles: ElementHandle[] } | null
-  > {
+  private async openChoices(): Promise<{
+    labels: string[];
+    handles: ElementHandle[];
+  } | null> {
     const deadline = Date.now() + OPTION_WAIT_MS;
     let previous = "";
     while (Date.now() < deadline) {
       await sleep(POLL_MS * 2);
       const handles: ElementHandle[] = [];
       const labels: string[] = [];
-      for (const option of await this.frame.$$(
-        OPEN_OPTIONS,
-      )) {
+      for (const option of await this.frame.$$(OPEN_OPTIONS)) {
         const label = await option.evaluate((el) =>
           (el as HTMLElement).offsetParent === null
             ? null
@@ -419,9 +421,7 @@ export class WorkdayDriver extends TrustedDriver {
     if (value === null) return { ok: false, reason: "Nothing to fill" };
     try {
       const box = boxOf(entry.ref);
-      const kind = await this.frame
-        .$eval(box, controlKind)
-        .catch(() => null);
+      const kind = await this.frame.$eval(box, controlKind).catch(() => null);
       if (!kind)
         return {
           ok: false,
@@ -435,7 +435,7 @@ export class WorkdayDriver extends TrustedDriver {
             ? await this.upload(entry.ref, resume)
             : { ok: false, reason: "Tailored PDF not loaded" };
         case "dropdown":
-          return await this.dropdown(entry.ref, first);
+          return await this.dropdown(entry.ref, first, entry.label);
         case "search":
           return await this.search(entry.ref, wanted, entry.label);
         case "radio":
@@ -461,7 +461,11 @@ export class WorkdayDriver extends TrustedDriver {
     }
   }
 
-  private async dropdown(ref: string, wanted: string): Promise<FillOutcome> {
+  private async dropdown(
+    ref: string,
+    wanted: string,
+    label: string,
+  ): Promise<FillOutcome> {
     const button = await this.frame.$(
       `:is(${boxOf(ref)}) button[aria-haspopup='listbox']`,
     );
@@ -470,14 +474,29 @@ export class WorkdayDriver extends TrustedDriver {
     if (before && selectionMatches(before, wanted))
       return { ok: true, result: `already "${before}"` };
     await button.click();
-    const picked = await this.pickOpen(wanted);
+    let picked = await this.pickOpen(wanted);
+    let note = "";
+    // The list words it differently ("Fluent" vs "Fluent / Native Speaker"): Claude picks
+    // among the list's own choices, or none when nothing there is your answer.
+    if (!picked && this.chooser) {
+      const choices = (await this.openChoices())?.labels.filter(
+        (l) => !PLACEHOLDER.test(l),
+      );
+      const choice = choices?.length
+        ? await this.chooser(label, wanted, choices)
+        : null;
+      if (choice) {
+        picked = await this.pickOpen(choice);
+        if (picked) note = ` (Claude picked the closest to "${wanted}")`;
+      }
+    }
     if (!picked) {
       await this.page.keyboard.press("Escape");
       return { ok: false, reason: `No choice matching "${wanted}"` };
     }
     const shown = await this.readBackRef(ref);
     return selectionMatches(shown, picked)
-      ? { ok: true, result: `picked "${picked}"` }
+      ? { ok: true, result: `picked "${picked}"${note}` }
       : { ok: false, reason: `"${picked}" wasn't selected` };
   }
 
@@ -498,7 +517,12 @@ export class WorkdayDriver extends TrustedDriver {
         `:is(${boxOf(ref)}) [data-automation-id='multiSelectContainer'] input`,
       );
       if (!input) return { ok: false, reason: "Search box not found" };
-      let chosen = await this.searchAndPick(ref, input, item, wanted.length === 1);
+      let chosen = await this.searchAndPick(
+        ref,
+        input,
+        item,
+        wanted.length === 1,
+      );
       // One answer (Field of Study, School) that the list words differently: Claude picks.
       if (!chosen && wanted.length === 1 && this.chooser) {
         chosen = await this.pickWithClaude(ref, input, label, item);
@@ -574,7 +598,8 @@ export class WorkdayDriver extends TrustedDriver {
     for (const word of [...words, "Other"]) {
       const open = await this.results(input, word);
       await this.page.keyboard.press("Escape");
-      for (const l of open?.labels ?? []) if (!NOT_A_CHOICE.test(l)) found.add(l);
+      for (const l of open?.labels ?? [])
+        if (!NOT_A_CHOICE.test(l)) found.add(l);
     }
     if (found.size === 0 || !this.chooser) return null;
     const choice = await this.chooser(label, wanted, [...found].slice(0, 300));
@@ -664,7 +689,10 @@ export class WorkdayDriver extends TrustedDriver {
       const group = `[role='group'][aria-labelledby="${clean(section)}"]`;
       const entries = () =>
         this.frame
-          .$$eval(`${group} [role='group'][aria-labelledby$='-panel']`, (l) => l.length)
+          .$$eval(
+            `${group} [role='group'][aria-labelledby$='-panel']`,
+            (l) => l.length,
+          )
           .catch(() => 0);
       for (let i = 0; i < count; i++) {
         const buttons = await this.frame.$$(

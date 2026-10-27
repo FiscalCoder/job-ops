@@ -128,20 +128,43 @@ describe("Workday page plans", () => {
   });
 
   it("My Experience: each job and degree entry from your resume, in order, plus skills", () => {
-    const at = (entry: string, key: string, label: string, kind: Field["kind"], more: Partial<Field> = {}) => ({
+    const at = (
+      entry: string,
+      key: string,
+      label: string,
+      kind: Field["kind"],
+      more: Partial<Field> = {},
+    ) => ({
       ...field(key, label, kind, more),
       ref: `${entry}--${key}`,
     });
     const job = (n: number) => [
-      at(`workExperience-${n}`, "jobTitle", "Job Title", "text", { required: true }),
-      at(`workExperience-${n}`, "companyName", "Company", "text", { required: true }),
-      at(`workExperience-${n}`, "location", "Location", "text"),
-      at(`workExperience-${n}`, "currentlyWorkHere", "I currently work here", "checkbox", {
-        options: ["I currently work here"],
+      at(`workExperience-${n}`, "jobTitle", "Job Title", "text", {
+        required: true,
       }),
-      at(`workExperience-${n}`, "startDate", "From", "date", { required: true }),
+      at(`workExperience-${n}`, "companyName", "Company", "text", {
+        required: true,
+      }),
+      at(`workExperience-${n}`, "location", "Location", "text"),
+      at(
+        `workExperience-${n}`,
+        "currentlyWorkHere",
+        "I currently work here",
+        "checkbox",
+        {
+          options: ["I currently work here"],
+        },
+      ),
+      at(`workExperience-${n}`, "startDate", "From", "date", {
+        required: true,
+      }),
       at(`workExperience-${n}`, "endDate", "To", "date", { required: true }),
-      at(`workExperience-${n}`, "roleDescription", "Role Description", "textarea"),
+      at(
+        `workExperience-${n}`,
+        "roleDescription",
+        "Role Description",
+        "textarea",
+      ),
     ];
     const plan = planOf({
       step: "My Experience",
@@ -150,22 +173,37 @@ describe("Workday page plans", () => {
         ...job(130),
         // A third entry: your resume has two (visible) jobs, so it's yours.
         ...job(131).slice(0, 1),
-        at("education-153", "school", "School or University", "search", { required: true }),
+        at("education-153", "school", "School or University", "search", {
+          required: true,
+        }),
         at("education-153", "degree", "Degree", "dropdown", {
           required: true,
           options: ["Diploma", "Bachelor's Degree", "Master's Degree"],
         }),
         at("education-153", "fieldOfStudy", "Field of Study", "search"),
-        at("education-153", "lastYearAttended", "To (Actual or Expected)", "date"),
+        at(
+          "education-153",
+          "lastYearAttended",
+          "To (Actual or Expected)",
+          "date",
+        ),
         at("education-153", "gradeAverage", "Overall Result (GPA)", "text"),
         at("skills", "skills", "Type to Add Skills", "search"),
         at("socialNetworkAccounts", "linkedInAccount", "LinkedIn", "text"),
-        at("resumeAttachments", "attachments", "Upload a file (5MB max)", "file"),
+        at(
+          "resumeAttachments",
+          "attachments",
+          "Upload a file (5MB max)",
+          "file",
+        ),
       ],
     });
     const of = (ref: string) => plan.entries.find((e) => e.ref === ref);
     // Most recent job first: Acme (current), then Beta.
-    expect(of("workExperience-129--jobTitle")).toMatchObject({ status: "fill", value: "Senior Engineer" });
+    expect(of("workExperience-129--jobTitle")).toMatchObject({
+      status: "fill",
+      value: "Senior Engineer",
+    });
     expect(of("workExperience-129--companyName")?.value).toBe("Acme");
     expect(of("workExperience-129--currentlyWorkHere")).toMatchObject({
       status: "fill",
@@ -179,26 +217,49 @@ describe("Workday page plans", () => {
     expect(of("workExperience-130--endDate")?.value).toBe("08/2023");
     expect(of("workExperience-131--jobTitle")?.status).toBe("skip");
     // Highest degree first.
-    expect(of("education-153--school")?.value).toBe("Some Institute of Technology");
-    expect(of("education-153--degree")).toMatchObject({ status: "fill", value: "Bachelor's Degree" });
+    expect(of("education-153--school")?.value).toBe(
+      "Some Institute of Technology",
+    );
+    expect(of("education-153--degree")).toMatchObject({
+      status: "fill",
+      value: "Bachelor's Degree",
+    });
     expect(of("education-153--fieldOfStudy")?.value).toBe("Computer Science");
     expect(of("education-153--lastYearAttended")?.value).toBe("2019");
     expect(of("education-153--gradeAverage")?.status).toBe("skip");
     // Visible skills only, searched one by one.
-    expect(of("skills--skills")).toMatchObject({ status: "fill", value: ["React", "TypeScript"] });
-    expect(of("socialNetworkAccounts--linkedInAccount")?.source).toBe("resume:linkedin");
-    expect(of("resumeAttachments--attachments")?.source).toBe("jobops:tailored-pdf");
+    expect(of("skills--skills")).toMatchObject({
+      status: "fill",
+      value: ["React", "TypeScript"],
+    });
+    expect(of("socialNetworkAccounts--linkedInAccount")?.source).toBe(
+      "resume:linkedin",
+    );
+    expect(of("resumeAttachments--attachments")?.source).toBe(
+      "jobops:tailored-pdf",
+    );
   });
 
   it("Walmart's education entry: school typed, degree in Workday's own words", () => {
     const plan = planOf({
       step: "My Experience",
       fields: [
-        { ...field("schoolName", "School or University", "text", { required: true }), ref: "education-74--schoolName" },
+        {
+          ...field("schoolName", "School or University", "text", {
+            required: true,
+          }),
+          ref: "education-74--schoolName",
+        },
         {
           ...field("degree", "Degree", "dropdown", {
             required: true,
-            options: ["Certificate", "High School", "Associates", "Bachelors", "Masters"],
+            options: [
+              "Certificate",
+              "High School",
+              "Associates",
+              "Bachelors",
+              "Masters",
+            ],
           }),
           ref: "education-74--degree",
         },
@@ -448,6 +509,15 @@ describe("POST /plans/:jobId/choose", () => {
     const prompt = String(create.mock.calls[0]?.[0].messages[0]?.content);
     expect(prompt).toContain("Information System Management");
     expect(prompt).toContain("Computer Science");
+
+    // A fact (Field of Study) is matched or broadened, never swapped for what "fits" (J&J:
+    // "Accounting and Finance" for an AI/ML degree); no match comes back refused.
+    expect(prompt).toContain(
+      "never one based on a different part of my resume",
+    );
+    expect(prompt).not.toContain("fits me best");
+    reply = { answer: ["NO MATCH"], why: "Nothing like AI/ML" };
+    expect((await choose(ask)).status).toBe(422);
 
     reply = { answer: ["Information Technology"], why: "Close" };
     expect((await choose(ask)).status).toBe(422);

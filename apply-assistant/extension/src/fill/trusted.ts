@@ -4,9 +4,9 @@ import type {
   Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import { captureDom, type DomCapture, MAX_DOM_CHARS } from "../trace/dom";
-import { digits, sleep } from "./options";
 import { type OperateApi, operateField } from "./operate";
-import { type SiteHelp, rescueField } from "./site-help";
+import { keptNumber, sameNumber, sleep } from "./options";
+import { rescueField, type SiteHelp } from "./site-help";
 import type { PlanEntry } from "./supervisor";
 
 /**
@@ -108,7 +108,9 @@ export abstract class TrustedDriver implements FormDriver {
     value: string | readonly string[] | null,
     failure: string,
   ): Promise<FillOutcome | null> {
-    const wanted = (Array.isArray(value) ? value : [value]).filter(Boolean).join(", ");
+    const wanted = (Array.isArray(value) ? value : [value])
+      .filter(Boolean)
+      .join(", ");
     if (!this.help || !wanted || entry.type === "file") return null;
     const target = {
       page: this.page,
@@ -128,7 +130,9 @@ export abstract class TrustedDriver implements FormDriver {
     stopped: () => boolean,
   ): Promise<FillOutcome> {
     // No answer of yours: Claude picks what fits you from your saved answers.
-    const wanted = (Array.isArray(value) ? value : [value]).filter(Boolean).join(", ");
+    const wanted = (Array.isArray(value) ? value : [value])
+      .filter(Boolean)
+      .join(", ");
     if (entry.type === "file")
       return Promise.resolve({ ok: false, reason: "Attach the file yourself" });
     const target = {
@@ -137,7 +141,10 @@ export abstract class TrustedDriver implements FormDriver {
       selector: this.boxFor(entry.ref),
       readBack: () => this.readBack(entry),
     };
-    return operateField(target, entry, wanted, failure, api, { help: this.help, stopped });
+    return operateField(target, entry, wanted, failure, api, {
+      help: this.help,
+      stopped,
+    });
   }
 
   /** Outlines the field being worked on and shows a small badge on the page. */
@@ -192,9 +199,12 @@ export abstract class TrustedDriver implements FormDriver {
     const got = await element.evaluate(
       (el) => (el as HTMLInputElement).value ?? "",
     );
-    const ok = compareDigits
-      ? digits(got).endsWith(digits(value))
-      : got === value;
+    if (!compareDigits && got !== value && keptNumber(got, value))
+      return {
+        ok: true,
+        result: `filled (the field takes numbers only: ${got})`,
+      };
+    const ok = compareDigits ? sameNumber(got, value) : got === value;
     return ok
       ? { ok: true, result: "filled" }
       : {
