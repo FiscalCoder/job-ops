@@ -233,6 +233,38 @@ describe("TrackingInboxPage", () => {
     );
   });
 
+  it("leaves the job unselected for an email with no reliable match", async () => {
+    const unmatched = makeInboxItem();
+    vi.mocked(api.getPostApplicationInbox).mockResolvedValue({
+      items: [
+        {
+          ...unmatched,
+          message: {
+            ...unmatched.message,
+            matchedJobId: null,
+            matchConfidence: 0,
+          },
+          matchedJob: null,
+        },
+      ],
+      total: 1,
+    } as Awaited<ReturnType<typeof api.getPostApplicationInbox>>);
+
+    render(
+      <MemoryRouter>
+        <TrackingInboxPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Select job")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Example - Software Engineer I")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Confirm email-job match" }),
+    ).toBeDisabled();
+  });
+
   it("loads dropdown jobs excluding discovered status", async () => {
     render(
       <MemoryRouter>

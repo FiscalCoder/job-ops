@@ -80,6 +80,7 @@ describe("classifyWithSmartRouter", () => {
       callJsonMock.mock.calls[0]?.[0]?.messages?.[1]?.content ?? "";
     expect(prompt).toContain("job board alerts");
     expect(prompt).toContain("course/learning platforms");
+    expect(prompt).toContain("one-time security/verification codes");
     expect(prompt).toContain("MUST be 0 when bestMatchIndex is null");
     expect(prompt).toContain("When unsure, use isRelevant=false");
     expect(prompt).toContain("ServiceNow: Sr Software Engineer");

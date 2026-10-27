@@ -8,6 +8,7 @@ import {
   type StartupJobRecord,
   scrapeStartupJobsViaAlgolia,
 } from "startup-jobs-scraper";
+import { resolveStartupJobEmployer } from "./employer";
 
 export type StartupJobsProgressEvent =
   | {
@@ -84,7 +85,7 @@ function mapStartupJob(row: StartupJobRecord): CreateJobInput | null {
   return {
     source: "startupjobs",
     title: row.title || "Unknown Title",
-    employer: row.employer || "Unknown Employer",
+    employer: resolveStartupJobEmployer(row),
     employerUrl: row.employerUrl || undefined,
     jobUrl: row.jobUrl,
     applicationLink: row.applicationLink || row.jobUrl,

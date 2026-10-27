@@ -180,6 +180,7 @@ isRelevant is false, even when the email is career-themed:
 - course/learning platforms, webinars, bootcamps, newsletters, community digests
 - promotional, transactional, or social-notification email
 - cold recruiter outreach about NEW roles the user has not applied to.
+- one-time security/verification codes, sign-in links, or account emails, even when they name an application (they don't change its stage).
 When unsure, use isRelevant=false.
 
 MATCHING:

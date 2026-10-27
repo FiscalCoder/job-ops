@@ -197,7 +197,6 @@ export const TrackingInboxPage: React.FC = () => {
   }, [provider, accountKey]);
 
   useEffect(() => {
-    const defaultAppliedJobId = appliedJobs[0]?.id ?? "";
     setAppliedJobByMessageId((previous) => {
       const next = { ...previous };
       let didChange = false;
@@ -211,9 +210,9 @@ export const TrackingInboxPage: React.FC = () => {
           const hasValidMatchedJob = appliedJobs.some(
             (appliedJob) => appliedJob.id === matchedJobId,
           );
-          const nextJobId = hasValidMatchedJob
-            ? matchedJobId
-            : defaultAppliedJobId;
+          // No reliable match: leave the job for you to pick rather than
+          // suggesting whichever job happens to be first.
+          const nextJobId = hasValidMatchedJob ? matchedJobId : "";
           if (next[item.message.id] !== nextJobId) {
             next[item.message.id] = nextJobId;
             didChange = true;
