@@ -106,23 +106,6 @@ export function limitText(limit: CompanyWindow): {
   };
 }
 
-/**
- * Before you apply to a company whose window is used up: says when you last applied and when
- * it opens again. True to go ahead.
- */
-export function confirmLimit(item: QueueItem): boolean {
-  const limit = item.companyLimit;
-  if (!limit?.full) return true;
-  const last = limit.used[0];
-  return window.confirm(
-    `${limit.name} takes ${limit.maxApplications} application${limit.maxApplications === 1 ? "" : "s"} per ${periodText(limit.windowDays)}` +
-      (last
-        ? `, and you applied for ${last.title} on ${day(last.appliedAt)}`
-        : "") +
-      `. The next opens ${limit.nextOpen ? day(limit.nextOpen) : "later"}.\n\nApply to ${item.title} anyway?`,
-  );
-}
-
 export interface QueueViewActions {
   /** One role's row (its badges, kit button, click to see the plan). */
   readonly row: (item: QueueItem, showEmployer: boolean) => HTMLElement;

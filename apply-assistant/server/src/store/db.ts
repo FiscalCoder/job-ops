@@ -327,6 +327,13 @@ export const MIGRATIONS: readonly string[] = [
      created_at text not null default (datetime('now')),
      primary key (user_id, keyword, job_id)
    );`,
+  // A block that ends on a date (e.g. 90 days after your last application there).
+  `create table blocked_until (
+     user_id text not null default '',
+     keyword text not null,
+     until text not null,
+     primary key (user_id, keyword)
+   );`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

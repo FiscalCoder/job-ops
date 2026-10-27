@@ -72,9 +72,10 @@
 
       <details id="blocked-card" class="card">
         <summary><strong>Blocked companies</strong> <span id="blocked-count" class="muted"></span></summary>
-        <p class="muted">Job Ops' own list (Settings): their jobs are never found again, and blocking skips the ones you have. Unblock puts those back.</p>
+        <p class="muted">Job Ops' own list (Settings): their jobs aren't found while blocked, and blocking skips the ones you have. Unblock puts those back. Days count from your last application there; leave it empty to block until you unblock.</p>
         <form id="block-form" class="row">
           <input id="block-name" type="text" autocomplete="off" placeholder="Company, e.g. Amazon" aria-label="Company to block" />
+          <input id="block-days" type="number" min="1" max="3650" step="1" placeholder="Days" aria-label="Days to block, from your last application there" class="days" />
           <button type="submit">Block</button>
         </form>
         <ul id="blocked" class="list"></ul>

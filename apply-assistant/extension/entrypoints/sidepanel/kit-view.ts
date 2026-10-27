@@ -8,6 +8,7 @@ import { saveResume } from "../../src/kit/resume-file";
 import type { ApplyClient, Kit, KitItem } from "../../src/lib/api";
 import { errorText, TraceRecorder } from "../../src/trace/recorder";
 import { trackTab } from "../../src/track/tabs";
+import { askClaude } from "./ask-claude";
 
 /**
  * The apply kit (APPLY_TRACE_AND_KIT_PLAN.md §T2): every answer for a job, one click each.
@@ -28,12 +29,12 @@ function el(
 }
 
 /** "primary": the accent colour; "go": green, for the kit's most used actions. */
-function button(
-  label: string,
-  onClick: () => void,
-  look?: "primary" | "go",
-) {
-  const b = el("button", { type: "button", class: look }, label) as HTMLButtonElement;
+function button(label: string, onClick: () => void, look?: "primary" | "go") {
+  const b = el(
+    "button",
+    { type: "button", class: look },
+    label,
+  ) as HTMLButtonElement;
   b.addEventListener("click", onClick);
   return b;
 }
@@ -204,13 +205,13 @@ export async function showKit(
   const openButton = button(
     "Open application ↗",
     async () => {
-    const tab = await chrome.tabs.create({
-      url: kit.job.applyUrl,
-      active: true,
-    });
-    // Pages opened from here (Apply, the company's form) are recognised as this job.
-    if (tab.id !== undefined) await trackTab(tab.id, job.jobId);
-    trace.event("kit-open-application", `Opened ${kit.job.applyUrl}`);
+      const tab = await chrome.tabs.create({
+        url: kit.job.applyUrl,
+        active: true,
+      });
+      // Pages opened from here (Apply, the company's form) are recognised as this job.
+      if (tab.id !== undefined) await trackTab(tab.id, job.jobId);
+      trace.event("kit-open-application", `Opened ${kit.job.applyUrl}`);
     },
     "primary",
   );
@@ -375,66 +376,5 @@ function outcomeButtons(
       "Done with this job? Click twice to confirm.",
     ),
     el("div", { class: "controls" }, make("applied"), make("skipped")),
-  );
-}
-
-/** Paste a question the kit doesn't cover; Claude answers from your resume and answers. */
-function askClaude(
-  client: ApplyClient,
-  jobId: string,
-  itemRow: (item: KitItem) => HTMLElement,
-): HTMLElement {
-  const question = el("textarea", {
-    rows: "2",
-    placeholder: "Paste the question from the form",
-    "aria-label": "Question",
-  }) as HTMLTextAreaElement;
-  const choices = el("textarea", {
-    rows: "3",
-    placeholder: "One choice per line (only for dropdowns)",
-    "aria-label": "Choices",
-  }) as HTMLTextAreaElement;
-  const long = el("input", { type: "checkbox" }) as HTMLInputElement;
-  const answer = el("div");
-  const ask = button(
-    "Ask Claude",
-    async () => {
-      ask.disabled = true;
-      answer.replaceChildren(el("p", { class: "muted" }, "Asking…"));
-      try {
-        const options = choices.value
-          .split("\n")
-          .map((c) => c.trim())
-          .filter(Boolean);
-        const reply = await client.kitAnswer(jobId, {
-          question: question.value,
-          ...(options.length ? { options } : {}),
-          long: long.checked,
-        });
-        answer.replaceChildren(
-          el("p", { class: "muted" }, reply.how),
-          itemRow({
-            key: "claude",
-            label: question.value.slice(0, 80),
-            value: reply.value,
-          }),
-        );
-      } catch (error) {
-        answer.replaceChildren(el("p", { class: "error" }, errorText(error)));
-      } finally {
-        ask.disabled = false;
-      }
-    },
-    "primary",
-  );
-  return el(
-    "div",
-    { class: "kit-group" },
-    el("h2", {}, "Ask Claude"),
-    question,
-    el("details", {}, el("summary", {}, "It's a dropdown"), choices),
-    el("label", { class: "inline" }, long, "Long answer (a paragraph)"),
-    el("div", { class: "controls" }, ask),
-    answer,
   );
 }

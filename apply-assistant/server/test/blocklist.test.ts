@@ -21,6 +21,10 @@ const job = (id: string, employer: string, status: string): MutableJob => ({
   suitabilityScore: 80,
 });
 
+const DAY_MS = 86_400_000;
+const daysAgo = (days: number) =>
+  new Date(Date.now() - days * DAY_MS).toISOString();
+
 /** Job Ops with its blocked-company setting and statuses that change as the app sets them. */
 function fakeJobOps() {
   const jobs = [
@@ -28,6 +32,9 @@ function fakeJobOps() {
     job("amzn-2", "Amazon Development Centre India", "discovered"),
     job("amzn-3", "Amazon", "applied"),
     job("other", "Acme", "ready"),
+    job("el-1", "ElevenLabs", "ready"),
+    { ...job("el-0", "ElevenLabs", "applied"), appliedAt: daysAgo(10) },
+    { ...job("old-0", "OldCo", "applied"), appliedAt: daysAgo(100) },
   ];
   const state = { blocked: ["Existing Co"], notes: [] as string[] };
   const api: JobOpsApi = {
@@ -72,9 +79,10 @@ afterEach(() => close?.());
 
 async function start() {
   const fake = fakeJobOps();
+  const db = openStore(":memory:");
   const server = createApp({
     jobOps: fake.api,
-    db: openStore(":memory:"),
+    db,
     authCacheSeconds: 60,
   }).listen(0);
   await new Promise((r) => server.once("listening", r));
@@ -91,7 +99,7 @@ async function start() {
     });
     return { status: res.status, json: (await res.json()) as any };
   };
-  return { call, ...fake };
+  return { call, db, ...fake };
 }
 
 const statusOf = (jobs: JobOpsJob[], id: string) =>
@@ -102,7 +110,11 @@ describe("blocked companies", () => {
     const { call, jobs, state } = await start();
 
     const blocked = await call("/blocked-companies", "PUT", { name: "Amazon" });
-    expect(blocked.json.data).toEqual({ name: "Amazon", skippedJobs: 2 });
+    expect(blocked.json.data).toEqual({
+      name: "Amazon",
+      skippedJobs: 2,
+      until: null,
+    });
     expect(state.blocked).toEqual(["Existing Co", "Amazon"]);
     // Any company whose name contains it, as discovery matches; applied jobs are left alone.
     expect(statusOf(jobs, "amzn-1")).toBe("skipped");
@@ -115,8 +127,8 @@ describe("blocked companies", () => {
     expect(state.blocked).toEqual(["Existing Co", "Amazon"]);
 
     expect((await call("/blocked-companies")).json.data).toEqual([
-      { name: "Existing Co", skippedJobs: 0 },
-      { name: "Amazon", skippedJobs: 2 },
+      { name: "Existing Co", skippedJobs: 0, until: null },
+      { name: "Amazon", skippedJobs: 2, until: null },
     ]);
 
     const unblocked = await call("/blocked-companies/Amazon", "DELETE");
@@ -142,5 +154,35 @@ describe("blocked companies", () => {
     expect(
       (await call("/blocked-companies", "PUT", { name: "a" })).status,
     ).toBe(400);
+  });
+
+  it("a block for some days runs from your last application there and ends by itself", async () => {
+    const { call, db, jobs, state } = await start();
+
+    const blocked = await call("/blocked-companies", "PUT", {
+      name: "ElevenLabs",
+      days: 90,
+    });
+    const until = Date.parse(blocked.json.data.until);
+    // 90 days from the application 10 days ago: 80 from now.
+    expect(Math.round((until - Date.now()) / DAY_MS)).toBe(80);
+    expect(statusOf(jobs, "el-1")).toBe("skipped");
+    expect(statusOf(jobs, "el-0")).toBe("applied");
+
+    // 90 days from an application 100 days ago are over: nothing is blocked.
+    const over = await call("/blocked-companies", "PUT", {
+      name: "OldCo",
+      days: 90,
+    });
+    expect(over.status).toBe(409);
+    expect(state.blocked).toEqual(["Existing Co", "ElevenLabs"]);
+
+    // Once the time is up, reading the list ends the block and puts the job back.
+    db.prepare("update blocked_until set until = ?").run(daysAgo(1));
+    expect((await call("/blocked-companies")).json.data).toEqual([
+      { name: "Existing Co", skippedJobs: 0, until: null },
+    ]);
+    expect(state.blocked).toEqual(["Existing Co"]);
+    expect(statusOf(jobs, "el-1")).toBe("ready");
   });
 });

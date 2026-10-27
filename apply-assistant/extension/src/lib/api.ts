@@ -43,6 +43,8 @@ export interface BlockedCompany {
   readonly name: string;
   /** Jobs blocking it skipped, which unblocking puts back. */
   readonly skippedJobs: number;
+  /** When the block ends by itself (ISO); null: blocked until you unblock it. */
+  readonly until: string | null;
 }
 
 export interface CompanyWindow {
@@ -214,9 +216,19 @@ export class ApplyClient implements TraceApi {
     return this.request("/blocked-companies");
   }
 
-  /** Blocks a company (any whose name contains it) and skips its Ready and Discovered jobs. */
-  blockCompany(name: string): Promise<{ name: string; skippedJobs: number }> {
-    return this.request("/blocked-companies", { name }, "PUT");
+  /**
+   * Blocks a company (any whose name contains it) and skips its Ready and Discovered jobs.
+   * `days`: the block ends that many days after your last application there.
+   */
+  blockCompany(
+    name: string,
+    days?: number,
+  ): Promise<{ name: string; skippedJobs: number; until: string | null }> {
+    return this.request(
+      "/blocked-companies",
+      days ? { name, days } : { name },
+      "PUT",
+    );
   }
 
   /** Unblocks it and puts back the jobs blocking it skipped. */

@@ -35,6 +35,16 @@ export function createBlockedSkipsRepo(db: DatabaseSync) {
   const removeKeyword = db.prepare(
     "delete from blocked_skips where user_id = ? and keyword = ?",
   );
+  const saveUntil = db.prepare(
+    `insert into blocked_until (user_id, keyword, until) values (?, ?, ?)
+     on conflict(user_id, keyword) do update set until = excluded.until`,
+  );
+  const allUntil = db.prepare(
+    "select keyword, until from blocked_until where user_id = ?",
+  );
+  const removeUntil = db.prepare(
+    "delete from blocked_until where user_id = ? and keyword = ?",
+  );
 
   return {
     add(skip: BlockedSkip): void {
@@ -61,8 +71,25 @@ export function createBlockedSkipsRepo(db: DatabaseSync) {
         ).map((r) => [r.keyword, Number(r.n)]),
       );
     },
+    /** When a block ends (ISO time); null blocks it for good. */
+    setUntil(keyword: string, until: string | null): void {
+      if (until) saveUntil.run(currentUser(), keyword.toLowerCase(), until);
+      else removeUntil.run(currentUser(), keyword.toLowerCase());
+    },
+    /** Each timed block's end, by keyword. */
+    untils(): Map<string, string> {
+      return new Map(
+        (
+          allUntil.all(currentUser()) as unknown as {
+            keyword: string;
+            until: string;
+          }[]
+        ).map((r) => [r.keyword, r.until]),
+      );
+    },
     clear(keyword: string): void {
       removeKeyword.run(currentUser(), keyword.toLowerCase());
+      removeUntil.run(currentUser(), keyword.toLowerCase());
     },
   };
 }

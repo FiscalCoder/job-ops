@@ -19,10 +19,11 @@ import { looksSubmitted } from "../../src/track/confirm";
 import { isSupportedPosting, pagedFill } from "../../src/track/job-match";
 import { resolveTab } from "../../src/track/tabs";
 import { renderHere } from "./here-view";
+import { askClaude } from "./ask-claude";
 import { setUpClaudeSettings } from "./claude-settings";
 import { setUpImport } from "./import-view";
 import { showKit } from "./kit-view";
-import { confirmLimit, postedText, renderQueue } from "./queue-view";
+import { postedText, renderQueue } from "./queue-view";
 import { renderRun as renderRunView } from "./run-view";
 
 // Side panel: sign in, run lookups, see the queue and each job's plan.
@@ -89,7 +90,6 @@ async function startFill(
   paged: "workday" | "generic" | null = null,
 ) {
   if (!client || activeRun) return;
-  if (!confirmLimit(item)) return;
   const box = $("run-box");
   box.hidden = false;
   $("main").hidden = true;
@@ -112,6 +112,13 @@ async function startFill(
     $("plan").replaceChildren();
     void loadQueue();
   };
+  // The run re-renders its part; Ask Claude below it keeps what you typed.
+  const runPart = el(
+    "div",
+    {},
+    el("p", { class: "muted" }, "Opening the posting and finding the form…"),
+  );
+  box.replaceChildren(runPart, askClaude(client, job.jobId));
   try {
     const options = {
       client,
@@ -119,7 +126,7 @@ async function startFill(
       countdownSeconds: await countdownSetting(),
       onChange: (view: RunView) =>
         renderRunView(
-          box,
+          runPart,
           view,
           (event) => activeRun?.dispatch(event),
           closeRun,
@@ -203,7 +210,6 @@ let closeKit: (() => Promise<void>) | null = null;
 /** The apply kit for any queued job: answers to copy or fill by hand. */
 async function openKit(item: QueueItem) {
   if (!client || activeRun || closeKit) return;
-  if (!confirmLimit(item)) return;
   const box = $("kit-box");
   box.hidden = false;
   $("main").hidden = true;
@@ -499,7 +505,23 @@ async function loadBlocked() {
           return el(
             "li",
             {},
-            el("div", { class: "row" }, el("span", {}, company.name), unblock),
+            el(
+              "div",
+              { class: "row" },
+              el(
+                "span",
+                {},
+                company.name,
+                company.until
+                  ? el(
+                      "span",
+                      { class: "muted" },
+                      ` · until ${shortDay(company.until)}`,
+                    )
+                  : null,
+              ),
+              unblock,
+            ),
             company.skippedJobs
               ? el(
                   "div",
@@ -513,28 +535,34 @@ async function loadBlocked() {
   );
 }
 
+const shortDay = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 /**
- * Blocks a company: you can shorten the name ("Amazon" for every Amazon entity), since any
- * company whose name contains it is blocked.
+ * "Block…" on a company: fills in the Blocked companies form, where you can shorten the name
+ * ("Amazon" for every Amazon entity: any company whose name contains it is blocked) and set
+ * how many days.
  */
-async function blockCompany(company: string) {
-  const name = window
-    .prompt(
-      `Block which company? Any company whose name contains this is blocked (shorten it to cover them all). Its Ready and Discovered jobs are skipped; Unblock puts them back.`,
-      company,
-    )
-    ?.trim();
-  if (!name) return;
-  await submitBlock(name);
+function blockCompany(company: string) {
+  const card = $<HTMLDetailsElement>("blocked-card");
+  card.open = true;
+  $<HTMLInputElement>("block-name").value = company;
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  $<HTMLInputElement>("block-days").focus();
 }
 
-async function submitBlock(name: string) {
+async function submitBlock(name: string, days: number | undefined) {
   try {
-    const result = await (client as ApplyClient).blockCompany(name);
-    $<HTMLDetailsElement>("blocked-card").open = true;
+    const result = await (client as ApplyClient).blockCompany(name, days);
     await Promise.all([loadBlocked(), loadQueue()]);
-    window.alert(
-      `Blocked "${result.name}": ${result.skippedJobs} job${result.skippedJobs === 1 ? "" : "s"} skipped.`,
+    showNotice(
+      `Blocked "${result.name}"${result.until ? ` until ${shortDay(result.until)}` : ""}: ${plural(result.skippedJobs, "job")} skipped.`,
     );
   } catch (error) {
     handle(error);
@@ -542,15 +570,12 @@ async function submitBlock(name: string) {
 }
 
 async function unblockCompany(company: BlockedCompany) {
-  if (!window.confirm(`Unblock ${company.name}? Its jobs can be found again.`))
-    return;
   try {
     const result = await (client as ApplyClient).unblockCompany(company.name);
     await Promise.all([loadBlocked(), loadQueue()]);
-    if (result.restoredJobs)
-      window.alert(
-        `Unblocked "${result.name}": ${result.restoredJobs} job${result.restoredJobs === 1 ? "" : "s"} back.`,
-      );
+    showNotice(
+      `Unblocked "${result.name}": ${plural(result.restoredJobs, "job")} back.`,
+    );
   } catch (error) {
     handle(error);
   }
@@ -559,10 +584,14 @@ async function unblockCompany(company: BlockedCompany) {
 $("block-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const input = $<HTMLInputElement>("block-name");
+  const daysInput = $<HTMLInputElement>("block-days");
   const name = input.value.trim();
   if (name.length < 2) return;
+  // Empty: blocked until you unblock it.
+  const days = Math.round(Number(daysInput.value));
   input.value = "";
-  void submitBlock(name);
+  daysInput.value = "";
+  void submitBlock(name, days > 0 ? days : undefined);
 });
 
 /** Marks a company as one application per N months (asks how many; 6 by default). */

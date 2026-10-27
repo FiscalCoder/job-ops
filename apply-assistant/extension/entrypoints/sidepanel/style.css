@@ -376,3 +376,9 @@ label.inline input {
   border-left: 3px solid var(--ok);
   padding-left: 8px;
 }
+
+/* Blocked companies: a short days box beside the name. */
+input.days {
+  width: 6em;
+  flex: none;
+}
