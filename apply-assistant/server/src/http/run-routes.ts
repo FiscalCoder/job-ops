@@ -73,17 +73,25 @@ export function createRunRoutes({
     "/jobs/:jobId/resume.pdf",
     async (req: AuthedRequest, res: Response) => {
       try {
-        const pdf = await jobOps.getPdf(tokenOf(req), String(req.params.jobId));
+        const jobId = String(req.params.jobId);
+        const pdf = await jobOps.getPdf(tokenOf(req), jobId);
+        // The company in the name tells one tailored resume from the next (Name_Resume_Company.pdf).
+        const employer = await jobOps
+          .getJob(tokenOf(req), jobId)
+          .then((job) => job.employer)
+          .catch(() => "");
         const name = [
           answers.get("identity.first_name")?.value,
           answers.get("identity.last_name")?.value,
         ]
           .map((part) => safeFilePart(part ?? ""))
           .filter(Boolean);
+        const company = safeFilePart(employer);
+        const fileName = [...name, "Resume", ...(company ? [company] : [])];
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader(
           "Content-Disposition",
-          `attachment; filename="${[...name, "Resume"].join("_")}.pdf"`,
+          `attachment; filename="${fileName.join("_")}.pdf"`,
         );
         res.setHeader("Cache-Control", "no-store");
         res.end(Buffer.from(pdf));

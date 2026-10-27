@@ -109,7 +109,7 @@ const action = (seq: number, extra: Record<string, unknown> = {}) => ({
 });
 
 describe("tailored resume for the extension", () => {
-  it("serves the job's tailored PDF named after you", async () => {
+  it("serves the job's tailored PDF named after you and the company", async () => {
     const { call, json } = await start();
     await json("/answer-bank/identity.first_name", { value: "Test" }, "PUT");
     await json("/answer-bank/identity.last_name", { value: "C" }, "PUT");
@@ -117,7 +117,7 @@ describe("tailored resume for the extension", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/pdf");
     expect(res.headers.get("content-disposition")).toBe(
-      'attachment; filename="Test_C_Resume.pdf"',
+      'attachment; filename="Test_C_Resume_Acme.pdf"',
     );
     expect(new TextDecoder().decode(await res.arrayBuffer())).toBe(
       "%PDF-1.5 tailored",
@@ -128,7 +128,7 @@ describe("tailored resume for the extension", () => {
     const { call } = await start();
     expect(
       (await call("/jobs/job-1/resume.pdf")).headers.get("content-disposition"),
-    ).toBe('attachment; filename="Resume.pdf"');
+    ).toBe('attachment; filename="Resume_Acme.pdf"');
     expect((await call("/jobs/nope/resume.pdf")).status).toBe(404);
   });
 });
