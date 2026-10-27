@@ -318,6 +318,15 @@ export const MIGRATIONS: readonly string[] = [
      anthropic_key text,
      updated_at text not null default (datetime('now'))
    );`,
+  // Jobs skipped because you blocked their company, with the status to put back on unblock.
+  `create table blocked_skips (
+     user_id text not null default '',
+     keyword text not null,
+     job_id text not null,
+     previous_status text not null,
+     created_at text not null default (datetime('now')),
+     primary key (user_id, keyword, job_id)
+   );`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

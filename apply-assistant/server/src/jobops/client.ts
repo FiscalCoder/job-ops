@@ -52,7 +52,8 @@ export interface JobOpsJobDetail extends JobOpsJob {
 
 export interface JobUpdate {
   readonly applicationLink?: string | null;
-  readonly status?: "applied" | "expired";
+  /** ready / discovered: putting back a job that blocking a company skipped. */
+  readonly status?: "applied" | "expired" | "ready" | "discovered";
 }
 
 /** Job Ops' manual import: what its model read from a job's page (any field may be missing). */
@@ -103,6 +104,15 @@ export interface JobOpsApi {
   markApplied(token: string, jobId: string): Promise<void>;
   /** Job Ops' own "Skip" action. */
   skipJob(token: string, jobId: string): Promise<void>;
+  /**
+   * Job Ops' blocked company keywords (Settings): discovery drops any company whose name
+   * contains one. Absent in fakes that don't need it.
+   */
+  getBlockedCompanies?(token: string): Promise<string[]>;
+  setBlockedCompanies?(
+    token: string,
+    keywords: readonly string[],
+  ): Promise<void>;
   addNote(token: string, jobId: string, note: JobNote): Promise<void>;
   getPdf(token: string, jobId: string): Promise<Uint8Array>;
   /** Resume Studio document (Reactive Resume JSON): the source the tailored PDFs are built from. */
@@ -133,6 +143,14 @@ const meData = z.object({
   }),
 });
 const designResumeData = z.object({ resumeJson: z.unknown() });
+const blockedSettingData = z
+  .object({
+    blockedCompanyKeywords: z
+      .object({ value: z.array(z.string()) })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
 const jobShape = z
   .object({
     id: z.string(),
@@ -251,6 +269,24 @@ export class JobOpsClient implements JobOpsApi {
       z.unknown(),
       { method: "POST", token, body: {} },
     );
+  }
+
+  async getBlockedCompanies(token: string): Promise<string[]> {
+    const data = await this.request("/api/settings", blockedSettingData, {
+      token,
+    });
+    return data.blockedCompanyKeywords?.value ?? [];
+  }
+
+  async setBlockedCompanies(
+    token: string,
+    keywords: readonly string[],
+  ): Promise<void> {
+    await this.request("/api/settings", z.unknown(), {
+      method: "PATCH",
+      token,
+      body: { blockedCompanyKeywords: keywords },
+    });
   }
 
   async skipJob(token: string, jobId: string): Promise<void> {

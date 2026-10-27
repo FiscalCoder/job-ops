@@ -14,6 +14,7 @@ import { createCapturedLinksRepo } from "../store/captured-links-repo.js";
 import { createClaudeAnswersRepo } from "../store/claude-answers-repo.js";
 import { createFillPlansRepo } from "../store/fill-plans-repo.js";
 import { createFormSchemasRepo } from "../store/form-schemas-repo.js";
+import { createBlockedSkipsRepo } from "../store/blocked-skips-repo.js";
 import { createCompanyLimitsRepo } from "../store/company-limits-repo.js";
 import { createSiteRecipesRepo } from "../store/site-recipes-repo.js";
 import { createOperator } from "../claude/operate.js";
@@ -30,6 +31,7 @@ import { createAuthMiddleware, sendJobOpsFailure } from "./auth.js";
 import { createCaptureRoutes } from "./capture-routes.js";
 import { sendError, sendOk } from "./envelope.js";
 import { createKitRoutes } from "./kit-routes.js";
+import { createBlocklistRoutes } from "./blocklist-routes.js";
 import { createCompanyRoutes } from "./company-routes.js";
 import { createImportRoutes } from "./import-routes.js";
 import { createSettingsRoutes } from "./settings-routes.js";
@@ -94,7 +96,8 @@ export function createApp({
     if (claimed || !user.isSystemAdmin) return;
     claimed = true;
     const rows = claimUnowned(db, user.id);
-    if (rows) log?.(`[users] ${rows} rows from before users given to ${user.username}`);
+    if (rows)
+      log?.(`[users] ${rows} rows from before users given to ${user.username}`);
   });
 
   app.disable("x-powered-by");
@@ -179,13 +182,24 @@ export function createApp({
     ownership.guard,
   );
   app.use(requireUser, createAnswerBankRoutes(answers));
-  app.use(requireUser, createSettingsRoutes({ settings: userSettings, access }));
+  app.use(
+    requireUser,
+    createSettingsRoutes({ settings: userSettings, access }),
+  );
   app.use(requireUser, createCompanyRoutes(limits));
+  app.use(
+    requireUser,
+    createBlocklistRoutes({ jobOps, skips: createBlockedSkipsRepo(db) }),
+  );
   app.use(requireUser, createImportRoutes({ jobOps, trace: record }));
   app.use(requireUser, createPlanRoutes(plans));
   app.use(
     requireUser,
-    createSiteRoutes({ plans, recipes: createSiteRecipesRepo(db), trace: record }),
+    createSiteRoutes({
+      plans,
+      recipes: createSiteRecipesRepo(db),
+      trace: record,
+    }),
   );
   app.use(
     requireUser,
@@ -194,7 +208,9 @@ export function createApp({
       answerer,
       trace: record,
       savedAnswers: () =>
-        savedAnswersForPrompt(new Map(answers.list().map((a) => [a.key, a.value]))),
+        savedAnswersForPrompt(
+          new Map(answers.list().map((a) => [a.key, a.value])),
+        ),
     }),
   );
   const runs = createRunsRepo(db);

@@ -38,6 +38,13 @@ export interface QueueItem {
 }
 
 /** Where you stand with a limited company (the server's view, from your Job Ops applications). */
+/** A blocked company (a keyword: any company whose name contains it). */
+export interface BlockedCompany {
+  readonly name: string;
+  /** Jobs blocking it skipped, which unblocking puts back. */
+  readonly skippedJobs: number;
+}
+
 export interface CompanyWindow {
   readonly id: number;
   readonly name: string;
@@ -200,6 +207,27 @@ export class ApplyClient implements TraceApi {
     note?: string;
   }): Promise<unknown> {
     return this.request("/company-limits", limit, "PUT");
+  }
+
+  /** Job Ops' blocked companies, with how many jobs each block skipped. */
+  blockedCompanies(): Promise<readonly BlockedCompany[]> {
+    return this.request("/blocked-companies");
+  }
+
+  /** Blocks a company (any whose name contains it) and skips its Ready and Discovered jobs. */
+  blockCompany(name: string): Promise<{ name: string; skippedJobs: number }> {
+    return this.request("/blocked-companies", { name }, "PUT");
+  }
+
+  /** Unblocks it and puts back the jobs blocking it skipped. */
+  unblockCompany(
+    name: string,
+  ): Promise<{ name: string; restoredJobs: number }> {
+    return this.request(
+      `/blocked-companies/${encodeURIComponent(name)}`,
+      undefined,
+      "DELETE",
+    );
   }
 
   unlimitCompany(id: number): Promise<unknown> {

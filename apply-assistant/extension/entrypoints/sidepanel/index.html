@@ -70,6 +70,16 @@
 
       <div id="plan" class="card" hidden></div>
 
+      <details id="blocked-card" class="card">
+        <summary><strong>Blocked companies</strong> <span id="blocked-count" class="muted"></span></summary>
+        <p class="muted">Job Ops' own list (Settings): their jobs are never found again, and blocking skips the ones you have. Unblock puts those back.</p>
+        <form id="block-form" class="row">
+          <input id="block-name" type="text" autocomplete="off" placeholder="Company, e.g. Amazon" aria-label="Company to block" />
+          <button type="submit">Block</button>
+        </form>
+        <ul id="blocked" class="list"></ul>
+      </details>
+
       <details class="card">
         <summary><strong>Your Claude key</strong></summary>
         <p id="claude-status" class="muted"></p>

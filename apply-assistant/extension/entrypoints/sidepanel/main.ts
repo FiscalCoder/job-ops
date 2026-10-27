@@ -1,6 +1,11 @@
 import { RunController, type RunView } from "../../src/fill/controller";
 import { ALL_SITES, activeTab } from "../../src/kit/page-fill";
-import { ApiError, ApplyClient, type QueueItem } from "../../src/lib/api";
+import {
+  ApiError,
+  ApplyClient,
+  type BlockedCompany,
+  type QueueItem,
+} from "../../src/lib/api";
 import {
   type CaptureEntry,
   loadCaptures,
@@ -303,6 +308,7 @@ async function showMain() {
     origins: [ALL_SITES],
   });
   void claudeSettings.refresh();
+  void loadBlocked();
   await loadQueue();
 }
 
@@ -466,8 +472,98 @@ async function loadQueue() {
         .unlimitCompany(limit.id)
         .then(loadQueue, handle);
     },
+    block: (company) => void blockCompany(company),
   });
 }
+
+/** The blocked companies (Job Ops' own list), each with Unblock. */
+async function loadBlocked() {
+  if (!client) return;
+  let blocked: readonly BlockedCompany[];
+  try {
+    blocked = await client.blockedCompanies();
+  } catch (error) {
+    handle(error);
+    return;
+  }
+  $("blocked-count").textContent = blocked.length ? `(${blocked.length})` : "";
+  $("blocked").replaceChildren(
+    ...(blocked.length
+      ? blocked.map((company) => {
+          const unblock = el(
+            "button",
+            { type: "button", class: "link" },
+            "Unblock",
+          );
+          unblock.addEventListener("click", () => void unblockCompany(company));
+          return el(
+            "li",
+            {},
+            el("div", { class: "row" }, el("span", {}, company.name), unblock),
+            company.skippedJobs
+              ? el(
+                  "div",
+                  { class: "muted" },
+                  `${company.skippedJobs} job${company.skippedJobs === 1 ? "" : "s"} skipped; back on Unblock`,
+                )
+              : null,
+          );
+        })
+      : [el("li", { class: "muted" }, "None blocked.")]),
+  );
+}
+
+/**
+ * Blocks a company: you can shorten the name ("Amazon" for every Amazon entity), since any
+ * company whose name contains it is blocked.
+ */
+async function blockCompany(company: string) {
+  const name = window
+    .prompt(
+      `Block which company? Any company whose name contains this is blocked (shorten it to cover them all). Its Ready and Discovered jobs are skipped; Unblock puts them back.`,
+      company,
+    )
+    ?.trim();
+  if (!name) return;
+  await submitBlock(name);
+}
+
+async function submitBlock(name: string) {
+  try {
+    const result = await (client as ApplyClient).blockCompany(name);
+    $<HTMLDetailsElement>("blocked-card").open = true;
+    await Promise.all([loadBlocked(), loadQueue()]);
+    window.alert(
+      `Blocked "${result.name}": ${result.skippedJobs} job${result.skippedJobs === 1 ? "" : "s"} skipped.`,
+    );
+  } catch (error) {
+    handle(error);
+  }
+}
+
+async function unblockCompany(company: BlockedCompany) {
+  if (!window.confirm(`Unblock ${company.name}? Its jobs can be found again.`))
+    return;
+  try {
+    const result = await (client as ApplyClient).unblockCompany(company.name);
+    await Promise.all([loadBlocked(), loadQueue()]);
+    if (result.restoredJobs)
+      window.alert(
+        `Unblocked "${result.name}": ${result.restoredJobs} job${result.restoredJobs === 1 ? "" : "s"} back.`,
+      );
+  } catch (error) {
+    handle(error);
+  }
+}
+
+$("block-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const input = $<HTMLInputElement>("block-name");
+  const name = input.value.trim();
+  if (name.length < 2) return;
+  input.value = "";
+  void submitBlock(name);
+});
 
 /** Marks a company as one application per N months (asks how many; 6 by default). */
 async function limitCompany(company: string) {

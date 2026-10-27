@@ -62,7 +62,10 @@ export function periodText(days: number): string {
 }
 
 /** "posted today", "posted 3 days ago", "posted 12 Sep". */
-export function postedText(postedAt: string | null | undefined, now = new Date()): string {
+export function postedText(
+  postedAt: string | null | undefined,
+  now = new Date(),
+): string {
   if (!postedAt) return "";
   const at = new Date(postedAt);
   if (Number.isNaN(at.getTime())) return "";
@@ -81,7 +84,10 @@ const day = (iso: string) =>
   });
 
 /** The limit in words, and whether you can still apply. */
-export function limitText(limit: CompanyWindow): { text: string; tone: string } {
+export function limitText(limit: CompanyWindow): {
+  text: string;
+  tone: string;
+} {
   const rule = `${limit.maxApplications} per ${periodText(limit.windowDays)}`;
   if (limit.full) {
     const last = limit.used[0];
@@ -110,7 +116,9 @@ export function confirmLimit(item: QueueItem): boolean {
   const last = limit.used[0];
   return window.confirm(
     `${limit.name} takes ${limit.maxApplications} application${limit.maxApplications === 1 ? "" : "s"} per ${periodText(limit.windowDays)}` +
-      (last ? `, and you applied for ${last.title} on ${day(last.appliedAt)}` : "") +
+      (last
+        ? `, and you applied for ${last.title} on ${day(last.appliedAt)}`
+        : "") +
       `. The next opens ${limit.nextOpen ? day(limit.nextOpen) : "later"}.\n\nApply to ${item.title} anyway?`,
   );
 }
@@ -121,6 +129,8 @@ export interface QueueViewActions {
   /** Marks the company as one application per six months. */
   readonly limit: (company: string) => void;
   readonly unlimit: (limit: CompanyWindow) => void;
+  /** Never apply there: blocked in Job Ops, its jobs skipped. */
+  readonly block: (company: string) => void;
 }
 
 export function renderQueue(
@@ -129,7 +139,9 @@ export function renderQueue(
   actions: QueueViewActions,
 ): void {
   if (items.length === 0) {
-    list.replaceChildren(el("li", { class: "muted" }, "No Ready jobs in Job Ops."));
+    list.replaceChildren(
+      el("li", { class: "muted" }, "No Ready jobs in Job Ops."),
+    );
     return;
   }
   list.replaceChildren(
@@ -155,9 +167,17 @@ export function renderQueue(
             group.company,
             group.items.length > 1 ? ` · ${group.items.length} roles` : "",
           ),
-          group.limit
-            ? button("Remove limit", () => actions.unlimit(group.limit as CompanyWindow))
-            : button("Limit…", () => actions.limit(group.company)),
+          el(
+            "span",
+            {},
+            group.limit
+              ? button("Remove limit", () =>
+                  actions.unlimit(group.limit as CompanyWindow),
+                )
+              : button("Limit…", () => actions.limit(group.company)),
+            " ",
+            button("Block…", () => actions.block(group.company)),
+          ),
         ),
         limit ? el("div", { class: `badge ${limit.tone}` }, limit.text) : null,
       );
