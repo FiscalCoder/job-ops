@@ -23,6 +23,27 @@ export function pageKey(url: string): string | null {
 }
 
 /**
+ * Whether two addresses show the same posting: the same page, or a company careers page with
+ * Greenhouse's embed for the same job (Toast sends ".../jobs?gh_jid=1" on to
+ * ".../jobs/senior-engineer?gh_jid=1").
+ */
+export function samePosting(a: string, b: string): boolean {
+  try {
+    const [x, y] = [new URL(a), new URL(b)];
+    const [job, other] = [x, y].map((u) => u.searchParams.get("gh_jid"));
+    // One careers page lists many jobs: the gh_jid says which.
+    if (job !== null || other !== null)
+      return (
+        job === other && x.hostname.toLowerCase() === y.hostname.toLowerCase()
+      );
+  } catch {
+    return false;
+  }
+  const key = pageKey(a);
+  return key !== null && key === pageKey(b);
+}
+
+/**
  * The queued job whose matched posting this page is: the posting itself or a page under it
  * (Ashby's /application, Lever's /apply).
  */

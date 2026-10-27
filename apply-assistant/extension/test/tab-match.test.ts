@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { QueueItem } from "../src/lib/api";
-import { jobForTab, pageKey } from "../src/lib/tab-match";
+import { jobForTab, pageKey, samePosting } from "../src/lib/tab-match";
 
 const item = (jobId: string, target: QueueItem["target"]): QueueItem => ({
   jobId,
@@ -68,5 +68,34 @@ describe("jobForTab", () => {
     expect(jobForTab(undefined, queue)).toBeNull();
     expect(jobForTab("chrome://extensions", queue)).toBeNull();
     expect(pageKey("not a url")).toBeNull();
+  });
+});
+
+describe("samePosting", () => {
+  it("a careers page with Greenhouse's embed is the same posting wherever it sends you", () => {
+    expect(
+      samePosting(
+        "https://careers.toasttab.com/jobs/senior-software-engineer?gh_jid=8317320#applynow",
+        "https://careers.toasttab.com/jobs?gh_jid=8317320",
+      ),
+    ).toBe(true);
+    expect(
+      samePosting(
+        "https://careers.toasttab.com/jobs?gh_jid=1",
+        "https://careers.toasttab.com/jobs?gh_jid=2",
+      ),
+    ).toBe(false);
+    expect(
+      samePosting(
+        "https://other.example.com/jobs?gh_jid=1",
+        "https://careers.toasttab.com/jobs?gh_jid=1",
+      ),
+    ).toBe(false);
+    expect(
+      samePosting(
+        "https://jobs.ashbyhq.com/acme/123/",
+        "https://jobs.ashbyhq.com/acme/123",
+      ),
+    ).toBe(true);
   });
 });

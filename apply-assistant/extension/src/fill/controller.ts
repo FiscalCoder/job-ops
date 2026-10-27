@@ -5,7 +5,7 @@ import {
   type Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import type { ApplyClient, QueueItem } from "../lib/api";
-import { pageKey } from "../lib/tab-match";
+import { samePosting } from "../lib/tab-match";
 import { errorText, TraceRecorder } from "../trace/recorder";
 import { setSupervised, trackTab } from "../track/tabs";
 import { attachDriver, formUrlFor, resumeFirst } from "./drivers";
@@ -88,6 +88,20 @@ function waitForTabLoad(tabId: number): Promise<void> {
   });
 }
 
+/** A careers page may send you on (to the job's own page) right after loading. */
+const REDIRECT_SETTLE_MS = 1_500;
+const MAX_REDIRECTS = 3;
+
+/** Waits for the tab's load and any redirect right after it. */
+async function waitForTabSettled(tabId: number): Promise<void> {
+  for (let i = 0; i < MAX_REDIRECTS; i++) {
+    await new Promise((resolve) => setTimeout(resolve, REDIRECT_SETTLE_MS));
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (tab?.status !== "loading") return;
+    await waitForTabLoad(tabId);
+  }
+}
+
 /**
  * The tab to fill: a new one on the form, or the tab you're on (moved to the form only when
  * it shows something else, so nothing you already typed there is reloaded away).
@@ -95,17 +109,21 @@ function waitForTabLoad(tabId: number): Promise<void> {
 async function openForm(url: string, tabId?: number): Promise<chrome.tabs.Tab> {
   if (tabId === undefined) {
     const tab = await chrome.tabs.create({ url, active: true });
-    if (tab.id !== undefined) await waitForTabLoad(tab.id);
+    if (tab.id !== undefined) {
+      await waitForTabLoad(tab.id);
+      await waitForTabSettled(tab.id);
+    }
     return tab;
   }
   const current = await chrome.tabs.get(tabId);
-  if (current.url && pageKey(current.url) === pageKey(url)) {
+  if (current.url && samePosting(current.url, url)) {
     if (current.status !== "complete") await waitForTabLoad(tabId);
     return (await chrome.tabs.update(tabId, { active: true })) ?? current;
   }
   const loading = waitForTabLoad(tabId);
   const moved = await chrome.tabs.update(tabId, { url, active: true });
   await loading;
+  await waitForTabSettled(tabId);
   return moved ?? current;
 }
 
@@ -120,6 +138,33 @@ async function release(browser: Browser, tabId: number): Promise<void> {
     () => false,
   );
   if (open) await browser.disconnect().catch(() => {});
+}
+
+/** Puppeteer's error for a frame the page replaced (it navigated) while being read. */
+const DETACHED = /detached frame/i;
+
+interface Attached {
+  readonly browser: Browser;
+  readonly page: Page | undefined;
+  readonly driver: FormDriver | null;
+}
+
+/** Connects to the tab and finds the form; lets go of the tab if that fails. */
+async function attachTab(
+  tabId: number,
+  attach: (page: Page) => Promise<FormDriver | null>,
+): Promise<Attached> {
+  const browser = await connect({
+    transport: await ExtensionTransport.connectTab(tabId),
+    defaultViewport: null,
+  });
+  try {
+    const [page] = await browser.pages();
+    return { browser, page, driver: page ? await attach(page) : null };
+  } catch (error) {
+    await release(browser, tabId);
+    throw error;
+  }
 }
 
 interface StartOptions {
@@ -328,12 +373,25 @@ export class RunController {
     await trackTab(tabId, job.jobId);
     // The run records this tab itself; manual-application recording stays out of it.
     await setSupervised(tabId, true);
-    const browser = await connect({
-      transport: await ExtensionTransport.connectTab(tabId),
-      defaultViewport: null,
-    });
-    const [page] = await browser.pages();
-    const driver = page ? await options.attach(page) : null;
+    let attached: Attached;
+    try {
+      attached = await attachTab(tabId, options.attach).catch(
+        async (error: unknown) => {
+          // The page moved on while being read (a redirect): read it again once it settles.
+          if (!DETACHED.test(errorText(error))) throw error;
+          await waitForTabSettled(tabId);
+          return attachTab(tabId, options.attach);
+        },
+      );
+    } catch (error) {
+      await setSupervised(tabId, false);
+      throw await failStart(
+        trace,
+        `Couldn't read the form: ${errorText(error)}`,
+        context,
+      );
+    }
+    const { browser, page, driver } = attached;
     // Any system: this site's saved steps and Claude, for fields the driver can't fill itself.
     if (page && driver instanceof TrustedDriver)
       driver.help = await siteHelp(client, job.jobId, recipeHost(page.url()));
