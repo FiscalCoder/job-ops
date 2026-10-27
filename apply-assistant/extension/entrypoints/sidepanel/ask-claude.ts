@@ -65,6 +65,12 @@ export function askClaude(
     placeholder: "One choice per line (only for dropdowns)",
     "aria-label": "Choices",
   }) as HTMLTextAreaElement;
+  const how = el("input", {
+    type: "text",
+    placeholder: "How to answer (optional): comma-separated skills, one line…",
+    "aria-label": "How to answer",
+    maxlength: "300",
+  }) as HTMLInputElement;
   const long = el("input", { type: "checkbox" }) as HTMLInputElement;
   const answer = el("div");
   const ask = el(
@@ -84,6 +90,7 @@ export function askClaude(
         question: question.value,
         ...(options.length ? { options } : {}),
         long: long.checked,
+        ...(how.value.trim() ? { instruction: how.value.trim() } : {}),
       });
       answer.replaceChildren(
         el("p", { class: "muted" }, reply.how),
@@ -104,6 +111,7 @@ export function askClaude(
     { class: "kit-group" },
     el("h2", {}, "Ask Claude"),
     question,
+    how,
     el("details", {}, el("summary", {}, "It's a dropdown"), choices),
     el("label", { class: "inline" }, long, "Long answer (a paragraph)"),
     el("div", { class: "controls" }, ask),

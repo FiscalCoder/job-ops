@@ -22,6 +22,8 @@ const answerBody = z.object({
   options: z.array(z.string().trim().min(1).max(200)).max(60).optional(),
   /** A written answer (paragraph) rather than a short one. */
   long: z.boolean().optional(),
+  /** How you want it written ("comma-separated skills"): outranks the usual length rules. */
+  instruction: z.string().trim().max(300).optional(),
 });
 
 /** What you did with a job you handled by hand. */
@@ -193,6 +195,7 @@ export function createKitRoutes(deps: KitRoutesDeps) {
       }
       const jobId = String(req.params.jobId);
       const { question, options = [], long = false } = body.data;
+      const instruction = body.data.instruction || undefined;
       try {
         const [job, design] = await Promise.all([
           jobOps.getJob(tokenOf(req), jobId),
@@ -206,6 +209,9 @@ export function createKitRoutes(deps: KitRoutesDeps) {
               label: question,
               type: options.length ? "select" : long ? "textarea" : "text",
               options,
+              // You pasted it: it may carry your own instruction as well.
+              pastedByCandidate: true,
+              ...(instruction ? { instruction } : {}),
             },
           ],
           {
@@ -227,7 +233,7 @@ export function createKitRoutes(deps: KitRoutesDeps) {
           message: found
             ? `Claude answered "${question.slice(0, 80)}"`
             : `Claude had no answer for "${question.slice(0, 80)}"`,
-          data: { question, options, reply: reply ?? null },
+          data: { question, options, instruction, reply: reply ?? null },
         });
         if (!found) {
           sendError(

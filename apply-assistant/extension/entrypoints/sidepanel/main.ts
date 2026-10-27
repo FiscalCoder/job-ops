@@ -615,6 +615,17 @@ async function limitCompany(company: string) {
   }
 }
 
+/** Job Ops' AI suitability score (0-100) for the role. */
+function scoreBadge(score: number | null): HTMLElement | null {
+  if (score === null) return null;
+  const tone = score >= 80 ? "ok" : score >= 60 ? "warn" : "";
+  return el(
+    "span",
+    { class: `badge ${tone}`, title: "Job Ops' AI suitability score" },
+    `AI ${Math.round(score)}`,
+  );
+}
+
 /** One role in the queue: title, when posted, its badges and the kit. */
 function queueRow(item: QueueItem, showEmployer: boolean): HTMLElement {
   const [tone, label] = targetBadge(item.target);
@@ -639,6 +650,8 @@ function queueRow(item: QueueItem, showEmployer: boolean): HTMLElement {
       el(
         "div",
         {},
+        scoreBadge(item.score),
+        item.score === null ? null : " ",
         el("span", { class: `badge ${tone}` }, label),
         " ",
         item.plan

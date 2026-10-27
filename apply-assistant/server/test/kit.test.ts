@@ -298,6 +298,35 @@ describe("kit routes", () => {
     );
   });
 
+  it("your instruction on how to write it goes to Claude as yours, and may run past a short answer", async () => {
+    const skills = Array.from({ length: 40 }, (_, i) => `Skill ${i}`);
+    const create = vi.fn<MessagesApi["create"]>();
+    create.mockResolvedValueOnce(
+      claudeReply([
+        {
+          ref: "kit",
+          kind: "answer",
+          bank_key: "",
+          answer: skills,
+          confidence: 0.9,
+          why: "Skills from the resume",
+        },
+      ]),
+    );
+    const call = await start(create);
+    const { status, body } = await call("/kit/job-1/answer", {
+      question: "What relevant skills make you a great fit?",
+      instruction: "comma-separated skills only",
+    });
+    expect(status).toBe(200);
+    expect(body.data.value).toBe(skills.join(", "));
+    const sent = String(create.mock.calls[0]?.[0].messages[0]?.content);
+    expect(sent).toContain(
+      '<candidate_instruction ref="kit">\ncomma-separated skills only',
+    );
+    expect(sent).toContain('<question ref="kit" type="text" from="candidate">');
+  });
+
   it("marks a job applied or skipped with Job Ops' own actions, once", async () => {
     const call = await start();
     jobOpsLog.length = 0;

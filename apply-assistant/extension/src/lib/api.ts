@@ -419,7 +419,13 @@ export class ApplyClient implements TraceApi {
 
   kitAnswer(
     jobId: string,
-    question: { question: string; options?: string[]; long?: boolean },
+    question: {
+      question: string;
+      options?: string[];
+      long?: boolean;
+      /** How you want it written ("comma-separated skills"); outranks the usual rules. */
+      instruction?: string;
+    },
   ): Promise<KitAnswer> {
     return this.request(`/kit/${encodeURIComponent(jobId)}/answer`, question);
   }

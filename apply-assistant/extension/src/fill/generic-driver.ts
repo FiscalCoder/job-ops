@@ -64,13 +64,46 @@ export function readGenericPage(): GenericPage {
     (el?.textContent ?? "").replace(/\s+/g, " ").trim();
   const SKIP = /^(hidden|submit|button|reset|image|password|search)$/i;
   const CAPTCHA = /recaptcha|hcaptcha|turnstile/i;
+  // Words a widget calls itself, not the question ("textbox", "Drop or select (.pdf)").
+  const GENERIC =
+    /^(textbox|text|input|search|select|combobox|listbox|choose file|upload|drop or select\b.*)$/i;
+  const meaningful = (t: string | null | undefined) =>
+    t && !GENERIC.test(t.trim()) ? t.trim() : "";
+  const shown = (el: Element) => {
+    const box = el.getBoundingClientRect();
+    return box.width > 1 && box.height > 1;
+  };
+  /** The elements it names as its label; screen-reader-only ones ("0 files selected") only if nothing else. */
+  const labelledBy = (el: Element | null | undefined) => {
+    const named = (el?.getAttribute("aria-labelledby") ?? "")
+      .split(/\s+/)
+      .map((id) => (id ? document.getElementById(id) : null))
+      .filter((e): e is HTMLElement => e !== null);
+    const visible = named.filter(shown);
+    return (visible.length ? visible : named).map(text).join(" ").trim();
+  };
+  /**
+   * No label at all (Rippling's custom questions): the text just above the field, from the
+   * nearest earlier block that isn't another field.
+   */
+  const questionAbove = (el: HTMLElement): string => {
+    let node: Element | null = el;
+    for (let depth = 0; node && depth < 5; depth++) {
+      let prev = node.previousElementSibling;
+      for (let hops = 0; prev && hops < 2; hops++) {
+        if (prev.querySelector("input, select, textarea, [role='combobox']"))
+          return "";
+        const said = text(prev).replace(/\s*\*$/, "");
+        if (said && !/^\d+\s*\/\s*\d+$/.test(said)) return said;
+        prev = prev.previousElementSibling;
+      }
+      node = node.parentElement;
+    }
+    return "";
+  };
   const labelOf = (el: HTMLElement): string => {
     const input = el as HTMLInputElement;
-    const byIds = (el.getAttribute("aria-labelledby") ?? "")
-      .split(/\s+/)
-      .map((id) => text(document.getElementById(id)))
-      .join(" ")
-      .trim();
+    const own = input.labels?.[0] ?? el.closest("label");
     const box = el.closest(
       "fieldset, [role='group'], [role='radiogroup'], .field, [class*='field' i], [class*='question' i]",
     );
@@ -80,12 +113,13 @@ export function readGenericPage(): GenericPage {
         : "";
     return (
       group ||
-      text(input.labels?.[0]) ||
-      el.getAttribute("aria-label") ||
-      byIds ||
-      text(el.closest("label")) ||
+      labelledBy(el) ||
+      labelledBy(own) ||
+      meaningful(text(own)) ||
+      meaningful(el.getAttribute("aria-label")) ||
       text(box?.querySelector("label, legend")) ||
-      el.getAttribute("placeholder") ||
+      questionAbove(el) ||
+      meaningful(el.getAttribute("placeholder")) ||
       el.getAttribute("name") ||
       ""
     ).slice(0, 300);
@@ -93,10 +127,16 @@ export function readGenericPage(): GenericPage {
   let counter = 0;
   const refOf = (el: HTMLElement, group: string | null): string => {
     if (group) return `input[name="${group.replace(/["\\]/g, "\\$&")}"]`;
-    if (el.id && document.querySelectorAll(`#${CSS.escape(el.id)}`).length === 1)
+    if (
+      el.id &&
+      document.querySelectorAll(`#${CSS.escape(el.id)}`).length === 1
+    )
       return `#${CSS.escape(el.id)}`;
     const name = el.getAttribute("name");
-    if (name && document.querySelectorAll(`[name="${CSS.escape(name)}"]`).length === 1)
+    if (
+      name &&
+      document.querySelectorAll(`[name="${CSS.escape(name)}"]`).length === 1
+    )
       return `[name="${name.replace(/["\\]/g, "\\$&")}"]`;
     const mark = el.getAttribute("data-ac-ref") ?? `ac${counter++}`;
     el.setAttribute("data-ac-ref", mark);
@@ -121,7 +161,8 @@ export function readGenericPage(): GenericPage {
     if (/one-time-code/i.test(el.getAttribute("autocomplete") ?? "")) continue;
     if (input.disabled || input.readOnly) continue;
     // A dropdown's stand-in for the browser's "required" check (react-select), and captcha tokens.
-    if (el.getAttribute("aria-hidden") === "true" && input.type !== "file") continue;
+    if (el.getAttribute("aria-hidden") === "true" && input.type !== "file")
+      continue;
     if (CAPTCHA.test(`${el.id} ${el.getAttribute("name") ?? ""}`)) continue;
     // Hidden fields aren't for you, except uploads (their input hides behind a button).
     const visible = el.offsetParent !== null || el.getClientRects().length > 0;
@@ -249,14 +290,19 @@ export function shownValue(selector: string): string {
   // of a multi-select, without its remove button. Stops at the next field.
   let box = el.parentElement;
   for (let depth = 0; box && depth < 5; depth++, box = box.parentElement) {
-    if (box.querySelectorAll("input:not([aria-hidden='true']), select, textarea").length > 1)
+    if (
+      box.querySelectorAll("input:not([aria-hidden='true']), select, textarea")
+        .length > 1
+    )
       break;
     const found = [
       ...box.querySelectorAll(
         "[class*='singleValue' i], [class*='single-value' i], [class*='selected' i], [class*='chip' i], [class*='tag' i], [class*='token' i]",
       ),
     ].filter((p) => !p.closest("button"));
-    const picks = found.filter((p) => !found.some((o) => o !== p && o.contains(p)));
+    const picks = found.filter(
+      (p) => !found.some((o) => o !== p && o.contains(p)),
+    );
     if (picks.length)
       return picks
         .map((p) => {
@@ -326,7 +372,12 @@ export class GenericDriver extends TrustedDriver {
           refs.filter((ref) => {
             const el = document.querySelector(ref);
             // Styled inputs are often hidden themselves: their wrapper shows.
-            return !el || !(el.parentElement ?? el).checkVisibility({ visibilityProperty: true });
+            return (
+              !el ||
+              !(el.parentElement ?? el).checkVisibility({
+                visibilityProperty: true,
+              })
+            );
           }).length,
         this.lastRefs,
       )
@@ -347,7 +398,10 @@ export class GenericDriver extends TrustedDriver {
     try {
       const kind = await this.frame.$eval(entry.ref, domKind).catch(() => null);
       if (!kind)
-        return { ok: false, reason: "Field not found on the page; fill it yourself" };
+        return {
+          ok: false,
+          reason: "Field not found on the page; fill it yourself",
+        };
       if (kind === "file")
         return resume
           ? await this.attachFile(entry.ref, resume)
@@ -379,10 +433,14 @@ export class GenericDriver extends TrustedDriver {
       default: {
         const input = await this.frame.$(entry.ref);
         if (!input) return { ok: false, reason: "Field not found on the page" };
-        const phone = await input.evaluate((el) => (el as HTMLInputElement).type === "tel");
+        const phone = await input.evaluate(
+          (el) => (el as HTMLInputElement).type === "tel",
+        );
         const typed = await this.typeText(input, wanted.join(", "), phone);
         // A picker that looks like a text box: its list opens when you click it.
-        return typed.ok ? typed : ((await this.chooseFromList(entry, wanted)) ?? typed);
+        return typed.ok
+          ? typed
+          : ((await this.chooseFromList(entry, wanted)) ?? typed);
       }
     }
   }
@@ -392,7 +450,10 @@ export class GenericDriver extends TrustedDriver {
     const handle = await this.frame.$(ref);
     if (!handle) return { ok: false, reason: "Dropdown not found" };
     const options = await handle.evaluate((el) =>
-      [...(el as HTMLSelectElement).options].map((o) => ({ text: o.text.trim(), value: o.value })),
+      [...(el as HTMLSelectElement).options].map((o) => ({
+        text: o.text.trim(),
+        value: o.value,
+      })),
     );
     const index = bestOption(
       options.map((o) => (o.value === "" ? "" : o.text)),
@@ -405,7 +466,10 @@ export class GenericDriver extends TrustedDriver {
   }
 
   /** Radios and checkboxes: clicks the matching ones (a lone checkbox: ticks it). */
-  private async choose(ref: string, wanted: readonly string[]): Promise<FillOutcome> {
+  private async choose(
+    ref: string,
+    wanted: readonly string[],
+  ): Promise<FillOutcome> {
     const inputs = await this.frame.$$(ref);
     const labels = await Promise.all(
       inputs.map((i) =>
@@ -433,9 +497,14 @@ export class GenericDriver extends TrustedDriver {
       return { ok: false, reason: `No choice matching "${wanted.join(", ")}"` };
     for (const index of targets) {
       const input = inputs[index];
-      if (!input || (await input.evaluate((el) => (el as HTMLInputElement).checked)))
+      if (
+        !input ||
+        (await input.evaluate((el) => (el as HTMLInputElement).checked))
+      )
         continue;
-      await input.click().catch(() => input.evaluate((el) => (el as HTMLElement).click()));
+      await input
+        .click()
+        .catch(() => input.evaluate((el) => (el as HTMLElement).click()));
       await sleep(150);
     }
     const shown = await this.readBackRef(ref);
@@ -449,7 +518,10 @@ export class GenericDriver extends TrustedDriver {
    * A searchable dropdown: type, then pick the best choice that shows. None worded like your
    * answer: the list's own choices (Claude picks what fits you); no list at all: Enter.
    */
-  private async combobox(entry: PlanEntry, all: readonly string[]): Promise<FillOutcome> {
+  private async combobox(
+    entry: PlanEntry,
+    all: readonly string[],
+  ): Promise<FillOutcome> {
     const { ref } = entry;
     const wanted = all[0] ?? "";
     const input = await this.frame.$(ref);
@@ -474,7 +546,10 @@ export class GenericDriver extends TrustedDriver {
   }
 
   /** A dropdown that isn't a select (a div with role=combobox): open it and pick. */
-  private async custom(entry: PlanEntry, all: readonly string[]): Promise<FillOutcome> {
+  private async custom(
+    entry: PlanEntry,
+    all: readonly string[],
+  ): Promise<FillOutcome> {
     const { ref } = entry;
     const wanted = all[0] ?? "";
     const handle = await this.frame.$(ref);
@@ -555,7 +630,10 @@ export class GenericDriver extends TrustedDriver {
     }
     if (!(await pickOpenChoice(this.frame, choice))) {
       await this.page.keyboard.press("Escape");
-      return { ok: false, reason: `"${choice}" couldn't be picked from the list` };
+      return {
+        ok: false,
+        reason: `"${choice}" couldn't be picked from the list`,
+      };
     }
     await sleep(200);
     return selectionMatches(await this.readBackRef(ref), choice)
@@ -567,7 +645,10 @@ export class GenericDriver extends TrustedDriver {
     const shown = await this.readBackRef(ref);
     return showsValue(shown, expected)
       ? { ok: true, result: `set to "${shown.slice(0, 60)}"` }
-      : { ok: false, reason: `Shows "${shown.slice(0, 40) || "nothing"}" instead` };
+      : {
+          ok: false,
+          reason: `Shows "${shown.slice(0, 40) || "nothing"}" instead`,
+        };
   }
 
   private readBackRef(ref: string): Promise<string> {

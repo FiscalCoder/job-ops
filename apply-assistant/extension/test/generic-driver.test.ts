@@ -7,12 +7,15 @@ import { isSupportedPosting, pagedFill } from "../src/track/job-match";
 /** Any company's own application page, read generically. */
 
 if (!globalThis.CSS?.escape)
-  vi.stubGlobal("CSS", { escape: (s: string) => s.replace(/["\\#.:]/g, "\\$&") });
+  vi.stubGlobal("CSS", {
+    escape: (s: string) => s.replace(/["\\#.:]/g, "\\$&"),
+  });
 
 // jsdom has no layout: everything with a box counts as visible here.
 Object.defineProperty(HTMLElement.prototype, "offsetParent", {
   get() {
-    return (this as HTMLElement).hidden || (this as HTMLElement).style.display === "none"
+    return (this as HTMLElement).hidden ||
+      (this as HTMLElement).style.display === "none"
       ? null
       : document.body;
   },
@@ -60,7 +63,8 @@ describe("readGenericPage", () => {
       ["Years of experience", "radio", true],
       ["I agree to the privacy notice", "checkbox", false],
     ]);
-    const byLabel = (label: string) => page.fields.find((f) => f.label === label);
+    const byLabel = (label: string) =>
+      page.fields.find((f) => f.label === label);
     // The placeholder isn't a choice.
     expect(byLabel("Country")?.options).toEqual(["India", "United States"]);
     expect(byLabel("Years of experience")).toMatchObject({
@@ -71,7 +75,9 @@ describe("readGenericPage", () => {
     for (const f of page.fields)
       expect(document.querySelector(f.ref), f.label).not.toBeNull();
     // Not the site's search box, a password or a hidden token.
-    expect(page.fields.some((f) => /search|password|csrf/i.test(f.key))).toBe(false);
+    expect(page.fields.some((f) => /search|password|csrf/i.test(f.key))).toBe(
+      false,
+    );
   });
 
   it("questions are keyed the same however they're punctuated", () => {
@@ -119,19 +125,57 @@ describe("react-select dropdowns", () => {
   });
 });
 
+/** Rippling: labels by id, a file input inside a "Drop or select" label, unlabelled questions. */
+const RIPPLING = `<form>
+  <div data-testid="field"><div><span id="field-56-label">Cover letter</span></div>
+    <div><div id="file-input-58">Total 0 file selected</div>
+      <label aria-labelledby="file-input-58 field-56-label">Drop or select (.doc / .docx / .pdf)<input type="file" title=""></label></div></div>
+  <div data-testid="field"><div><span id="field-39-label">Location</span><span>*</span></div>
+    <div><input id="field-39" aria-label="textbox" aria-labelledby="field-39-label" name="Qg8J2SVPIQz"></div></div>
+  <div><div><p>What is your current salary package?</p></div>
+    <div data-testid="field"><div><input id="field-88" name="PzLD6fU-UVZ"></div></div>
+    <div><p>0/50</p></div></div>
+  <div><div><p>Notice period in days</p></div>
+    <div data-testid="field"><div><input id="field-92" name="QACqteXH3UV"></div></div>
+    <div><p>0/50</p></div></div>
+</form>`;
+
+describe("fields without a proper label", () => {
+  it("take the text they point to, or the question just above them (Rippling)", () => {
+    document.body.innerHTML = RIPPLING;
+    expect(readGenericPage().fields.map((f) => [f.label, f.kind])).toEqual([
+      // jsdom has no layout, so the screen-reader text stays in.
+      ["Total 0 file selected Cover letter", "file"],
+      ["Location", "text"],
+      ["What is your current salary package?", "text"],
+      ["Notice period in days", "text"],
+    ]);
+  });
+});
+
 describe("isSupportedPosting", () => {
   it("Greenhouse, Ashby and Lever postings, not their boards or other sites", () => {
     expect(
-      isSupportedPosting("https://job-boards.greenhouse.io/fanaticscommerce/jobs/4405584009?gh_src=x"),
+      isSupportedPosting(
+        "https://job-boards.greenhouse.io/fanaticscommerce/jobs/4405584009?gh_src=x",
+      ),
     ).toBe(true);
-    expect(isSupportedPosting("https://boards.greenhouse.io/acme/jobs/1")).toBe(true);
+    expect(isSupportedPosting("https://boards.greenhouse.io/acme/jobs/1")).toBe(
+      true,
+    );
     expect(
-      isSupportedPosting("https://jobs.ashbyhq.com/acme/0f6b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d/application"),
+      isSupportedPosting(
+        "https://jobs.ashbyhq.com/acme/0f6b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d/application",
+      ),
     ).toBe(true);
     expect(
-      isSupportedPosting("https://jobs.lever.co/acme/0f6b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d/apply"),
+      isSupportedPosting(
+        "https://jobs.lever.co/acme/0f6b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d/apply",
+      ),
     ).toBe(true);
-    expect(isSupportedPosting("https://job-boards.greenhouse.io/acme")).toBe(false);
+    expect(isSupportedPosting("https://job-boards.greenhouse.io/acme")).toBe(
+      false,
+    );
     expect(isSupportedPosting("https://careers.acme.com/jobs/123")).toBe(false);
   });
 });
@@ -139,10 +183,16 @@ describe("isSupportedPosting", () => {
 describe("pagedFill", () => {
   it("Workday's apply flow, any company page, never LinkedIn or the job boards", () => {
     expect(
-      pagedFill("https://acme.wd1.myworkdayjobs.com/en-US/External/job/X_R1/apply/applyManually"),
+      pagedFill(
+        "https://acme.wd1.myworkdayjobs.com/en-US/External/job/X_R1/apply/applyManually",
+      ),
     ).toBe("workday");
-    expect(pagedFill("https://careers.acme.com/jobs/123/apply")).toBe("generic");
-    expect(pagedFill("https://acme.wd1.myworkdayjobs.com/en-US/External/job/X_R1")).toBeNull();
+    expect(pagedFill("https://careers.acme.com/jobs/123/apply")).toBe(
+      "generic",
+    );
+    expect(
+      pagedFill("https://acme.wd1.myworkdayjobs.com/en-US/External/job/X_R1"),
+    ).toBeNull();
     expect(pagedFill("https://www.linkedin.com/jobs/view/1")).toBeNull();
     expect(pagedFill("https://www.naukri.com/job-listings-x-1")).toBeNull();
     expect(pagedFill("http://careers.acme.com/apply")).toBeNull();

@@ -332,7 +332,7 @@ try {
         .getByText(/Resume attached on apply\.hueint\.com/)
         .waitFor({ timeout: 10_000 });
       const state = await careersPage.locator("#state").textContent();
-      assert.match(state ?? "", /^resume: Test_C_Resume\.pdf \d+$/);
+      assert.match(state ?? "", /^resume: Test_C_Resume_AcmeRobotics\.pdf \d+$/);
       assert.equal(
         await careersPage.evaluate(
           () => document.querySelector("[name=cover]").files.length,
