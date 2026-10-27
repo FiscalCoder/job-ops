@@ -94,23 +94,32 @@ function fakeJobOps(log: {
   updates: [string, JobUpdate][];
   notes: [string, string][];
 }): JobOpsApi {
+  // This test's own copy: a captured apply link is saved, as Job Ops does.
+  const current = jobs.map((j) => ({ ...j }));
+  let revision = 1;
   return {
     login: async () => ({ token: "good", expiresIn: 3600 }),
     me: async (token) => {
-      if (token === "good") return { id: "u1", username: "me", isSystemAdmin: true };
+      if (token === "good")
+        return { id: "u1", username: "me", isSystemAdmin: true };
       throw new JobOpsError(401, "UNAUTHORIZED", "nope");
     },
     listJobs: async (_t, statuses) => {
-      const found = jobs.filter((j) => statuses.includes(j.status));
-      return { jobs: found, total: found.length, revision: "r1" };
+      const found = current.filter((j) => statuses.includes(j.status));
+      return { jobs: found, total: found.length, revision: `r${revision}` };
     },
     getJob: async (_t, id) => {
-      const job = jobs.find((j) => j.id === id);
+      const job = current.find((j) => j.id === id);
       if (!job) throw new JobOpsError(404, "NOT_FOUND", "Job not found");
       return { ...job, location: "Bengaluru", jobDescription: JD };
     },
     updateJob: async (_t, id, update) => {
       log.updates.push([id, update]);
+      const job = current.find((j) => j.id === id);
+      if (job && update.applicationLink !== undefined) {
+        job.applicationLink = update.applicationLink;
+        revision++;
+      }
     },
     addNote: async (_t, id, note) => {
       log.notes.push([id, note.title]);
@@ -337,6 +346,22 @@ describe("lookups", () => {
     expect(pending.json.data.map((p: any) => p.jobId)).not.toContain(
       "linkedin",
     );
+  });
+
+  it("another job at a company known to have no board shows Not found, not Not checked yet", async () => {
+    const { call } = await start();
+    // Learned while looking up a different job of the same company.
+    await call("/lookups/results", {
+      type: "board",
+      jobId: "direct",
+      employer: "Gamma Labs Inc.",
+      token: null,
+      method: "careers-page",
+    });
+    const { json } = await call("/queue");
+    expect(
+      json.data.find((item: any) => item.jobId === "linkedin")?.target,
+    ).toEqual({ status: "none" });
   });
 
   it("validates result payloads", async () => {
@@ -650,7 +675,8 @@ describe("lookups", () => {
       ).toBeUndefined();
       await call("/captures", {
         linkedinJobId: "4400000001",
-        applyUrl: "https://jobs.lever.co/gamma/123",
+        applyUrl:
+          "https://jobs.lever.co/gamma/0a1b2c3d-1111-2222-3333-444455556666",
       });
       const queue = await call("/queue");
       expect(

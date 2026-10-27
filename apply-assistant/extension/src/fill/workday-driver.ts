@@ -87,6 +87,8 @@ const NOT_A_CHOICE = /^(select one|no items\.?|no results?( found)?\.?)$/i;
 const STOP_WORDS = /^(and|the|for|with|of|in)$/i;
 /** How many of an answer's words are searched for when the whole answer finds nothing. */
 const MAX_SEARCH_WORDS = 4;
+/** At most this many choices found across searches go to Claude. */
+const MAX_FOUND = 300;
 
 /** Workday's placeholder choice in every dropdown. */
 const PLACEHOLDER = /^select one$/i;
@@ -284,10 +286,17 @@ export type Chooser = (
   options: readonly string[],
 ) => Promise<string | null>;
 
+export type SearchTerms = (
+  label: string,
+  wanted: string,
+) => Promise<readonly string[]>;
+
 export class WorkdayDriver extends TrustedDriver {
   readonly system = "workday" as const;
   /** Set by the run: used when a search finds nothing worded like your answer. */
   chooser: Chooser | null = null;
+  /** Set by the run: broader words to search for when your answer's own words find nothing. */
+  searchTerms: SearchTerms | null = null;
 
   protected readonly errorSelector =
     "[data-automation-id='errorMessage'], [data-automation-id='errorBanner'] li, [data-automation-id='inputAlert']";
@@ -577,8 +586,10 @@ export class WorkdayDriver extends TrustedDriver {
   }
 
   /**
-   * Your answer isn't in the list as such (Field of Study differs by company): searches its
-   * main words, has Claude pick the closest of everything found, and picks that.
+   * Your answer isn't in the list as such (Field of Study differs by company). Everything each
+   * search finds is kept: first your answer's main words, then (when Claude sees nothing there
+   * that is your answer) broader words Claude suggests and "Other". Claude then picks the best
+   * of all of it, or nothing, and that is picked.
    */
   private async pickWithClaude(
     ref: string,
@@ -586,23 +597,42 @@ export class WorkdayDriver extends TrustedDriver {
     label: string,
     wanted: string,
   ): Promise<string | null> {
-    const words = [
-      ...new Set(
-        wanted
-          .split(/[^\p{L}\p{N}+#.]+/u)
-          .filter((w) => w.length > 2 && !STOP_WORDS.test(w)),
-      ),
-    ].slice(0, MAX_SEARCH_WORDS);
+    const chooser = this.chooser;
+    if (!chooser) return null;
     const found = new Set<string>();
-    // "Other" too: a school or employer that isn't listed is entered as Other.
-    for (const word of [...words, "Other"]) {
-      const open = await this.results(input, word);
-      await this.page.keyboard.press("Escape");
-      for (const l of open?.labels ?? [])
-        if (!NOT_A_CHOICE.test(l)) found.add(l);
+    const searched = new Set<string>();
+    const collect = async (terms: readonly string[]) => {
+      for (const term of terms) {
+        if (searched.has(term.toLowerCase())) continue;
+        searched.add(term.toLowerCase());
+        const open = await this.results(input, term);
+        await this.page.keyboard.press("Escape");
+        for (const l of open?.labels ?? [])
+          if (!NOT_A_CHOICE.test(l)) found.add(l);
+      }
+    };
+    const choose = async () =>
+      found.size > 0
+        ? chooser(label, wanted, [...found].slice(0, MAX_FOUND))
+        : null;
+    await collect(
+      [
+        ...new Set(
+          wanted
+            .split(/[^\p{L}\p{N}+#.]+/u)
+            .filter((w) => w.length > 2 && !STOP_WORDS.test(w)),
+        ),
+      ].slice(0, MAX_SEARCH_WORDS),
+    );
+    let choice = await choose();
+    if (!choice) {
+      const broader = this.searchTerms
+        ? await this.searchTerms(label, wanted).catch(() => [])
+        : [];
+      // "Other" last: a school or employer that isn't listed is entered as Other.
+      await collect([...broader, "Other"]);
+      choice = await choose();
     }
-    if (found.size === 0 || !this.chooser) return null;
-    const choice = await this.chooser(label, wanted, [...found].slice(0, 300));
     if (!choice) return null;
     return this.searchAndPick(ref, input, choice, true);
   }

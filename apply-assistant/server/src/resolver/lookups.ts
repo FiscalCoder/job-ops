@@ -391,7 +391,14 @@ export function createLookups(deps: LookupsDeps) {
     ]);
     const past: PastApplication[] = applied.flatMap((j) =>
       j.appliedAt
-        ? [{ jobId: j.id, title: j.title, employer: j.employer, appliedAt: j.appliedAt }]
+        ? [
+            {
+              jobId: j.id,
+              title: j.title,
+              employer: j.employer,
+              appliedAt: j.appliedAt,
+            },
+          ]
         : [],
     );
     const now = new Date();
@@ -416,7 +423,11 @@ export function createLookups(deps: LookupsDeps) {
                 titleScore: target.titleScore,
                 descScore: target.descScore,
               }
-            : { status: "pending" as const },
+            : // Nothing left to look up (the company has no board on file): not found, not
+              // "not checked" for the week the board cache lasts.
+              nextTaskFor(job) === null
+              ? { status: "none" as const }
+              : { status: "pending" as const },
           plan: summaries.get(job.id) ?? null,
           postedAt: job.datePosted ?? null,
           // A company that takes only so many applications from you: pick your best role.

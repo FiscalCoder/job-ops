@@ -138,7 +138,11 @@ async function startFill(
     };
     activeRun =
       pagedHow && tabId !== undefined
-        ? await RunController.startPaged({ ...options, tabId, system: pagedHow })
+        ? await RunController.startPaged({
+            ...options,
+            tabId,
+            system: pagedHow,
+          })
         : await RunController.start({
             ...options,
             ...(tabId === undefined ? {} : { tabId }),
@@ -427,15 +431,17 @@ const ATS_NAMES: Record<string, string> = {
   lever: "Lever",
 };
 
-/** Badge for a job's posting: "On Ashby", "Not found", … */
+/** Badge for a job's posting: "On Ashby", "Not on Greenhouse/Ashby/Lever", … */
 function targetBadge(target: QueueItem["target"]): [string, string] {
   const system = ATS_NAMES[target.ats ?? ""] ?? "a supported system";
   const badges: Record<string, [string, string]> = {
     matched: ["ok", `On ${system}`],
     possible: ["warn", `Possible match on ${system}`],
-    none: ["", "Not found"],
+    // Not a failure: the company takes applications elsewhere (Workday, its own site), filled
+    // page by page once you open it.
+    none: ["", "Not on Greenhouse/Ashby/Lever"],
     closed: ["bad", "Closed"],
-    pending: ["", "Not checked yet"],
+    pending: ["", "Lookup pending"],
   };
   return badges[target.status] ?? ["", target.status];
 }
@@ -486,41 +492,43 @@ async function limitCompany(company: string) {
 
 /** One role in the queue: title, when posted, its badges and the kit. */
 function queueRow(item: QueueItem, showEmployer: boolean): HTMLElement {
-      const [tone, label] = targetBadge(item.target);
-      const needs = item.plan?.summary.needsYou ?? 0;
-      const posted = postedText(item.postedAt);
-      const li = el(
-        "li",
-        { class: item.plan ? "clickable" : undefined },
-        el("div", {}, item.title),
-        showEmployer || posted
+  const [tone, label] = targetBadge(item.target);
+  const needs = item.plan?.summary.needsYou ?? 0;
+  const posted = postedText(item.postedAt);
+  const li = el(
+    "li",
+    { class: item.plan ? "clickable" : undefined },
+    el("div", {}, item.title),
+    showEmployer || posted
+      ? el(
+          "div",
+          { class: "muted" },
+          [showEmployer ? item.employer : "", posted]
+            .filter(Boolean)
+            .join(" · "),
+        )
+      : null,
+    el(
+      "div",
+      { class: "row" },
+      el(
+        "div",
+        {},
+        el("span", { class: `badge ${tone}` }, label),
+        " ",
+        item.plan
           ? el(
-              "div",
-              { class: "muted" },
-              [showEmployer ? item.employer : "", posted].filter(Boolean).join(" · "),
+              "span",
+              { class: `badge ${needs ? "warn" : "ok"}` },
+              needs ? `${needs} need you` : "plan ready",
             )
           : null,
-        el(
-          "div",
-          { class: "row" },
-          el(
-            "div",
-            {},
-            el("span", { class: `badge ${tone}` }, label),
-            " ",
-            item.plan
-              ? el(
-                  "span",
-                  { class: `badge ${needs ? "warn" : "ok"}` },
-                  needs ? `${needs} need you` : "plan ready",
-                )
-              : null,
-          ),
-          kitButton(item),
-        ),
-      );
-      if (item.plan) li.addEventListener("click", () => void showPlan(item));
-      return li;
+      ),
+      kitButton(item),
+    ),
+  );
+  if (item.plan) li.addEventListener("click", () => void showPlan(item));
+  return li;
 }
 
 $("refresh").addEventListener("click", () => void loadQueue());
@@ -646,29 +654,31 @@ async function checkTab() {
   if (turn !== checking) return;
   // A job's posting with a plan is filled from its plan; any other page of it page by page.
   const paged =
-    match.how === "posting" && match.item.plan ? null : pagedFill(tab.url ?? "");
+    match.how === "posting" && match.item.plan
+      ? null
+      : pagedFill(tab.url ?? "");
   renderHere(
     box,
     match,
     submitted,
     {
-    kitButton,
-    fill: () => {
-      box.hidden = true;
-      void startFill(match.item, tabId, paged);
-    },
-    markApplied: async () => {
-      await (client as ApplyClient).kitOutcome(match.item.jobId, "applied");
-      box.hidden = true;
-      showNotice(
-        `${match.item.title} · ${match.item.employer}: Marked Applied in Job Ops.`,
-      );
-      await loadQueue();
-    },
-    dismiss: () => {
-      dismissed.add(seenKey);
-      void checkTab();
-    },
+      kitButton,
+      fill: () => {
+        box.hidden = true;
+        void startFill(match.item, tabId, paged);
+      },
+      markApplied: async () => {
+        await (client as ApplyClient).kitOutcome(match.item.jobId, "applied");
+        box.hidden = true;
+        showNotice(
+          `${match.item.title} · ${match.item.employer}: Marked Applied in Job Ops.`,
+        );
+        await loadQueue();
+      },
+      dismiss: () => {
+        dismissed.add(seenKey);
+        void checkTab();
+      },
     },
     paged,
   );

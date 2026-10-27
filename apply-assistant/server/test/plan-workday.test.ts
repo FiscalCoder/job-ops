@@ -523,6 +523,32 @@ describe("POST /plans/:jobId/choose", () => {
     expect((await choose(ask)).status).toBe(422);
     expect((await choose({ ...ask, options: [] })).status).toBe(400);
 
+    // Its words found nothing that is it: broader words to search the list for.
+    reply = {
+      answer: [
+        '"Computer Science", Information Technology, Engineering, Data Science, Statistics',
+      ],
+      why: "Broader fields",
+    };
+    const terms = await fetch(`${base}/plans/job-1/search-terms`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer good",
+      },
+      body: JSON.stringify({
+        label: "Field of Study",
+        wanted: "Artificial Intelligence and Machine Learning",
+      }),
+    });
+    expect(terms.status).toBe(200);
+    expect(((await terms.json()) as any).data.terms).toEqual([
+      "Computer Science",
+      "Information Technology",
+      "Engineering",
+      "Data Science",
+    ]);
+
     // A Degree dropdown wording none of its choices like your degree: Claude picks one while
     // the page is planned, and you confirm it.
     reply = { answer: ["Engineering Degree (4 years)"], why: "B.Tech" };

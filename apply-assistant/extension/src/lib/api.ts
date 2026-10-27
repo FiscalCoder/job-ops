@@ -253,6 +253,17 @@ export class ApplyClient implements TraceApi {
     return this.request(`/plans/${encodeURIComponent(jobId)}/choose`, ask);
   }
 
+  /** Workday: broader words to search a list for when your answer's own words found nothing. */
+  searchTerms(
+    jobId: string,
+    ask: { label: string; wanted: string },
+  ): Promise<{ terms: readonly string[] }> {
+    return this.request(
+      `/plans/${encodeURIComponent(jobId)}/search-terms`,
+      ask,
+    );
+  }
+
   /** Any company's form: Claude's steps for a field the extension couldn't fill. */
   act(
     jobId: string,
@@ -273,7 +284,9 @@ export class ApplyClient implements TraceApi {
   }
 
   stopOperate(jobId: string, session: string): Promise<unknown> {
-    return this.request(`/plans/${encodeURIComponent(jobId)}/operate/stop`, { session });
+    return this.request(`/plans/${encodeURIComponent(jobId)}/operate/stop`, {
+      session,
+    });
   }
 
   /** A site's saved steps, by question. */

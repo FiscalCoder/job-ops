@@ -15,7 +15,15 @@ const tellBody = z.object({
     .object({
       label: z.string().trim().min(1).max(500),
       type: z
-        .enum(["text", "textarea", "file", "select", "multiselect", "hidden", "unknown"])
+        .enum([
+          "text",
+          "textarea",
+          "file",
+          "select",
+          "multiselect",
+          "hidden",
+          "unknown",
+        ])
         .catch("text"),
       options: z.array(z.string().trim().min(1).max(300)).max(500),
     })
@@ -27,6 +35,11 @@ const chooseBody = z.object({
   label: z.string().trim().min(1).max(500),
   wanted: z.string().trim().max(500),
   options: z.array(z.string().trim().min(1).max(300)).min(1).max(300),
+});
+
+const searchTermsBody = z.object({
+  label: z.string().trim().min(1).max(500),
+  wanted: z.string().trim().min(1).max(500),
 });
 
 /** Fill plans: one per job with a matched, fetched form, and "Tell agent" for one field. */
@@ -49,11 +62,19 @@ export function createPlanRoutes(plans: PlansService) {
     async (req: AuthedRequest, res: Response) => {
       const body = chooseBody.safeParse(req.body);
       if (!body.success) {
-        sendError(res, 400, "INVALID_REQUEST", "The field and its choices are needed");
+        sendError(
+          res,
+          400,
+          "INVALID_REQUEST",
+          "The field and its choices are needed",
+        );
         return;
       }
       try {
-        sendOk(res, await plans.choose(tokenOf(req), String(req.params.jobId), body.data));
+        sendOk(
+          res,
+          await plans.choose(tokenOf(req), String(req.params.jobId), body.data),
+        );
       } catch (error) {
         if (error instanceof NotPlannableError) {
           sendError(res, 409, "NOT_PLANNABLE", error.message);
@@ -67,7 +88,54 @@ export function createPlanRoutes(plans: PlansService) {
           sendJobOpsFailure(res, error);
           return;
         }
-        sendError(res, 502, "CLAUDE_FAILED", "Claude couldn't be reached; try again");
+        sendError(
+          res,
+          502,
+          "CLAUDE_FAILED",
+          "Claude couldn't be reached; try again",
+        );
+      }
+    },
+  );
+
+  /** Workday: broader words to search a list for when your answer's own words found nothing. */
+  router.post(
+    "/plans/:jobId/search-terms",
+    async (req: AuthedRequest, res: Response) => {
+      const body = searchTermsBody.safeParse(req.body);
+      if (!body.success) {
+        sendError(
+          res,
+          400,
+          "INVALID_REQUEST",
+          "The field and your answer are needed",
+        );
+        return;
+      }
+      try {
+        sendOk(
+          res,
+          await plans.searchTerms(
+            tokenOf(req),
+            String(req.params.jobId),
+            body.data,
+          ),
+        );
+      } catch (error) {
+        if (error instanceof NotPlannableError) {
+          sendError(res, 409, "NOT_PLANNABLE", error.message);
+          return;
+        }
+        if (error instanceof JobOpsError) {
+          sendJobOpsFailure(res, error);
+          return;
+        }
+        sendError(
+          res,
+          502,
+          "CLAUDE_FAILED",
+          "Claude couldn't be reached; try again",
+        );
       }
     },
   );

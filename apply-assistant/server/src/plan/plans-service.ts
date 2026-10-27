@@ -86,6 +86,8 @@ const FACTUAL_FIELD =
   /\b(school|college|universit|institut|degree|field of study|major|discipline|speciali[sz]ation|qualification|company|employer)/i;
 /** What Claude replies when a fact has no matching choice (the field then waits for you). */
 const NO_MATCH = "NO MATCH";
+/** Broader searches Claude may suggest for one answer. */
+const MAX_SEARCH_TERMS = 4;
 
 export function createPlans(deps: PlansDeps) {
   const { jobOps, targets, schemas, plans, answers } = deps;
@@ -434,6 +436,49 @@ export function createPlans(deps: PlansDeps) {
       if (!answerer || off) throw new NotPlannableError(jobId, off ?? "");
       const { job, resume } = await jobAndResume(token, jobId);
       return closest(answerer, jobId, job, resume, ask);
+    },
+
+    /**
+     * Workday: what to search a list for when your answer's own words found nothing that is
+     * it ("Computer Science" for an AI/ML degree). Only the same thing or broader.
+     */
+    async searchTerms(
+      token: string,
+      jobId: string,
+      ask: { label: string; wanted: string },
+    ): Promise<{ terms: string[] }> {
+      const off = claudeOff(answerer);
+      if (!answerer || off) throw new NotPlannableError(jobId, off ?? "");
+      const { job, resume } = await jobAndResume(token, jobId);
+      const answer = await answerer.tell(
+        { ref: "search", label: ask.label, type: "text", options: [] },
+        `My answer is "${ask.wanted}", but searching the form's list for its words found nothing that is it. Give up to ${MAX_SEARCH_TERMS} short search words (one to three words each) that such a list would use for the same thing or the broader field or category containing it, separated by commas. Nothing unrelated.`,
+        {
+          job: {
+            title: job.title,
+            employer: job.employer,
+            description: job.jobDescription,
+          },
+          resume,
+          bank: bankMap(),
+        },
+        traceUsage(trace, jobId),
+      );
+      const terms = [
+        ...new Set(
+          String(answer.value)
+            .split(/[,\n]/)
+            .map((t) => t.trim().replace(/^["'-]+|["'.]+$/g, ""))
+            .filter((t) => t.length > 1 && t.length <= 40),
+        ),
+      ].slice(0, MAX_SEARCH_TERMS);
+      trace({
+        jobId,
+        kind: "choose",
+        message: `Claude suggested searching for ${terms.map((t) => `"${t}"`).join(", ") || "nothing"} for "${ask.label.slice(0, 80)}" (your answer: "${ask.wanted.slice(0, 80)}")`,
+        data: { ...ask, terms },
+      });
+      return { terms };
     },
 
     /**

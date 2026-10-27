@@ -102,7 +102,7 @@ function addDegree() {
 const RESULTS = {
   source: ["LinkedIn", "LinkedIn Learning", "Indeed", "Referral"],
   school: ["Some Institute of Technology", "Some School"],
-  fieldOfStudy: ["Computer Science", "Information Systems", "Management Studies"],
+  fieldOfStudy: ["Accounting and Finance", "Computer Science", "Information Systems", "Machine Tool Technology", "Other"],
   skills: ["React", "React Native", "TypeScript"],
 };
 document.addEventListener("input", (e) => {
@@ -191,11 +191,31 @@ const VALUES = {
 
 // My Experience, from the resume: the n-th entry on the page gets the n-th job / degree.
 const JOBS = [
-  { jobTitle: "Senior Engineer", companyName: "Acme", currentlyWorkHere: "I currently work here", startDate: "09/2023", roleDescription: "Built the platform." },
-  { jobTitle: "Engineer", companyName: "Beta", startDate: "01/2020", endDate: "08/2023", roleDescription: "Built features." },
+  {
+    jobTitle: "Senior Engineer",
+    companyName: "Acme",
+    currentlyWorkHere: "I currently work here",
+    startDate: "09/2023",
+    roleDescription: "Built the platform.",
+  },
+  {
+    jobTitle: "Engineer",
+    companyName: "Beta",
+    startDate: "01/2020",
+    endDate: "08/2023",
+    roleDescription: "Built features.",
+  },
 ];
-// "Information System Management" isn't in the list as such: Claude picks the closest.
-const DEGREES = [{ school: "Some Institute of Technology", fieldOfStudy: "Information System Management", degree: "Bachelor's Degree" }];
+// As at J&J: "Artificial Intelligence and Machine Learning" isn't in the list, and its words find
+// only an unrelated choice. Claude sees nothing that is it, suggests a broader search, and picks
+// from everything found across both rounds.
+const DEGREES = [
+  {
+    school: "Some Institute of Technology",
+    fieldOfStudy: "Artificial Intelligence and Machine Learning",
+    degree: "Bachelor's Degree",
+  },
+];
 /** The stub's answer for one field (the server maps entries the same way). */
 function valueFor(field, order) {
   const entry = /^(workExperience|education)-(\d+)--/.exec(field.ref);
@@ -212,6 +232,7 @@ function valueFor(field, order) {
 
 const posted = [];
 const chooseAsks = [];
+const searchTermAsks = [];
 const actAsks = [];
 const recipeCalls = [];
 const runCalls = [];
@@ -254,8 +275,14 @@ function stubServer(route, url) {
       ),
     ];
     const add = (page.sections ?? []).flatMap((s) => {
-      const wanted = { "Work-Experience-section": JOBS.length, "Education-section": DEGREES.length }[s.id] ?? 0;
-      return wanted > s.entries ? [{ section: s.id, count: wanted - s.entries }] : [];
+      const wanted =
+        {
+          "Work-Experience-section": JOBS.length,
+          "Education-section": DEGREES.length,
+        }[s.id] ?? 0;
+      return wanted > s.entries
+        ? [{ section: s.id, count: wanted - s.entries }]
+        : [];
     });
     return ok(route, {
       schemaHash: "x",
@@ -280,7 +307,12 @@ function stubServer(route, url) {
               ref: f.ref,
               label: f.label,
               section: "main",
-              type: f.key === "skills" ? "multiselect" : ["text", "date", "textarea"].includes(f.kind) ? "text" : "select",
+              type:
+                f.key === "skills"
+                  ? "multiselect"
+                  : ["text", "date", "textarea"].includes(f.kind)
+                    ? "text"
+                    : "select",
               required: f.required,
               actionClass: "auto",
               status: valueFor(f, order) ? "fill" : "skip",
@@ -291,13 +323,27 @@ function stubServer(route, url) {
       ),
     });
   }
+  // "Claude" takes only the same field or a broader one: Computer Science, else no match.
   if (url.pathname === "/plans/stub/choose") {
     const ask = req.postDataJSON();
     chooseAsks.push(ask);
+    if (!ask.options.includes("Computer Science"))
+      return route.fulfill({
+        status: 422,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: false,
+          error: { code: "NO_ANSWER", message: "NO MATCH" },
+        }),
+      });
     return ok(route, {
-      value: ask.options.includes("Information Systems") ? "Information Systems" : ask.options[0],
-      why: "stub",
+      value: "Computer Science",
+      why: "stub: the broader field",
     });
+  }
+  if (url.pathname === "/plans/stub/search-terms") {
+    searchTermAsks.push(req.postDataJSON());
+    return ok(route, { terms: ["Computer Science"] });
   }
   // "Claude": open the list from its chevron, then pick the value.
   if (url.pathname === "/plans/stub/act") {
@@ -313,7 +359,9 @@ function stubServer(route, url) {
   }
   if (url.pathname === "/recipes") {
     recipeCalls.push(
-      req.method() === "GET" ? { host: url.searchParams.get("host") } : req.postDataJSON(),
+      req.method() === "GET"
+        ? { host: url.searchParams.get("host") }
+        : req.postDataJSON(),
     );
     return ok(route, req.method() === "GET" ? [] : {});
   }
@@ -351,7 +399,9 @@ const context = await chromium.launchPersistentContext(profile, {
 const failures = [];
 let shownOnFailure = null;
 const check = (name, pass, detail = "") => {
-  console.log(`${pass ? "PASS" : "FAIL"} ${name}${detail ? `: ${detail}` : ""}`);
+  console.log(
+    `${pass ? "PASS" : "FAIL"} ${name}${detail ? `: ${detail}` : ""}`,
+  );
   if (!pass) failures.push(name);
 };
 
@@ -360,7 +410,11 @@ try {
     const url = new URL(route.request().url());
     if (url.host === SERVER_HOST) return stubServer(route, url);
     if (url.href.startsWith(APPLY_PAGE))
-      return route.fulfill({ status: 200, contentType: "text/html", body: WIZARD });
+      return route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: WIZARD,
+      });
     if (url.protocol === "chrome-extension:") return route.continue();
     return route.abort();
   });
@@ -392,7 +446,10 @@ try {
   await fill.waitFor({ timeout: 15_000 });
   check("Fill this page offered on the Workday application", true);
   // The Apply kit (which opened the application) starts it too.
-  await panel.locator("#here").getByRole("button", { name: "Apply kit" }).click();
+  await panel
+    .locator("#here")
+    .getByRole("button", { name: "Apply kit" })
+    .click();
   const kitFill = panel
     .locator("#kit-box")
     .getByRole("button", { name: "Fill this page" });
@@ -477,25 +534,35 @@ try {
   check(
     "empty sections reported, then planned again once entries were added",
     JSON.stringify(second?.sections.map((s) => [s.id, s.entries])) ===
-      JSON.stringify([["Work-Experience-section", 0], ["Education-section", 0]]) &&
-      posted[2]?.sections.map((s) => s.entries).join() === "2,1",
+      JSON.stringify([
+        ["Work-Experience-section", 0],
+        ["Education-section", 0],
+      ]) && posted[2]?.sections.map((s) => s.entries).join() === "2,1",
     JSON.stringify(posted.slice(1).map((p) => p.sections)),
   );
   const experience = await form.evaluate(() => {
     const shown = (panel, key) =>
-      [...panel.querySelectorAll(`[data-fkit-id$="--${key}"] [data-automation-id$="-display"]`)]
+      [
+        ...panel.querySelectorAll(
+          `[data-fkit-id$="--${key}"] [data-automation-id$="-display"]`,
+        ),
+      ]
         .map((d) => d.textContent)
         .join("/");
-    const jobs = [...document.querySelectorAll("#we-list > [role=group]")].map((panel) => ({
-      title: panel.querySelector("[id$='--jobTitle']").value,
-      company: panel.querySelector("[id$='--companyName']").value,
-      current: panel.querySelector("[id$='--currentlyWorkHere']").checked,
-      from: shown(panel, "startDate"),
-      to: shown(panel, "endDate"),
-      description: panel.querySelector("textarea").value,
-    }));
+    const jobs = [...document.querySelectorAll("#we-list > [role=group]")].map(
+      (panel) => ({
+        title: panel.querySelector("[id$='--jobTitle']").value,
+        company: panel.querySelector("[id$='--companyName']").value,
+        current: panel.querySelector("[id$='--currentlyWorkHere']").checked,
+        from: shown(panel, "startDate"),
+        to: shown(panel, "endDate"),
+        description: panel.querySelector("textarea").value,
+      }),
+    );
     const pills = (s) =>
-      [...document.querySelectorAll(`${s} [data-automation-id=selectedItem]`)].map((p) => p.textContent).join(",");
+      [...document.querySelectorAll(`${s} [data-automation-id=selectedItem]`)]
+        .map((p) => p.textContent)
+        .join(",");
     return {
       jobs,
       school: pills("#ed-list [data-fkit-id$='--school']"),
@@ -509,26 +576,43 @@ try {
     "a work experience entry added and filled per job",
     JSON.stringify(experience.jobs) ===
       JSON.stringify([
-        { title: "Senior Engineer", company: "Acme", current: true, from: "09/2023", to: "MM/YYYY", description: "Built the platform." },
-        { title: "Engineer", company: "Beta", current: false, from: "01/2020", to: "08/2023", description: "Built features." },
+        {
+          title: "Senior Engineer",
+          company: "Acme",
+          current: true,
+          from: "09/2023",
+          to: "MM/YYYY",
+          description: "Built the platform.",
+        },
+        {
+          title: "Engineer",
+          company: "Beta",
+          current: false,
+          from: "01/2020",
+          to: "08/2023",
+          description: "Built features.",
+        },
       ]),
     JSON.stringify(experience.jobs),
   );
   check(
     "an education entry added and filled",
     experience.school === "Some Institute of Technology" &&
-      experience.study === "Information Systems" &&
+      experience.study === "Computer Science" &&
       experience.degree === "Bachelor's Degree",
     `${experience.school} / ${experience.study} / ${experience.degree}`,
   );
   check(
-    "Field of Study not in the list as such: Claude picked from what its words found",
-    chooseAsks.length === 1 &&
-      chooseAsks[0].wanted === "Information System Management" &&
-      chooseAsks[0].options.includes("Information Systems") &&
-      chooseAsks[0].options.includes("Management Studies") &&
-      !chooseAsks[0].options.includes("No Items."),
-    JSON.stringify(chooseAsks),
+    "Field of Study not in the list: nothing related from its words, so a broader search; Claude picked from all that was found",
+    chooseAsks.length === 2 &&
+      chooseAsks[0].wanted === "Artificial Intelligence and Machine Learning" &&
+      JSON.stringify(chooseAsks[0].options) === '["Machine Tool Technology"]' &&
+      searchTermAsks.length === 1 &&
+      ["Machine Tool Technology", "Computer Science", "Other"].every((o) =>
+        chooseAsks[1].options.includes(o),
+      ) &&
+      !chooseAsks[1].options.includes("No Items."),
+    JSON.stringify({ chooseAsks, searchTermAsks }),
   );
   check(
     "skills added one by one (those Workday has)",

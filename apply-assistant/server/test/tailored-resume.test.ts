@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { experienceMonths, resumeForPrompt } from "../src/claude/questions";
-import type { ResumeFacts } from "../src/plan/resume-facts";
-import { tailoredFor } from "../src/plan/tailored-resume";
+import { experienceMonths, resumeForPrompt } from "../src/claude/questions.js";
+import type { ResumeFacts } from "../src/plan/resume-facts.js";
+import { tailoredFor } from "../src/plan/tailored-resume.js";
 
 const base: ResumeFacts = {
   email: null,

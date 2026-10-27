@@ -156,11 +156,17 @@ async function planPagedPage(
   if (driver.system === "workday" && FINAL_STEP.test(await driver.step()))
     return [];
   type PagePlan = { entries: PlanEntry[]; add?: EntriesToAdd[] };
-  const plan = (await client.planPage(jobId, await driver.readPage())) as PagePlan;
+  const plan = (await client.planPage(
+    jobId,
+    await driver.readPage(),
+  )) as PagePlan;
   if (!plan.add?.length) return plan.entries;
   // My Experience: one entry per job and degree on your resume, then the page is planned again.
   await driver.addEntries(plan.add);
-  const again = (await client.planPage(jobId, await driver.readPage())) as PagePlan;
+  const again = (await client.planPage(
+    jobId,
+    await driver.readPage(),
+  )) as PagePlan;
   return again.entries;
 }
 
@@ -288,7 +294,11 @@ export class RunController {
       attach: async (page) => {
         if (system === "workday") {
           const driver = await WorkdayDriver.attach(page);
-          if (driver) driver.chooser = chooser;
+          if (driver) {
+            driver.chooser = chooser;
+            driver.searchTerms = async (label, wanted) =>
+              (await client.searchTerms(job.jobId, { label, wanted })).terms;
+          }
           return driver;
         }
         const driver = await GenericDriver.attach(page);
@@ -515,7 +525,8 @@ export class RunController {
           action.step,
           action.step.note ? "needs you" : "waiting for your click",
         );
-        if (this.wizard) this.timer = setTimeout(() => void this.watchPage(), REVIEW_POLL_MS);
+        if (this.wizard)
+          this.timer = setTimeout(() => void this.watchPage(), REVIEW_POLL_MS);
         return;
       case "fill":
         return this.fill(action.step);
@@ -600,7 +611,11 @@ export class RunController {
 
   /** While a step waits for you on Workday: you may have filled the rest and moved on. */
   private async watchPage(): Promise<void> {
-    if (this.tabClosed || this.busy || nextAction(this.state).kind !== "wait-for-you")
+    if (
+      this.tabClosed ||
+      this.busy ||
+      nextAction(this.state).kind !== "wait-for-you"
+    )
       return;
     const moved = await this.movedTo();
     if (moved) return this.nextPage(moved);
@@ -630,11 +645,7 @@ export class RunController {
     });
     try {
       await sleep(PAGE_SETTLE_MS);
-      const entries = await planPagedPage(
-        this.client,
-        this.job.jobId,
-        wizard,
-      );
+      const entries = await planPagedPage(this.client, this.job.jobId, wizard);
       this.state = begin(entries);
       this.trace.event(
         "page",
@@ -778,7 +789,10 @@ export class RunController {
   /** "Let Claude do it": Claude works the field on the page; Pause or Abort stops it. */
   private operate(step: Step): Promise<FillOutcome> {
     if (!this.driver.operate)
-      return Promise.resolve({ ok: false, reason: "Claude can't work this form" });
+      return Promise.resolve({
+        ok: false,
+        reason: "Claude can't work this form",
+      });
     const jobId = this.job.jobId;
     return this.driver.operate(
       step.entry,
