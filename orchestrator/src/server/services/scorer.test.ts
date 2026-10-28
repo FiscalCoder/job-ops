@@ -923,6 +923,8 @@ describe("salary penalty", () => {
                 "jobBrief",
                 "jobPatches",
                 "jobWarnings",
+                "scoreParts",
+                "caps",
               ],
             }),
           }),
@@ -1166,5 +1168,98 @@ describe("salary penalty", () => {
         ScoringUnavailableError,
       );
     });
+  });
+});
+
+describe("settleScore", () => {
+  it("adds up the parts and opens the reason with the breakdown", async () => {
+    const { settleScore } = await import("./scorer");
+    const result = settleScore(70, "Strong Node/React match.", [
+      { part: "Skills", points: 45, max: 50 },
+      { part: "Experience", points: 30, max: 30 },
+      { part: "Location", points: 16, max: 20 },
+    ]);
+    expect(result.score).toBe(91);
+    expect(result.reason).toBe(
+      "Skills 45/50 · Experience 30/30 · Location 16/20 — Strong Node/React match.",
+    );
+  });
+
+  it("applies the smallest cap even when the model's own score ignored it", async () => {
+    const { settleScore } = await import("./scorer");
+    const result = settleScore(
+      74,
+      "Remote, but Canada only.",
+      [
+        { part: "Skills", points: 48, max: 50 },
+        { part: "Experience", points: 30, max: 30 },
+        { part: "Location", points: 20, max: 20 },
+      ],
+      [
+        { rule: "not open to India", cap: 25 },
+        { rule: "service company", cap: 30 },
+      ],
+    );
+    expect(result.score).toBe(25);
+    expect(result.reason).toContain("capped at 25: not open to India");
+  });
+
+  it("clamps parts to their range and scales a rubric that isn't out of 100", async () => {
+    const { settleScore } = await import("./scorer");
+    const result = settleScore(50, "r", [
+      { part: "Skills", points: 12, max: 10 },
+      { part: "Location", points: -3, max: 10 },
+    ]);
+    expect(result.score).toBe(50);
+    expect(result.reason).toBe("Skills 10/10 · Location 0/10 — r");
+  });
+
+  it("keeps the model's score when the rubric has no parts, and a cap above it changes nothing", async () => {
+    const { settleScore } = await import("./scorer");
+    expect(settleScore(62.4, "r", [], [{ rule: "x", cap: 80 }])).toEqual({
+      score: 62,
+      reason: "r",
+    });
+  });
+
+  it("scores a job from its parts and caps end to end", async () => {
+    const { scoreJobSuitability } = await import("./scorer");
+    getSettingMock.mockResolvedValue(null);
+    getEffectiveSettingsMock.mockResolvedValue({
+      penalizeMissingSalary: { value: false, default: false, override: null },
+      missingSalaryPenalty: { value: 10, default: 10, override: null },
+      rxresumeBaseResumeId: "base-resume-123",
+    } as any);
+    resolveLlmModelMock.mockResolvedValue("claude-haiku-5-5");
+    createConfiguredLlmServiceMock.mockResolvedValue({
+      callJson: callJsonMock,
+    });
+    callJsonMock.mockResolvedValue({
+      success: true,
+      data: {
+        score: 82,
+        reason: "IT-services delivery role.",
+        scoreParts: [
+          { part: "Skills", points: 44, max: 50 },
+          { part: "Experience", points: 30, max: 30 },
+          { part: "Location", points: 17, max: 20 },
+        ],
+        caps: [{ rule: "service company", cap: 25 }],
+      },
+    });
+
+    const result = await scoreJobSuitability(
+      createJob({ salary: "30 LPA" }),
+      {},
+    );
+
+    expect(result.score).toBe(25);
+    expect(result.reason).toBe(
+      "Skills 44/50 · Experience 30/30 · Location 17/20 · capped at 25: service company — IT-services delivery role.",
+    );
+    const call = callJsonMock.mock.calls.at(-1)?.[0];
+    expect(call.jsonSchema.schema.required).toEqual(
+      expect.arrayContaining(["scoreParts", "caps"]),
+    );
   });
 });

@@ -170,8 +170,43 @@ const SCORING_SCHEMA: JsonSchemaDefinition = {
         maxItems: 10,
         items: { type: "string" },
       },
+      scoreParts: {
+        type: "array",
+        maxItems: 10,
+        items: {
+          type: "object",
+          properties: {
+            part: { type: "string" },
+            points: { type: "integer" },
+            max: { type: "integer" },
+          },
+          required: ["part", "points", "max"],
+          additionalProperties: false,
+        },
+      },
+      caps: {
+        type: "array",
+        maxItems: 10,
+        items: {
+          type: "object",
+          properties: {
+            rule: { type: "string" },
+            cap: { type: "integer" },
+          },
+          required: ["rule", "cap"],
+          additionalProperties: false,
+        },
+      },
     },
-    required: ["score", "reason", "jobBrief", "jobPatches", "jobWarnings"],
+    required: [
+      "score",
+      "reason",
+      "jobBrief",
+      "jobPatches",
+      "jobWarnings",
+      "scoreParts",
+      "caps",
+    ],
     additionalProperties: false,
   },
 };
@@ -180,7 +215,10 @@ const SCORING_OUTPUT_INSTRUCTIONS = `
 Perform these tasks in one response:
 1. JOB FACT REVIEW (candidate-independent): compare JOB DATA with the original listing. Use only those sources, never the candidate profile. Propose a patch only for a missing or clearly incorrect whitelisted field with an exact supporting listing excerpt. Do not guess, infer from general knowledge, estimate, annualise compensation, or paraphrase/invent evidence. Use high confidence for clear corrections; medium may only fill missing values; omit ambiguous corrections. Candidate evaluation must use the proposed corrected facts.
 2. JOB BRIEF: use only stated job information, remain neutral, remove employer fluff, never judge candidate fit, and use "Not stated" for missing practical details.
-3. CANDIDATE EVALUATION: score the candidate against the listing, corrected facts, and scoring instructions.
+3. CANDIDATE EVALUATION: score the candidate against the listing, corrected facts, and scoring instructions. The scoring prompt above is the rubric; SCORING INSTRUCTIONS in the system context add to it, and where the two conflict, follow the scoring prompt.
+   - scoreParts: when the rubric scores separate parts, list each with the points given and its maximum, in the rubric's order; otherwise [].
+   - caps: every hard cap from the rubric or instructions that applies to this job, with its cap value; otherwise []. Name it as the rubric names it.
+   - score: the sum of scoreParts (out of 100), lowered to the smallest cap. The total is recomputed from scoreParts and caps, so give the honest part scores.
 
 Patchable fields: ${PATCHABLE_JOB_FIELDS.join(", ")}.
 Value conventions: salaryInterval is hourly|daily|weekly|monthly|yearly; salary amounts and vacancyCount are numbers without annualisation; salaryCurrency is a 3-letter code; isRemote is boolean; workFromHomeType is remote|hybrid|onsite; all other patch values are strings. Return only changed fields. Put unsupported distinctions or explicit contradictions that cannot be represented safely in jobWarnings.
@@ -199,7 +237,9 @@ Respond with ONLY valid JSON in this exact shape:
     "repeated_signals": ["<up to 5 repeated themes>"]
   },
   "jobPatches": [{"field":"<whitelisted field>","value":<string|number|boolean>,"confidence":"high|medium|low","evidence":"<exact listing excerpt>"}],
-  "jobWarnings": ["<unrepresentable or contradictory stated fact>"]
+  "jobWarnings": ["<unrepresentable or contradictory stated fact>"],
+  "scoreParts": [{"part":"<rubric part>","points":<integer>,"max":<integer>}],
+  "caps": [{"rule":"<cap that applies>","cap":<integer>}]
 }
 No markdown, code fences, or text outside the JSON.`.trim();
 
@@ -233,6 +273,57 @@ const NON_SOURCE_JOB_FIELDS = new Set<keyof Job>([
   "createdAt",
   "updatedAt",
 ]);
+
+type ScorePart = { part: string; points: number; max: number };
+type ScoreCap = { rule: string; cap: number };
+
+const clampScore = (value: number) =>
+  Math.min(100, Math.max(0, Math.round(value)));
+
+/**
+ * The total is arithmetic, so it's done here rather than trusted to the model: the sum of
+ * the rubric's parts (scaled to 100), lowered to the smallest cap that applies. The reason
+ * opens with the breakdown so every score shows where its points came from. Without parts
+ * (a rubric that scores holistically) the model's score stands, still capped.
+ */
+export function settleScore(
+  modelScore: number,
+  reason: string,
+  parts: readonly ScorePart[] = [],
+  caps: readonly ScoreCap[] = [],
+): { score: number; reason: string } {
+  const valid = parts.filter(
+    (p) => p.part.trim() && Number.isFinite(p.points) && p.max > 0,
+  );
+  const max = valid.reduce((sum, p) => sum + p.max, 0);
+  const total = valid.length
+    ? clampScore(
+        (100 *
+          valid.reduce(
+            (sum, p) => sum + Math.min(p.max, Math.max(0, p.points)),
+            0,
+          )) /
+          max,
+      )
+    : clampScore(modelScore);
+  const binding = caps
+    .filter((c) => c.rule.trim() && Number.isFinite(c.cap))
+    .reduce<ScoreCap | null>(
+      (lowest, c) => (lowest === null || c.cap < lowest.cap ? c : lowest),
+      null,
+    );
+  const capped = binding !== null && clampScore(binding.cap) < total;
+  const score = capped ? clampScore(binding.cap) : total;
+
+  const breakdown = [
+    ...valid.map(
+      (p) =>
+        `${p.part.trim()} ${Math.min(p.max, Math.max(0, p.points))}/${p.max}`,
+    ),
+    ...(capped ? [`capped at ${score}: ${binding.rule.trim()}`] : []),
+  ].join(" · ");
+  return { score, reason: breakdown ? `${breakdown} — ${reason}` : reason };
+}
 
 /**
  * Check if a job's salary field is missing/empty.
@@ -335,6 +426,8 @@ export async function scoreJobSuitability(
     jobBrief?: JobBrief;
     jobPatches?: JobFactPatch[];
     jobWarnings?: string[];
+    scoreParts?: ScorePart[];
+    caps?: ScoreCap[];
   }>(llm, {
     model,
     messages: [
@@ -375,8 +468,21 @@ export async function scoreJobSuitability(
     );
   }
 
-  const clampedScore = Math.min(100, Math.max(0, Math.round(score)));
-  const clampedReason = reason || "No explanation provided";
+  const settled = settleScore(
+    score,
+    reason || "No explanation provided",
+    result.data.scoreParts,
+    result.data.caps,
+  );
+  if (Math.abs(settled.score - clampScore(score)) > 5) {
+    logger.info("Score recomputed from its parts and caps", {
+      jobId: job.id,
+      modelScore: score,
+      score: settled.score,
+    });
+  }
+  const clampedScore = settled.score;
+  const clampedReason = settled.reason;
   const patchResult = validateAndApplyJobPatches(
     job,
     result.data.jobPatches ?? [],
