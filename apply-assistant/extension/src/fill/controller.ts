@@ -481,7 +481,13 @@ export class RunController {
 
   /** Your controls from the side panel. */
   dispatch(event: RunEvent): void {
-    if (this.busy && event.type !== "pause" && event.type !== "abort") return;
+    if (
+      this.busy &&
+      event.type !== "pause" &&
+      event.type !== "abort" &&
+      event.type !== "submitted"
+    )
+      return;
     const decision = decisionEvent(
       event,
       this.state.phase === "filling"

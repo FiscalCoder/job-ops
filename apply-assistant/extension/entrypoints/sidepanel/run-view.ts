@@ -198,7 +198,12 @@ function currentCard(
   // or it doesn't fit the choices) picking what fits you from your saved answers.
   if (action.kind !== "fill" && step.entry.type !== "file")
     controls.push(
-      button("Let Claude do it", () => send({ type: "let-claude" }), false, busy),
+      button(
+        "Let Claude do it",
+        () => send({ type: "let-claude" }),
+        false,
+        busy,
+      ),
     );
   controls.push(
     button("I'll do it", () => send({ type: "i-did-it" }), false, busy),
@@ -266,6 +271,12 @@ export function renderRun(
             ? button("Fill this page", refill, true)
             : null,
           button("Abort", () => send({ type: "abort" })),
+          // You submitted it yourself, at any point: the run ends and the job is marked applied.
+          // (On the last review the card below asks the same.)
+          action.kind === "review" &&
+            !(view.page && (view.busy || !view.page.last))
+            ? null
+            : button("I applied", () => send({ type: "submitted" })),
         ),
   );
 
