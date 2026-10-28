@@ -281,6 +281,13 @@ export abstract class TrustedDriver implements FormDriver {
         .evaluate(
           (pattern) =>
             /\/confirmation\b/.test(location.pathname) ||
+            // Oracle: its thank-you dialog, then your candidate profile.
+            /\/CandidateExperience\/.*\/my-profile\b/.test(location.pathname) ||
+            [
+              ...document.querySelectorAll<HTMLElement>(
+                "[class*='confirmed-submission' i], [class*='thank-you' i]",
+              ),
+            ].some((el) => el.offsetParent !== null) ||
             new RegExp(pattern, "i").test(document.body?.innerText ?? ""),
           CONFIRMATION.source,
         )

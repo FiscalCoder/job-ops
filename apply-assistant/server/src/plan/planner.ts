@@ -6,11 +6,7 @@ import { type ActionClass, classifyField, type FieldRule } from "./classify.js";
 import { countryOf } from "./country.js";
 import type { FieldType, FormField, FormSchema } from "./gh-schema.js";
 import { findDeclineOption, pickOption, pickOptions } from "./options.js";
-import type {
-  DegreeLevel,
-  ResumeFacts,
-  YearMonth,
-} from "./resume-facts.js";
+import type { DegreeLevel, ResumeFacts, YearMonth } from "./resume-facts.js";
 
 /**
  * Builds a fill plan: for every field, the proposed value, where it came from, its action class
@@ -303,7 +299,11 @@ function resolveHistory(
 ): Resolved | "skip" {
   const source = `resume:${rule.section}.${rule.index}.${rule.part}`;
   const answer = (value: string | null | undefined): Resolved | "skip" =>
-    value ? { value, source } : field.required ? missing(source, `No ${field.label.toLowerCase()} on your resume`) : "skip";
+    value
+      ? { value, source }
+      : field.required
+        ? missing(source, `No ${field.label.toLowerCase()} on your resume`)
+        : "skip";
   if (rule.section === "experience") {
     const job = resume.experience[rule.index];
     // More entries on the page than jobs on your resume: those are yours.
@@ -316,7 +316,9 @@ function resolveHistory(
       case "location":
         return answer(job.location);
       case "currentlyWorkHere":
-        return job.current ? answer(field.options[0]?.label ?? field.label) : "skip";
+        return job.current
+          ? answer(field.options[0]?.label ?? field.label)
+          : "skip";
       case "startDate":
         return answer(monthYear(job.start));
       case "endDate":
@@ -405,6 +407,13 @@ function resolveRule(
     case "cover-letter":
       return field.required
         ? missing("draft", "A cover letter is required")
+        : "skip";
+    case "attachment":
+      return field.required
+        ? missing(
+            "you",
+            "An upload that isn't your resume: attach the file yourself",
+          )
         : "skip";
     case "education":
       return resolveEducation(rule.part, input.resume);
@@ -611,7 +620,7 @@ function fitToField(field: FormField, resolved: Resolved): Typed {
 }
 
 /** Answers that are yours: your answer bank, remembered answers, resume, Job Ops' tailored PDF. */
-const YOURS = /^(bank|learned|resume|jobops|rule:fixed)\b/
+const YOURS = /^(bank|learned|resume|jobops|rule:fixed)\b/;
 
 function planField(
   field: FormField,

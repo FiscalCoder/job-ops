@@ -153,6 +153,33 @@ describe("fields without a proper label", () => {
   });
 });
 
+describe("Oracle's apply flow", () => {
+  it("leaves its help chat's upload out, and new marks never reuse kept ones", () => {
+    document.body.innerHTML = `<form>
+      <label for="r">Upload Resume</label><input type="file" id="r">
+      <input type="file" aria-label="Phone">
+      <div class="oda-chat-wrapper"><input class="oda-chat-none" type="file" tabindex="-1" aria-hidden="true"></div>
+    </form>`;
+    const first = readGenericPage().fields;
+    expect(first.map((f) => [f.label, f.ref])).toEqual([
+      ["Upload Resume", "#r"],
+      ["Phone", '[data-ac-ref="ac0"]'],
+    ]);
+    // The page draws the field again, without our mark; one kept elsewhere is ac0.
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<form><input type="file" aria-label="Other"></form>',
+    );
+    document.querySelector('[data-ac-ref="ac0"]')?.remove();
+    document.body.insertAdjacentHTML(
+      "afterbegin",
+      '<input type="file" aria-label="Kept" data-ac-ref="ac0">',
+    );
+    const again = readGenericPage().fields.map((f) => f.ref);
+    expect(new Set(again).size).toBe(again.length);
+  });
+});
+
 describe("isSupportedPosting", () => {
   it("Greenhouse, Ashby and Lever postings, not their boards or other sites", () => {
     expect(

@@ -583,8 +583,7 @@ export class RunController {
           action.step,
           action.step.note ? "needs you" : "waiting for your click",
         );
-        if (this.wizard)
-          this.timer = setTimeout(() => void this.watchPage(), REVIEW_POLL_MS);
+        this.timer = setTimeout(() => void this.watchPage(), REVIEW_POLL_MS);
         return;
       case "fill":
         return this.fill(action.step);
@@ -623,8 +622,24 @@ export class RunController {
       case "finished":
         return this.finish();
       case "paused":
+        this.timer = setTimeout(() => void this.watchPaused(), REVIEW_POLL_MS);
         return;
     }
+  }
+
+  /** Paused or waiting on a step: you may have submitted the form yourself meanwhile. */
+  private async submittedMeanwhile(): Promise<boolean> {
+    if (this.tabClosed || this.busy || !(await this.driver.submitted()))
+      return false;
+    this.apply({ type: "submitted" });
+    void this.loop();
+    return true;
+  }
+
+  private async watchPaused(): Promise<void> {
+    if (nextAction(this.state).kind !== "paused") return;
+    if (await this.submittedMeanwhile()) return;
+    this.timer = setTimeout(() => void this.watchPaused(), REVIEW_POLL_MS);
   }
 
   /** Fields filled earlier that are empty again (a re-render or another field reset them). */
@@ -667,7 +682,7 @@ export class RunController {
       this.nextPage((await wizard.step()) || this.pageStep || "this page"))();
   }
 
-  /** While a step waits for you on Workday: you may have filled the rest and moved on. */
+  /** While a step waits for you: you may have filled the rest and moved on, or submitted. */
   private async watchPage(): Promise<void> {
     if (
       this.tabClosed ||
@@ -675,6 +690,7 @@ export class RunController {
       nextAction(this.state).kind !== "wait-for-you"
     )
       return;
+    if (await this.submittedMeanwhile()) return;
     const moved = await this.movedTo();
     if (moved) return this.nextPage(moved);
     this.timer = setTimeout(() => void this.watchPage(), REVIEW_POLL_MS);

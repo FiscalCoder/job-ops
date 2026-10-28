@@ -24,6 +24,8 @@ export type FieldRule =
   | { kind: "work-auth"; ask: "authorized" | "sponsorship" }
   | { kind: "resume-file" }
   | { kind: "cover-letter" }
+  /** An upload that isn't for the resume ("Supporting documents"): yours to pick. */
+  | { kind: "attachment" }
   | { kind: "education"; part: "school" | "degree" | "discipline" }
   | { kind: "consent" }
   | { kind: "eeo"; key: string }
@@ -67,6 +69,7 @@ const BY_REF: Record<string, FieldRule> = {
   phone: profile("phone"),
   resume: { kind: "resume-file" },
   cover_letter: { kind: "cover-letter" },
+  attachment: { kind: "attachment" },
   gender: { kind: "eeo", key: "eeo.gender" },
   race: { kind: "eeo", key: "eeo.race" },
   hispanic_ethnicity: { kind: "eeo", key: "eeo.race" },
@@ -113,7 +116,10 @@ const LABEL_RULES: readonly [RegExp, FieldRule][] = [
     /^(street address|address( line)? ?1|address|mailing address)\s*\*?$/,
     bank("location.address_line1"),
   ],
-  [/postal code|\bzip( code)?\b|\bpin ?code\b|postcode/, bank("location.postal_code")],
+  [
+    /postal code|\bzip( code)?\b|\bpin ?code\b|postcode/,
+    bank("location.postal_code"),
+  ],
   [
     /(authori[sz]ed to work|work authori[sz]ation|legally (authori[sz]ed|eligible|allowed|permitted)|right to work|eligible to work|work permit)/,
     { kind: "work-auth", ask: "authorized" },
@@ -258,6 +264,7 @@ function actionClassFor(rule: FieldRule): ActionClass {
     case "question":
     case "located-in":
     case "cover-letter":
+    case "attachment":
       return "confirm";
     case "education":
       return rule.part === "school" ? "confirm" : "auto";

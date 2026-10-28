@@ -47,6 +47,17 @@ describe("driver helpers", () => {
     expect(selectionMatches("+246", "India +91")).toBe(false);
     expect(selectionMatches("", "India")).toBe(false);
   });
+
+  it("never takes Female for Male, nor typed-over text for the pick (Oracle)", () => {
+    expect(rankOption("Female", "Male")).toBe(9);
+    expect(bestOption(["Female", "Male"], "Male")).toBe(1);
+    expect(bestOption(["Female"], "Male")).toBeNull();
+    expect(selectionMatches("Female", "Male")).toBe(false);
+    expect(selectionMatches("+9+91", "+91")).toBe(false);
+    expect(selectionMatches("DR.Mr.", "Mr.")).toBe(false);
+    expect(selectionMatches("MR.", "Mr.")).toBe(true);
+    expect(selectionMatches("+91", "India (+91)")).toBe(true);
+  });
 });
 
 describe("ethnicityAnswer (Greenhouse shows Race only after Hispanic/Latino: No)", () => {

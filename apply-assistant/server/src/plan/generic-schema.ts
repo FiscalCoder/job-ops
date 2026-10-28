@@ -13,7 +13,11 @@ type PageField = WorkdayPage["fields"][number];
 
 /** Meanings recognised from a label, for the kinds of field they can be. */
 const BY_LABEL: readonly [RegExp, string, readonly PageField["kind"][]][] = [
-  [/preferred (first )?name|name you (go by|prefer)/i, "preferred_name", ["text"]],
+  [
+    /preferred (first )?name|name you (go by|prefer)/i,
+    "preferred_name",
+    ["text"],
+  ],
   [/^(legal )?first name|given name|^first$/i, "first_name", ["text"]],
   [/last name|surname|family name|^last$/i, "last_name", ["text"]],
   [/^(your |full |legal )?(full )?name$/i, "full_name", ["text"]],
@@ -21,6 +25,12 @@ const BY_LABEL: readonly [RegExp, string, readonly PageField["kind"][]][] = [
   [/phone|mobile( number)?$|contact number/i, "phone", ["text"]],
   [/cover letter/i, "cover_letter", ["file"]],
   [/resume|résumé|\bcv\b|curriculum/i, "resume", ["file"]],
+  // Other documents (Oracle shows "Upload Attachment" on every page): never the resume again.
+  [
+    /attach|document|supporting|additional|portfolio|transcript|certificat|other/i,
+    "attachment",
+    ["file"],
+  ],
   [/gender|\bsex\b/i, "gender", ["dropdown", "radio", "search"]],
   [/\brace\b|ethnicit/i, "race", ["dropdown", "radio", "search"]],
   [/veteran/i, "veteran_status", ["dropdown", "radio", "search"]],
@@ -55,17 +65,30 @@ function typeOf(field: PageField): FieldType {
 
 function canonicalOf(field: PageField): string | undefined {
   const label = field.label.replace(/\*$/, "").trim();
-  const found = BY_LABEL.find(
+  return BY_LABEL.find(
     ([pattern, , kinds]) => kinds.includes(field.kind) && pattern.test(label),
-  );
-  if (found) return found[1];
-  // An upload without a telling label is the resume.
-  return field.kind === "file" ? "resume" : undefined;
+  )?.[1];
+}
+
+/**
+ * Uploads without a telling label ("Drop or select", "Upload"): the first is the resume when
+ * no upload asks for it by name; the rest are other documents, yours to pick.
+ */
+function uploadMeanings(fields: readonly PageField[]): (string | undefined)[] {
+  const named = fields.map(canonicalOf);
+  let resume = named.includes("resume");
+  return fields.map((f, i) => {
+    if (named[i] || f.kind !== "file") return named[i];
+    if (resume) return "attachment";
+    resume = true;
+    return "resume";
+  });
 }
 
 export function parseGenericPage(page: WorkdayPage, title: string): FormSchema {
-  const fields: FormField[] = page.fields.map((f) => {
-    const canonical = canonicalOf(f);
+  const meanings = uploadMeanings(page.fields);
+  const fields: FormField[] = page.fields.map((f, i) => {
+    const canonical = meanings[i];
     const label = f.label.replace(/\*$/, "").trim();
     return {
       ref: f.ref,

@@ -26,7 +26,15 @@ const field = (
   label: string,
   kind: Field["kind"],
   more: Partial<Field> = {},
-): Field => ({ ref, key: ref, label, kind, required: false, options: [], ...more });
+): Field => ({
+  ref,
+  key: ref,
+  label,
+  kind,
+  required: false,
+  options: [],
+  ...more,
+});
 
 const careersPage: WorkdayPage = {
   system: "generic",
@@ -65,7 +73,10 @@ describe("a company's own page, planned from its labels", () => {
     expect(of("#last")).toMatchObject({ status: "fill", value: "T" });
     expect(of("#mail")?.source).toBe("resume:email");
     expect(of("#tel")?.source).toBe("resume:phone");
-    expect(of("#cv")).toMatchObject({ status: "fill", source: "jobops:tailored-pdf" });
+    expect(of("#cv")).toMatchObject({
+      status: "fill",
+      source: "jobops:tailored-pdf",
+    });
     expect(of("#gender")).toMatchObject({
       status: "fill",
       value: "Prefer not to say",
@@ -77,6 +88,50 @@ describe("a company's own page, planned from its labels", () => {
       value: "I agree to the privacy notice",
       actionClass: "confirm",
     });
+  });
+
+  it("the resume goes only where a resume is asked for, not into Oracle's other attachments", () => {
+    const oracle: WorkdayPage = {
+      system: "generic",
+      step: "/apply/section/1 · step 1 of 3",
+      fields: [
+        field("#import", "Import your profile from resume", "file"),
+        field("#resume", "Upload Resume", "file"),
+        field("#attachment", "Upload Attachment", "file"),
+        field("#letter", "Cover Letter", "file"),
+      ],
+    };
+    const plan = buildPlan({
+      schema: parseGenericPage(oracle, "Senior Engineer"),
+      resume: resumeFacts(fakeDesignResume),
+      bank,
+    });
+    const of = (ref: string) => plan.entries.find((e) => e.ref === ref);
+    expect(of("#import")?.source).toBe("jobops:tailored-pdf");
+    expect(of("#resume")?.source).toBe("jobops:tailored-pdf");
+    expect(of("#attachment")?.status).toBe("skip");
+    expect(of("#letter")?.status).toBe("skip");
+
+    // No upload names the resume: the first unnamed one is it, a second isn't.
+    const unnamed = buildPlan({
+      schema: parseGenericPage(
+        {
+          ...oracle,
+          fields: [
+            field("#a", "Drop or select", "file"),
+            field("#b", "Upload", "file"),
+            field("#c", "Supporting documents", "file", { required: true }),
+          ],
+        },
+        "Senior Engineer",
+      ),
+      resume: resumeFacts(fakeDesignResume),
+      bank,
+    });
+    const in2 = (ref: string) => unnamed.entries.find((e) => e.ref === ref);
+    expect(in2("#a")?.source).toBe("jobops:tailored-pdf");
+    expect(in2("#b")?.status).toBe("skip");
+    expect(in2("#c")?.status).toBe("needs-you");
   });
 });
 
@@ -137,7 +192,10 @@ async function start(reply: () => unknown) {
   const call = async (method: string, path: string, body?: unknown) => {
     const res = await fetch(`${base}${path}`, {
       method,
-      headers: { "content-type": "application/json", authorization: "Bearer good" },
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer good",
+      },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     return { status: res.status, json: (await res.json()) as any };
@@ -172,13 +230,15 @@ describe("Claude's steps for a field, and the recipes they become", () => {
 
     const trail = (await call("GET", "/trace/jobs/job-1")).json.data.events;
     const act = trail.find((e: any) => e.kind === "act");
-    expect(JSON.stringify(act.data.steps)).not.toContain("Bengaluru\"");
+    expect(JSON.stringify(act.data.steps)).not.toContain('Bengaluru"');
     expect(act.data.steps[1].value).toBe("{value}");
 
     // A key that isn't allowed: nothing is run.
     reply = { steps: [{ action: "press", value: "F5" }], why: "reload" };
     expect((await call("POST", "/plans/job-1/act", ask)).status).toBe(422);
-    expect((await call("POST", "/plans/job-1/act", { label: "x" })).status).toBe(400);
+    expect(
+      (await call("POST", "/plans/job-1/act", { label: "x" })).status,
+    ).toBe(400);
   });
 
   it("a recipe is kept per site and question, with how often it worked", async () => {
@@ -189,9 +249,25 @@ describe("Claude's steps for a field, and the recipes they become", () => {
       { action: "press", value: "Enter" },
     ];
     const host = "careers.acme.example";
-    await call("POST", "/recipes", { host, label: "Current location *", steps, ok: true, jobId: "job-1" });
-    await call("POST", "/recipes", { host, label: "current location", steps, ok: true });
-    await call("POST", "/recipes", { host, label: "Current location", steps, ok: false });
+    await call("POST", "/recipes", {
+      host,
+      label: "Current location *",
+      steps,
+      ok: true,
+      jobId: "job-1",
+    });
+    await call("POST", "/recipes", {
+      host,
+      label: "current location",
+      steps,
+      ok: true,
+    });
+    await call("POST", "/recipes", {
+      host,
+      label: "Current location",
+      steps,
+      ok: false,
+    });
     const recipes = (await call("GET", `/recipes?host=${host}`)).json.data;
     expect(recipes).toEqual([
       expect.objectContaining({
@@ -201,7 +277,9 @@ describe("Claude's steps for a field, and the recipes they become", () => {
         failed: 1,
       }),
     ]);
-    expect((await call("GET", "/recipes?host=other.example")).json.data).toEqual([]);
+    expect(
+      (await call("GET", "/recipes?host=other.example")).json.data,
+    ).toEqual([]);
     expect((await call("GET", "/recipes?host=bad host!")).status).toBe(400);
   });
 });

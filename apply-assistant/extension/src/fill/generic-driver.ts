@@ -42,6 +42,9 @@ export interface GenericField {
   readonly options: readonly string[];
 }
 
+/** A search box is cleared key by key; longer text than this isn't a dropdown's. */
+const MAX_CLEAR_CHARS = 120;
+
 export interface GenericPage {
   readonly system: "generic";
   readonly step: string;
@@ -124,7 +127,14 @@ export function readGenericPage(): GenericPage {
       ""
     ).slice(0, 300);
   };
-  let counter = 0;
+  // New marks after those already on the page: a redrawn field mustn't take a kept one's.
+  let counter =
+    Math.max(
+      -1,
+      ...[...document.querySelectorAll("[data-ac-ref]")].map(
+        (e) => Number(e.getAttribute("data-ac-ref")?.slice(2)) || 0,
+      ),
+    ) + 1;
   const refOf = (el: HTMLElement, group: string | null): string => {
     if (group) return `input[name="${group.replace(/["\\]/g, "\\$&")}"]`;
     if (
@@ -158,6 +168,8 @@ export function readGenericPage(): GenericPage {
     const tag = el.tagName.toLowerCase();
     if (tag === "input" && SKIP.test(input.type)) continue;
     if (el.closest("header, nav, footer, #ac-badge")) continue;
+    // A help chat's own inputs (Oracle's chatbot takes files): not the application.
+    if (el.closest("[class*='chat' i], [id*='chat' i]")) continue;
     if (/one-time-code/i.test(el.getAttribute("autocomplete") ?? "")) continue;
     if (input.disabled || input.readOnly) continue;
     // A dropdown's stand-in for the browser's "required" check (react-select), and captcha tokens.
@@ -396,16 +408,22 @@ export class GenericDriver extends TrustedDriver {
     if (value === null) return { ok: false, reason: "Nothing to fill" };
     const wanted = Array.isArray(value) ? value : [value as string];
     try {
-      const kind = await this.frame.$eval(entry.ref, domKind).catch(() => null);
+      const kindOf = () =>
+        this.frame.$eval(entry.ref, domKind).catch(() => null);
+      let kind = await kindOf();
+      if (!kind && (await this.refind(entry))) kind = await kindOf();
       if (!kind)
         return {
           ok: false,
           reason: "Field not found on the page; fill it yourself",
         };
-      if (kind === "file")
-        return resume
-          ? await this.attachFile(entry.ref, resume)
-          : { ok: false, reason: "Tailored PDF not loaded" };
+      if (kind === "file") {
+        if (!resume) return { ok: false, reason: "Tailored PDF not loaded" };
+        // The page asked again (its heading changed): attaching twice adds a second copy.
+        if (await this.hasFile(entry.ref, resume.name))
+          return { ok: true, result: "already attached" };
+        return await this.attachFile(entry.ref, resume);
+      }
       return await this.fillKind(entry, kind, wanted);
     } catch (error) {
       return failed(error);
@@ -565,18 +583,67 @@ export class GenericDriver extends TrustedDriver {
     return { ok: false, reason: `No choice matching "${wanted}"` };
   }
 
-  /** Clears text typed into a search box (never Backspace in an empty one: it removes a tag). */
+  /**
+   * Clears what a search box shows, key by key from its end: a dropdown that moves the caret
+   * as it opens (Oracle's) ignores a select-all, and typing then lands after the old value
+   * ("DR.Mr."). Never Backspace in an empty one: it removes a tag.
+   */
   private async clearSearch(ref: string): Promise<void> {
-    const typed = await this.frame
+    const length = await this.frame
       .$eval(ref, (el) => {
         const input = el as HTMLInputElement;
         input.focus();
-        if (!input.value) return false;
-        input.select?.();
-        return true;
+        return input.value?.length ?? 0;
       })
+      .catch(() => 0);
+    if (!length) return;
+    await this.page.keyboard.press("End");
+    for (let i = 0; i < Math.min(length, MAX_CLEAR_CHARS); i++)
+      await this.page.keyboard.press("Backspace");
+  }
+
+  /**
+   * A field the page drew again (Oracle redraws its form after a resume import) loses the mark
+   * it was found by: finds it again by its label, alone on the page, and marks it the same.
+   */
+  private async refind(entry: PlanEntry): Promise<boolean> {
+    const mark = /^\[data-ac-ref="(ac\d+)"\]$/.exec(entry.ref)?.[1];
+    if (!mark) return false;
+    const page = await this.frame.evaluate(readGenericPage).catch(() => null);
+    const same = page?.fields.filter((f) => f.label === entry.label) ?? [];
+    const found = same.length === 1 ? same[0] : undefined;
+    if (!found || found.ref === entry.ref) return false;
+    return this.frame
+      .evaluate(
+        (ref, mark) => {
+          const el = document.querySelector(ref);
+          el?.setAttribute("data-ac-ref", mark);
+          return el !== null;
+        },
+        found.ref,
+        mark,
+      )
       .catch(() => false);
-    if (typed) await this.page.keyboard.press("Backspace");
+  }
+
+  /** The file is already listed beside this upload (attached earlier in the run). */
+  private hasFile(ref: string, name: string): Promise<boolean> {
+    return this.frame
+      .$eval(
+        ref,
+        (el, name) => {
+          let box = el.parentElement;
+          for (
+            let depth = 0;
+            box && depth < 4;
+            depth++, box = box.parentElement
+          )
+            if ((box.textContent ?? "").includes(name)) return true;
+          return false;
+        },
+        name,
+      )
+      .catch(() => false);
   }
 
   /**

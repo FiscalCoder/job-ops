@@ -92,8 +92,9 @@ const FORBIDDEN_CLICK =
 const MAX_WAIT_MS = 1_500;
 const MAX_HTML_CHARS = 8_000;
 /** Visible choices of a list that's open somewhere on the page (lists often open in a portal). */
+/** The choices of an open list; Oracle's lists are grids, one choice per cell. */
 const OPEN_CHOICES =
-  "[role='option'], [role='listbox'] li, li[class*='option' i], div[class*='option' i]:not([class*='options' i])";
+  "[role='option'], [role='gridcell'], [role='listbox'] li, li[class*='option' i], div[class*='option' i]:not([class*='options' i])";
 
 /**
  * The field's HTML for Claude: the field marked data-ac-target="1" and the markup around it

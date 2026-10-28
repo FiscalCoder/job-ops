@@ -28,10 +28,33 @@ export const keptNumber = (shown: string, wanted: string): boolean =>
   digits(wanted).length > 0 &&
   digits(shown) === digits(wanted);
 
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+/** What a word can't start right after ("DR.Mr." is one word). */
+const JOINS_BEFORE = /[\p{L}\p{N}.]/u;
+
 /**
- * Dropdown option ranking: exact > starts-with > whole word > contains. Among options starting
- * with your answer, one where it's followed by punctuation ("Bengaluru, Karnataka", "India +91")
- * is the place itself; one where another word follows ("Bengaluru Rural") ranks just below.
+ * `part` appears in `whole` as whole words: "+91" in "India +91", but not "male" in "female",
+ * "+91" in "+9+91" or "Mr." in "DR.Mr.".
+ */
+export function containsWords(whole: string, part: string): boolean {
+  if (!part) return false;
+  for (
+    let at = whole.indexOf(part);
+    at >= 0;
+    at = whole.indexOf(part, at + 1)
+  ) {
+    const before = whole[at - 1] ?? " ";
+    const after = whole[at + part.length] ?? " ";
+    if (!JOINS_BEFORE.test(before) && !WORD_CHAR.test(after)) return true;
+  }
+  return false;
+}
+
+/**
+ * Dropdown option ranking: exact > starts-with > whole word > contains (as whole words, so
+ * "Male" never picks "Female"). Among options starting with your answer, one where it's
+ * followed by punctuation ("Bengaluru, Karnataka", "India +91") is the place itself; one
+ * where another word follows ("Bengaluru Rural") ranks just below.
  */
 export function rankOption(label: string, wanted: string): number {
   const s = label.toLowerCase().replace(/\s+/g, " ").trim();
@@ -42,7 +65,7 @@ export function rankOption(label: string, wanted: string): number {
     return /^ [\p{L}\p{N}]/u.test(s.slice(w.length)) ? 1.5 : 1;
   const words = (t: string) => ` ${t.replace(/[^a-z0-9]+/g, " ").trim()} `;
   if (words(s).includes(words(w))) return 2;
-  if (s.includes(w)) return 3;
+  if (containsWords(s, w)) return 3;
   return 9;
 }
 
@@ -63,12 +86,13 @@ export function bestOption(
 
 /**
  * Read-back for a dropdown: some widgets show only part of the chosen option (the phone
- * country picker shows "+91" for "India +91"), so either containing the other counts.
+ * country picker shows "+91" for "India +91"), so either containing the other as whole
+ * words counts ("Female" doesn't show "Male").
  */
 export function selectionMatches(shown: string, picked: string): boolean {
   const a = shown.trim().toLowerCase();
   const b = picked.trim().toLowerCase();
   // Nothing shown means nothing was chosen (e.g. text typed but the menu never closed).
   if (!a) return false;
-  return a === b || b.includes(a) || a.includes(b);
+  return a === b || containsWords(b, a) || containsWords(a, b);
 }
