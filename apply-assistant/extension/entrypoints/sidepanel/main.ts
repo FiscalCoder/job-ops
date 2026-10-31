@@ -29,7 +29,7 @@ import {
 import { setUpClaudeSettings } from "./claude-settings";
 import { setUpImport } from "./import-view";
 import { kitDrawer, showKit } from "./kit-view";
-import { postedText, renderQueue } from "./queue-view";
+import { matchesSearch, postedText, renderQueue } from "./queue-view";
 import { renderRun as renderRunView } from "./run-view";
 
 // Side panel: sign in, run lookups, see the queue and each job's plan.
@@ -504,6 +504,10 @@ function captureLine(entry: CaptureEntry): string {
 }
 
 function renderCaptures(entries: readonly CaptureEntry[]) {
+  // Shown on the folded card's heading.
+  $("captures-count").textContent = entries.length
+    ? `· ${entries.length} saved`
+    : "";
   $("captures").replaceChildren(
     ...(entries.length
       ? entries.map((e) => el("li", {}, captureLine(e)))
@@ -519,13 +523,19 @@ chrome.storage.onChanged.addListener((changes, area) => {
 function renderRun(summary: RunSummary | null) {
   const line = $("last-run");
   const details = $("run-details");
+  const state = $("lookups-state");
   if (!summary) {
     line.textContent =
       "Not run yet. Runs every 30 minutes while Chrome is open.";
+    state.textContent = "· not run yet";
     details.hidden = true;
     return;
   }
   const when = new Date(summary.finishedAt).toLocaleString();
+  // Shown on the folded card's heading.
+  state.textContent = summary.error
+    ? "· last run stopped"
+    : `· last run ${new Date(summary.finishedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
   const count = summary.lines.length;
   line.textContent = summary.error
     ? `Last run ${when} stopped: ${summary.error}`
@@ -595,7 +605,23 @@ async function loadQueue() {
   }
   queueItems = items;
   void checkTab();
-  renderQueue($("queue"), items, {
+  showQueue();
+}
+
+/** The queue as your search narrows it (Autopilot still works through all of it). */
+function showQueue() {
+  const query = $<HTMLInputElement>("queue-search").value.trim();
+  const shown = queueItems.filter((item) => matchesSearch(item, query));
+  $("queue-count").textContent = query
+    ? `${shown.length} of ${queueItems.length}`
+    : "";
+  if (query && !shown.length) {
+    $("queue").replaceChildren(
+      el("li", { class: "muted" }, `No jobs match "${query}".`),
+    );
+    return;
+  }
+  renderQueue($("queue"), shown, {
     row: queueRow,
     limit: (company) => void limitCompany(company),
     unlimit: (limit) => {
@@ -796,6 +822,7 @@ function queueRow(item: QueueItem, showEmployer: boolean): HTMLElement {
 }
 
 $("refresh").addEventListener("click", () => void loadQueue());
+$("queue-search").addEventListener("input", () => showQueue());
 $("autopilot-start").addEventListener("click", () => void startAutopilot());
 
 interface Entry {
@@ -824,6 +851,8 @@ async function showPlan(item: QueueItem) {
   const box = $("plan");
   box.hidden = false;
   box.replaceChildren(el("p", { class: "muted" }, "Loading plan…"));
+  // The plan opens above the queue: brought into view however far down you clicked.
+  box.scrollIntoView({ block: "nearest", behavior: "smooth" });
   try {
     const plan = (await client.plan(item.jobId)) as { entries: Entry[] };
     const entries = plan.entries.filter((e) => e.status !== "skip");

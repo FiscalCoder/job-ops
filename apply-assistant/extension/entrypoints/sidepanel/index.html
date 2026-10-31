@@ -32,9 +32,29 @@
 
     <section id="main" hidden>
       <p id="notice" class="ok" role="status" hidden></p>
+      <!-- The tab you're on: its job, Fill this page, the kit. -->
       <div id="here" class="card here" hidden></div>
+
+      <!-- What you work through: the queue, Autopilot over it, the job you picked. -->
       <div class="card">
-        <strong>Add a job</strong>
+        <div class="row">
+          <strong>Queue</strong>
+          <div class="controls">
+            <button type="button" id="refresh">Refresh</button>
+            <button type="button" id="autopilot-start" class="primary" title="Apply to the queue for you, highest score first; you check and submit each">Autopilot</button>
+          </div>
+        </div>
+        <div class="search">
+          <input id="queue-search" type="search" placeholder="Search company, role, site…" aria-label="Search the queue by company, role or site" autocomplete="off" />
+          <span id="queue-count" class="muted"></span>
+        </div>
+        <div id="plan" class="card plan" hidden></div>
+        <ul id="queue" class="list"></ul>
+      </div>
+
+      <!-- Now and then: folded until you need them. -->
+      <details id="import-card" class="card">
+        <summary><strong>Add a job</strong></summary>
         <p class="muted">A job's page or its application form on any site: Job Ops adds it, tailors your resume and scores it.</p>
         <form id="import-form" class="row">
           <input id="import-url" type="url" placeholder="https://…" aria-label="Link to the job or its application form" />
@@ -42,13 +62,14 @@
         </form>
         <button type="button" id="import-tab" class="link">Use this tab</button>
         <div id="import-box"></div>
-      </div>
-      <div class="card">
+      </details>
+
+      <details id="lookups-card" class="card">
+        <summary><strong>Job-board lookups</strong> <span id="lookups-state" class="muted"></span></summary>
         <div class="row">
-          <strong>Job-board lookups</strong>
+          <p id="last-run" class="muted"></p>
           <button type="button" id="run" class="primary">Run now</button>
         </div>
-        <p id="last-run" class="muted"></p>
         <details id="run-details" hidden>
           <summary>What happened</summary>
           <ul id="run-lines"></ul>
@@ -57,23 +78,13 @@
           Some companies host Greenhouse on their own careers page.
           <button type="button" id="allow-sites" class="link">Allow reading company career sites</button>
         </p>
-      </div>
+      </details>
 
-      <div class="card">
-        <strong>LinkedIn apply links</strong>
+      <details id="captures-card" class="card">
+        <summary><strong>LinkedIn apply links</strong> <span id="captures-count" class="muted"></span></summary>
         <p class="muted">Click Apply on a LinkedIn job as usual: the company page it opens is saved to that job in Job Ops.</p>
         <ul id="captures" class="list"></ul>
-      </div>
-      <div class="card">
-        <div class="row">
-          <strong>Queue</strong>
-          <button type="button" id="autopilot-start" class="primary" title="Apply to the queue for you, highest score first; you check and submit each">Autopilot</button>
-          <button type="button" id="refresh">Refresh</button>
-        </div>
-        <ul id="queue" class="list"></ul>
-      </div>
-
-      <div id="plan" class="card" hidden></div>
+      </details>
 
       <details id="blocked-card" class="card">
         <summary><strong>Blocked companies</strong> <span id="blocked-count" class="muted"></span></summary>

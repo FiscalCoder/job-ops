@@ -30,6 +30,35 @@ const groupKey = (item: QueueItem) =>
   item.companyLimit?.name.toLowerCase() ??
   item.employer.replace(LEGAL, "").replace(/\s+/g, " ").trim().toLowerCase();
 
+/** Where a job's link goes ("careers.acme.com"), for search. */
+const hostOf = (url: string | null | undefined) => {
+  try {
+    return url ? new URL(url).hostname.replace(/^www\./, "") : "";
+  } catch {
+    return "";
+  }
+};
+
+/**
+ * The queue's search: every word you type is in the job's company, role, system (Greenhouse,
+ * Workday…) or site, in any order and case ("acme backend", "greenhouse senior").
+ */
+export function matchesSearch(item: QueueItem, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const text = [
+    item.title,
+    item.employer,
+    item.target.ats ?? "",
+    hostOf(item.applicationLink),
+    hostOf(item.jobUrl),
+    hostOf(item.target.postingUrl),
+  ]
+    .join(" ")
+    .toLowerCase();
+  return words.every((w) => text.includes(w));
+}
+
 /** Companies with their roles, best-scored company first; roles best-scored first. */
 export function groupByCompany(items: readonly QueueItem[]): CompanyGroup[] {
   const groups = new Map<string, QueueItem[]>();

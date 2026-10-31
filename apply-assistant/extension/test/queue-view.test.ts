@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   groupByCompany,
   limitText,
+  matchesSearch,
   periodText,
   postedText,
   renderQueue,
@@ -118,5 +119,24 @@ describe("queue grouped by company", () => {
     );
     block?.click();
     expect(blocked).toEqual(["Acme"]);
+  });
+});
+
+describe("searching the queue", () => {
+  const job = item({
+    title: "Senior Backend Engineer",
+    employer: "Acme Robotics",
+    jobUrl: "https://www.linkedin.com/jobs/view/1",
+    applicationLink: "https://careers.acme.com/jobs/7",
+    target: { status: "matched", ats: "greenhouse", postingUrl: "https://job-boards.greenhouse.io/acme/jobs/7" },
+  });
+  it("every word, in any order and case, in its company, role, system or site", () => {
+    expect(matchesSearch(job, "")).toBe(true);
+    expect(matchesSearch(job, "acme backend")).toBe(true);
+    expect(matchesSearch(job, "BACKEND senior")).toBe(true);
+    expect(matchesSearch(job, "greenhouse")).toBe(true);
+    expect(matchesSearch(job, "careers.acme")).toBe(true);
+    expect(matchesSearch(job, "acme frontend")).toBe(false);
+    expect(matchesSearch(job, "okta")).toBe(false);
   });
 });

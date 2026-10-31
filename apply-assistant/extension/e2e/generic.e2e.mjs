@@ -371,6 +371,8 @@ try {
   await panel.getByRole("button", { name: "Abort" }).click();
   await panel.getByRole("button", { name: "Close" }).click();
   const tabsBefore = context.pages().length;
+  // Add a job is folded until you open it.
+  await panel.locator("#import-card > summary").click();
   await panel.locator("#import-url").fill("https://www.linkedin.com/jobs/view/1");
   await panel.locator("#import-form").getByRole("button", { name: "Add" }).click();
   await panel.getByText("LinkedIn and Indeed pages aren't read", { exact: false }).waitFor();

@@ -439,3 +439,27 @@ li {
   display: grid;
   gap: 8px;
 }
+
+/* A job's plan, opened above the queue it was picked from. */
+.card .plan {
+  margin: 8px 0;
+  background: var(--bg, transparent);
+}
+
+/* Folded cards: the heading's status sits beside it. */
+details.card > summary {
+  cursor: pointer;
+}
+
+/* The queue's search, under its heading. */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+}
