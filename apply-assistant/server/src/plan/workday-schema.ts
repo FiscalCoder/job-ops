@@ -44,6 +44,12 @@ export const workdayPageSchema = z.object({
           .optional(),
         /** Company pages: what it shows now (a block filled from your uploaded resume). */
         value: z.string().max(300).optional(),
+        /** Company pages: its placeholder, name and the heading above it (for Claude's map). */
+        context: z.string().max(300).optional(),
+        /** Set by Claude's page map: what it takes, when the label alone says nothing. */
+        meaning: z.string().max(40).optional(),
+        /** Set by Claude's page map: what kind of input it really is. */
+        widget: z.enum(["tags", "date", "search", "captcha"]).optional(),
       }),
     )
     .max(200),
@@ -59,6 +65,11 @@ export const workdayPageSchema = z.object({
     )
     .max(30)
     .optional(),
+  /**
+   * Company pages: sections the page offers to add an entry to ("+ Add Education Details"),
+   * by their name, even with no entry yet.
+   */
+  addable: z.array(z.string().max(100)).max(10).optional(),
 });
 
 export type WorkdayPage = z.infer<typeof workdayPageSchema>;

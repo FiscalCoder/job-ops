@@ -9,7 +9,9 @@ import {
   toQuestion,
 } from "../claude/questions.js";
 import type { TellAnswer } from "../claude/tell.js";
+import { mergePageMap, type PageMapper } from "../claude/page-map.js";
 import { traceUsage } from "../claude/usage-trace.js";
+import { currentUser } from "../store/owner.js";
 import type { JobOpsApi } from "../jobops/client.js";
 import type { AnswerBankRepo } from "../store/answer-bank-repo.js";
 import type { ApplyTargetsRepo } from "../store/apply-targets-repo.js";
@@ -22,6 +24,7 @@ import type { FormSchema } from "./form-schema.js";
 import { parseGenericPage } from "./generic-schema.js";
 import {
   buildPlan,
+  daysForDateAnswers,
   type FillPlan,
   hasRememberedAnswer,
   locationSettles,
@@ -75,6 +78,8 @@ export interface PlansDeps {
   readonly trace?: TraceRecord;
   /** Your answers to earlier forms' questions, reused before asking Claude. */
   readonly learned?: LearnedAnswersRepo;
+  /** Claude's map of a company's page before it's planned (null without Claude). */
+  readonly pageMapper?: PageMapper | null;
 }
 
 export interface RebuildResult {
@@ -257,6 +262,30 @@ export function createPlans(deps: PlansDeps) {
       },
     });
     return plan;
+  }
+
+  /** The page with Claude's map merged in; as read when Claude is off or can't say. */
+  async function mapped(jobId: string, page: WorkdayPage): Promise<WorkdayPage> {
+    const mapper = deps.pageMapper;
+    if (!mapper) return page;
+    const map = await mapper
+      .map(currentUser(), "", page, traceUsage(trace, jobId))
+      .catch(() => null);
+    if (!map) return page;
+    const merged = mergePageMap(page, map);
+    const filled = merged.fields.filter(
+      (f, i) =>
+        f.block !== page.fields[i]?.block ||
+        f.meaning !== undefined ||
+        f.widget !== undefined,
+    ).length;
+    trace({
+      jobId,
+      kind: "page-map",
+      message: `Claude mapped page "${page.step}": ${filled} of ${page.fields.length} field(s) given a job, meaning or input kind the reader didn't see${map.add.length ? `; add buttons: ${map.add.join(", ")}` : ""}`,
+      data: { fields: page.fields.length, filled, add: map.add },
+    });
+    return merged;
   }
 
   /** The job, and the resume as its tailored PDF has it (Claude writes from this). */
@@ -493,8 +522,10 @@ export function createPlans(deps: PlansDeps) {
     ): Promise<WorkdayPagePlan> {
       const { job, resume } = await jobAndResume(token, jobId);
       const generic = page.system === "generic";
+      // A company's page: Claude's map first, filling only what the page reader left out.
+      const read = generic ? await mapped(jobId, page) : page;
       const schema = generic
-        ? parseGenericPage(page, job.title, resume)
+        ? parseGenericPage(read, job.title, resume)
         : parseWorkdayPage(page, job.title);
       const { plan: planned, fromClaude } = await planSchema(
         jobId,
@@ -513,7 +544,7 @@ export function createPlans(deps: PlansDeps) {
       const { summary } = plan;
       // Fewer job or degree blocks than on your resume: the site's Add More, then planned again.
       const add = generic
-        ? blocksToAdd(page.fields, resume)
+        ? blocksToAdd(read.fields, resume, read.addable)
         : entriesToAdd(page, resume);
       trace({
         jobId,
@@ -532,7 +563,12 @@ export function createPlans(deps: PlansDeps) {
           ...(add.length ? { add } : {}),
         },
       });
-      return { ...plan, add };
+      // A date answer in a field that asks for days ("Available To Join (in days)").
+      return {
+        ...plan,
+        entries: generic ? daysForDateAnswers(plan.entries, new Date()) : plan.entries,
+        add,
+      };
     },
 
     async build(token: string, jobId: string): Promise<FillPlan> {

@@ -237,3 +237,25 @@ Next:
   "Let Claude do it" did (School on iCIMS, a question it first declined).
 - I13 ☑ Jobs with no company link (only LinkedIn or a job board) aren't counted as jobs done;
   the bar says how many there are ("job 38 of 82" after two applications).
+
+### J. Keka (Zono) and Claude's page map (2026-10-31 evening; fallbacks only)
+
+- J1 ☑ Entry headings: a plain `<label>` or bold text above numbered entries counts ("Experience
+  Details"), so Keka's `companyName_0`, `designation_0` … are one job each (they had all
+  got the same saved "Job Title").
+- J2 ☑ Add buttons: a leading "+" or icon is ignored ("+ Add Experience Details"). The page
+  reports the sections it offers to add (`addable`), so an empty "Education Details" gets
+  your degrees.
+- J3 ☑ Dates: "Date of Joining/Relieving" are a job's start/end. Read-only date pickers are read
+  and set through jQuery UI's picker, or the browser's date input. "09/2025" is the first of
+  that month. Otherwise they go to saved steps or Claude as before.
+- J4 ☑ Tag boxes ("Add new skill"): one item at a time, each confirmed with Enter.
+- J5 ☑ "Available To Join (in days)" planned with a date: the days from today to it.
+- J6 ☑ "Last Hike": a saved answer (comp.last_hike) and its label rule.
+- J7 ☑ Captchas never go to Claude.
+- J8 ☑ Claude's page map, before each company page is planned (`claude/page-map.ts`). Claude
+  reads every field (label, kind, name, placeholder, heading above) and the Add buttons, and
+  says what each takes, which job/degree it's in, and what input it is (tags, date, search,
+  captcha). It fills only gaps (`mergePageMap`): a field's own meaning, job or kind is never
+  changed. One haiku call per page layout, remembered in memory (lost on a server restart).
+  Traced as "page-map".

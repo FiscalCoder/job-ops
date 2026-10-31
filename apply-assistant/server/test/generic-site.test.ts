@@ -488,3 +488,70 @@ describe("Claude's steps for a field, and the recipes they become", () => {
     expect((await call("GET", "/recipes?host=bad host!")).status).toBe(400);
   });
 });
+
+describe("Keka's form (Zono)", () => {
+  const resume = resumeFacts(fakeDesignResume);
+  const block = { id: "Experience Details-0", heading: "Experience Details" };
+  const page: WorkdayPage = {
+    system: "generic",
+    step: "/careers/applyjob/4314 · SDE III, Backend",
+    addable: ["Experience Details", "Education Details"],
+    fields: [
+      field("#companyName_0", "Company Name", "text", { block }),
+      field("#designation_0", "Job Title", "text", { block }),
+      field("#experienceDateOfJoining_0", "Date of Joining", "date", { block }),
+      field("#experienceDateOfRelieving_0", "Date of Relieving", "date", { block }),
+      field("#hike", "Last Hike", "date"),
+    ],
+  };
+  const plan = buildPlan({
+    schema: parseGenericPage(page, "Engineer", resume),
+    resume,
+    bank: new Map([...bank, ["comp.last_hike", "2025-04-01"]]),
+  });
+  const of = (ref: string) => plan.entries.find((e) => e.ref === ref);
+
+  it("Date of Joining / Relieving are the job's start and end (month/year, as before)", () => {
+    expect(of("#companyName_0")?.value).toBe("Acme");
+    expect(of("#experienceDateOfJoining_0")?.value).toBe("09/2023");
+    // Acme is current: no end date.
+    expect(of("#experienceDateOfRelieving_0")?.status).toBe("skip");
+  });
+
+  it("Last Hike is your saved date of your last hike", () => {
+    expect(of("#hike")).toMatchObject({ status: "fill", value: "2025-04-01" });
+  });
+
+  it("an empty section the page offers to add gets your degrees", async () => {
+    const { blocksToAdd } = await import("../src/plan/history-blocks.js");
+    expect(blocksToAdd(page.fields, resume, page.addable)).toEqual([
+      { section: "Experience Details", count: 1 },
+      { section: "Education Details", count: 2 },
+    ]);
+    // Without the page offering it, nothing for education (as before).
+    expect(blocksToAdd(page.fields, resume)).toEqual([
+      { section: "Experience Details", count: 1 },
+    ]);
+  });
+
+  it("a field asking for days, planned with a date: the days from today to it", async () => {
+    const { daysForDateAnswers } = await import("../src/plan/planner.js");
+    const entry = {
+      ref: "#availability",
+      label: "Available To Join (in days)",
+      section: "main" as const,
+      type: "text" as const,
+      required: true,
+      actionClass: "auto" as const,
+      status: "fill" as const,
+      value: "2026-11-20",
+      optionValues: null,
+      source: "bank:work.earliest_start_date",
+    };
+    const [days] = daysForDateAnswers([entry], new Date(2026, 9, 31));
+    expect(days?.value).toBe("20");
+    // A date field isn't touched; a date already past is 0 days.
+    expect(daysForDateAnswers([{ ...entry, label: "Start date" }], new Date(2026, 9, 31))[0]?.value).toBe("2026-11-20");
+    expect(daysForDateAnswers([entry], new Date(2026, 11, 1))[0]?.value).toBe("0");
+  });
+});

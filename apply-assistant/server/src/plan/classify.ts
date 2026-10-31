@@ -84,6 +84,7 @@ const BY_REF: Record<string, FieldRule> = {
   github: profile("github"),
   website: profile("website"),
   current_company: profile("recent_employer"),
+  last_hike: bank("comp.last_hike"),
   // Workday ("Have you worked for <company>...?", "Phone Device Type").
   worked_here: bank("history.worked_at_company"),
   phone_type: { kind: "fixed", value: "Mobile" },

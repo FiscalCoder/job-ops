@@ -38,6 +38,7 @@ const BY_LABEL: readonly [RegExp, string, readonly PageField["kind"][]][] = [
   [/veteran/i, "veteran_status", ["dropdown", "radio", "search"]],
   [/disabilit/i, "disability_status", ["dropdown", "radio", "search"]],
   [/current (company|employer)|present employer/i, "current_company", ["text"]],
+  [/last (salary )?(hike|increment|raise|appraisal)/i, "last_hike", ["text", "date"]],
 ];
 
 const DEMOGRAPHIC = new Set([
@@ -94,6 +95,28 @@ function uploadMeanings(fields: readonly PageField[]): (string | undefined)[] {
   });
 }
 
+/** Claude's meaning for a field (its page map), when it's one the planner answers itself. */
+const MAPPED = new Set([
+  "first_name",
+  "last_name",
+  "full_name",
+  "preferred_name",
+  "email",
+  "phone",
+  "resume",
+  "cover_letter",
+  "attachment",
+  "current_company",
+  "last_hike",
+  "linkedin",
+  "github",
+  "website",
+  "location",
+  "skills",
+]);
+const mapped = (f: PageField): string | undefined =>
+  f.meaning && MAPPED.has(f.meaning) ? f.meaning : undefined;
+
 export function parseGenericPage(
   page: WorkdayPage,
   title: string,
@@ -102,7 +125,8 @@ export function parseGenericPage(
   const meanings = uploadMeanings(page.fields);
   const history = historyCanonicals(page.fields, resume);
   const fields: FormField[] = page.fields.map((f, i) => {
-    const canonical = history.get(f.ref) ?? meanings[i];
+    // Claude's page map only where the label alone says nothing.
+    const canonical = history.get(f.ref) ?? meanings[i] ?? mapped(f);
     const label = f.label.replace(/\*$/, "").trim();
     return {
       ref: f.ref,
@@ -120,6 +144,7 @@ export function parseGenericPage(
       }),
       section: canonical && DEMOGRAPHIC.has(canonical) ? "demographic" : "main",
       ...(f.block ? { group: f.block.heading } : {}),
+      ...(f.widget ? { widget: f.widget } : {}),
     };
   });
   return {

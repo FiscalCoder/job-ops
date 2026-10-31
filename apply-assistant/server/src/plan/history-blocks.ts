@@ -34,6 +34,9 @@ function dateRole(label: string, start: string, end: string): string | null {
         : "Date";
   if (/\b(start|from|began|begin)/i.test(label)) return `${start}${part}`;
   if (/\b(end|to|until|finish|left)\b/i.test(label)) return `${end}${part}`;
+  // Keka: "Date of Joining", "Date of Relieving".
+  if (/\bjoin(ing|ed)?\b/i.test(label)) return `${start}${part}`;
+  if (/\breliev|\bleaving\b|\bexit\b/i.test(label)) return `${end}${part}`;
   return null;
 }
 
@@ -222,6 +225,8 @@ const MAX_ADD = 6;
 export function blocksToAdd(
   fields: readonly PageField[],
   resume: ResumeFacts,
+  /** Sections the page offers an Add for, by name ("Education Details"), even when empty. */
+  addable: readonly string[] = [],
 ): { section: string; count: number }[] {
   const blocks = blocksOf(fields);
   return (["experience", "education"] as const).flatMap((section) => {
@@ -231,6 +236,13 @@ export function blocksToAdd(
       section === "experience"
         ? resume.experience.length
         : resume.education.length;
+    // None yet, but the page offers to add one (Keka's empty Education Details).
+    const offered = addable.find(
+      (name) =>
+        SECTION_OF.find(([pattern]) => pattern.test(name))?.[1] === section,
+    );
+    if (!first && offered && wanted > 0)
+      return [{ section: offered, count: Math.min(wanted, MAX_ADD) }];
     if (!first || wanted <= mine.length) return [];
     return [
       {

@@ -83,7 +83,8 @@ const VALUES = {
   Country: "India",
   "Current location": "Bengaluru",
   "Notice period": "30 days",
-  "Start date": "2026-11-20",
+  // Not a date: the date input can't take it, so "Claude's" steps are asked (and refused).
+  "Start date": "As soon as possible",
   "Years of experience": "5+",
   "I agree to the privacy notice": "I agree to the privacy notice",
 };

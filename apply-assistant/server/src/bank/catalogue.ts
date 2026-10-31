@@ -169,6 +169,14 @@ export const BANK_KEYS: readonly BankKeyDef[] = [
     },
   ),
   def(
+    "comp.last_hike",
+    "Date of your last salary hike",
+    "Compensation",
+    "date",
+    "2025-04-01",
+    { hint: "For 'Last hike' / 'last increment' (Keka and others)." },
+  ),
+  def(
     "history.worked_at_company",
     "Have you worked at the company you're applying to?",
     "History",

@@ -35,6 +35,8 @@ export interface PlanEntry {
   readonly source: string;
   readonly reason?: string;
   readonly bankKey?: string;
+  /** What kind of input it really is, from Claude's page map (the driver's hint). */
+  readonly widget?: FormField["widget"];
   /** A searched list without your answer: what else to search for, in order ("Other"). */
   readonly alternatives?: readonly string[];
 }
@@ -363,6 +365,33 @@ function datePart(
   if (part.endsWith("Day")) return point.month ? { value: "1", source } : null;
   if (part.endsWith("Year")) return { value: String(point.year), source };
   return null;
+}
+
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A field asking for days ("Available To Join (in days)") planned with a date (your earliest
+ * start date): the number of days from today to it, never below 0. Other entries as they are.
+ */
+export function daysForDateAnswers<T extends PlanEntry>(
+  entries: readonly T[],
+  today: Date,
+): T[] {
+  return entries.map((entry) => {
+    const date =
+      typeof entry.value === "string" ? ISO_DATE.exec(entry.value) : null;
+    if (!date || !/\bdays?\b/i.test(entry.label)) return entry;
+    const at = Date.UTC(Number(date[1]), Number(date[2]) - 1, Number(date[3]));
+    const from = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    const days = Math.max(0, Math.round((at - from) / DAY_MS));
+    return {
+      ...entry,
+      value: String(days),
+      ...(entry.optionValues ? { optionValues: [String(days)] } : {}),
+      source: `${entry.source} (in days from today)`,
+    };
+  });
 }
 
 /** Where the job was: your saved address for that employer, else the city on your resume. */
@@ -769,6 +798,7 @@ function planField(
     label: field.label,
     section: field.section,
     ...(field.group ? { group: field.group } : {}),
+    ...(field.widget ? { widget: field.widget } : {}),
     type: field.type,
     required: field.required,
     actionClass,

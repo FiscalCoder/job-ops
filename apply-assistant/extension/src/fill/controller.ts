@@ -1305,6 +1305,9 @@ export class RunController {
       this.claudeSpent ||
       (this.escalated.get(step.seq) ?? 0) >= MAX_CLAUDE_TRIES ||
       step.entry.type === "file" ||
+      // A captcha is yours to solve: Claude never types one.
+      /captcha/i.test(`${step.entry.label} ${step.entry.ref}`) ||
+      step.entry.widget === "captcha" ||
       !this.driver.operate ||
       this.state.paused
     )

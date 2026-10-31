@@ -49,6 +49,8 @@ export interface GenericField {
   readonly block?: { readonly id: string; readonly heading: string };
   /** What it shows now (a block the site filled from your uploaded resume). */
   readonly value?: string;
+  /** Its placeholder, name and the heading above it: what Claude's page map reads. */
+  readonly context?: string;
 }
 
 /** A dropdown's prompt, not a choice ("— Make a Selection —", "Select…"). */
@@ -63,6 +65,8 @@ export interface GenericPage {
   readonly step: string;
   readonly fields: readonly GenericField[];
   readonly sections: readonly never[];
+  /** Sections offering "+ Add …" for an entry ("Education Details"), even with none yet. */
+  readonly addable?: readonly string[];
 }
 
 /** The page's step: where you are and its heading; runs inside the page. */
@@ -213,7 +217,9 @@ export function readGenericPage(): GenericPage {
       );
       if (unnumbered) return undefined;
       const head = [
-        ...node.querySelectorAll("h2, h3, h4, h5, h6, legend, p"),
+        ...node.querySelectorAll(
+          "h2, h3, h4, h5, h6, legend, p, label:not([for]), strong",
+        ),
       ].find(
         (h) =>
           h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING &&
@@ -245,6 +251,33 @@ export function readGenericPage(): GenericPage {
     return PROMPT.test(value) ? "" : value.slice(0, 300);
   };
 
+  /** The nearest heading above a field (a few levels up), for Claude's page map. */
+  const HEADING_TAGS = "h1, h2, h3, h4, h5, h6, legend, label:not([for]), strong";
+  const headingAbove = (el: HTMLElement): string => {
+    let node: Element | null = el;
+    for (let depth = 0; node && depth < 6; depth++) {
+      let prev = node.previousElementSibling;
+      for (let hops = 0; prev && hops < 3; hops++) {
+        const head = prev.matches(HEADING_TAGS) ? prev : prev.querySelector(HEADING_TAGS);
+        const said = text(head);
+        if (said && said.length < 60) return said;
+        prev = prev.previousElementSibling;
+      }
+      node = node.parentElement;
+    }
+    return "";
+  };
+  const contextOf = (el: HTMLElement): string =>
+    [
+      el.getAttribute("placeholder") ? `placeholder: ${el.getAttribute("placeholder")}` : "",
+      el.getAttribute("name") ? `name: ${el.getAttribute("name")}` : "",
+      headingAbove(el) ? `under: ${headingAbove(el)}` : "",
+      (el as HTMLInputElement).readOnly ? "read-only" : "",
+    ]
+      .filter(Boolean)
+      .join("; ")
+      .slice(0, 300);
+
   const fields: GenericField[] = [];
   const seen = new Set<string>();
   for (const el of document.querySelectorAll<HTMLElement>(
@@ -258,7 +291,14 @@ export function readGenericPage(): GenericPage {
     // A help chat's own inputs (Oracle's chatbot takes files): not the application.
     if (el.closest("[class*='chat' i], [id*='chat' i]")) continue;
     if (/one-time-code/i.test(el.getAttribute("autocomplete") ?? "")) continue;
-    if (input.disabled || input.readOnly) continue;
+    if (input.disabled) continue;
+    // Read-only, except a date picker's box (Keka's "Date of Joining"): set through its picker.
+    const datePicker =
+      input.readOnly &&
+      /date|calendar/i.test(
+        `${input.className} ${input.parentElement?.className ?? ""}`,
+      );
+    if (input.readOnly && !datePicker) continue;
     // A dropdown's stand-in for the browser's "required" check (react-select), and captcha tokens.
     if (el.getAttribute("aria-hidden") === "true" && input.type !== "file")
       continue;
@@ -292,7 +332,8 @@ export function readGenericPage(): GenericPage {
     } else if (input.type === "checkbox") {
       kind = "checkbox";
       options = members.length > 1 ? members.map(optionLabel) : [];
-    } else if (input.type === "date" || input.type === "month") kind = "date";
+    } else if (input.type === "date" || input.type === "month" || datePicker)
+      kind = "date";
     else if (tag !== "input") kind = "dropdown";
     else if (
       el.getAttribute("role") === "combobox" ||
@@ -317,6 +358,7 @@ export function readGenericPage(): GenericPage {
       options: options.map((o) => o.slice(0, 300)).slice(0, 500),
       ...(block ? { block } : {}),
       ...(value ? { value } : {}),
+      ...(contextOf(el) ? { context: contextOf(el) } : {}),
     });
   }
   const heading = [...document.querySelectorAll("h1, h2")]
@@ -329,6 +371,22 @@ export function readGenericPage(): GenericPage {
     step: `${location.pathname.slice(0, 76)}${heading ? ` · ${heading.slice(0, 120)}` : ""}`,
     fields,
     sections: [],
+    addable: [
+      ...new Set(
+        [...document.querySelectorAll<HTMLElement>("a, button, [role=button]")]
+          .filter((b) => b.offsetParent !== null || b.getClientRects().length > 0)
+          .map((b) =>
+            /^add (?:more |another |new )?(.{3,60})$/i
+              .exec(text(b).replace(/^[^a-z]+/i, ""))?.[1]
+              ?.replace(/[()]/g, "")
+              .trim(),
+          )
+          .filter(
+            (name): name is string =>
+              !!name && /experience|employment|work history|education|academic/i.test(name),
+          ),
+      ),
+    ].slice(0, 10),
   };
 }
 
@@ -386,6 +444,12 @@ function domKind(el: Element): DomKind {
   if (input.type === "radio") return "radio";
   if (input.type === "checkbox") return "checkbox";
   if (input.type === "date" || input.type === "month") return "date";
+  // A read-only box a date picker writes into (Keka's "Date of Joining").
+  if (
+    input.readOnly &&
+    /date|calendar/i.test(`${input.className} ${input.parentElement?.className ?? ""}`)
+  )
+    return "date";
   if (
     el.getAttribute("role") === "combobox" ||
     /^(list|both)$/.test(el.getAttribute("aria-autocomplete") ?? "") ||
@@ -685,10 +749,12 @@ export class GenericDriver extends TrustedDriver {
           (name, lastRef) => {
             for (const el of document.querySelectorAll("[data-ac-add]"))
               el.removeAttribute("data-ac-add");
+            // "+ Add Experience Details": the leading "+" (or an icon's text) isn't the word.
             const labelOf = (el: HTMLElement) =>
               (el.textContent || (el as HTMLInputElement).value || "")
                 .replace(/\s+/g, " ")
                 .trim()
+                .replace(/^[^a-z]+/i, "")
                 .toLowerCase();
             const adds = (root: ParentNode) =>
               [
@@ -779,7 +845,7 @@ export class GenericDriver extends TrustedDriver {
       case "checkbox":
         return this.choose(entry.ref, wanted);
       case "date":
-        return { ok: false, reason: "A date picker" };
+        return this.datePicker(entry.ref, first);
       case "combobox":
         return this.combobox(entry, wanted);
       case "custom":
@@ -787,6 +853,18 @@ export class GenericDriver extends TrustedDriver {
       default: {
         const input = await this.frame.$(entry.ref);
         if (!input) return { ok: false, reason: "Field not found on the page" };
+        // Several answers into a box that collects tags (Keka's "Add new skill", or one
+        // Claude's page map calls tags): one by one.
+        if (
+          wanted.join(", ").includes(",") &&
+          (entry.widget === "tags" || (await this.isTagInput(entry.ref)))
+        )
+          return this.addTags(entry.ref, wanted.join(", "));
+        // Claude's page map says it's a date picker: tried as one first.
+        if (entry.widget === "date") {
+          const picked = await this.datePicker(entry.ref, first);
+          if (picked.ok) return picked;
+        }
         const phone = await input.evaluate(
           (el) => (el as HTMLInputElement).type === "tel",
         );
@@ -826,6 +904,113 @@ export class GenericDriver extends TrustedDriver {
         }),
       READ_MS,
     ).catch(() => null);
+  }
+
+  /**
+   * A date field: the browser's own date input set directly, or a jQuery UI date picker set
+   * through the picker (its box is read-only). Anything else, or no date: a date picker for
+   * saved steps or Claude.
+   */
+  private async datePicker(ref: string, wanted: string): Promise<FillOutcome> {
+    // "2025-09-01", or a job's month as planned ("09/2025": its first day).
+    const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(wanted.trim());
+    const month = /^(\d{1,2})\/(\d{4})$/.exec(wanted.trim());
+    const date = iso ?? (month ? [wanted, month[2], month[1], "1"] : null);
+    if (!date) return { ok: false, reason: "A date picker" };
+    const shown = await within(
+      () =>
+        this.frame.evaluate(
+          (ref, y, m, d) => {
+            const el = document.querySelector<HTMLInputElement>(ref);
+            if (!el) return "";
+            if (el.type === "date") {
+              const set = Object.getOwnPropertyDescriptor(
+                HTMLInputElement.prototype,
+                "value",
+              )?.set;
+              set?.call(el, `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+              return el.value;
+            }
+            const jq = (window as unknown as { jQuery?: (e: Element) => {
+              datepicker?: (...args: unknown[]) => unknown;
+              trigger: (event: string) => unknown;
+            } }).jQuery;
+            const picker = jq?.(el);
+            if (!picker?.datepicker || !el.classList.contains("hasDatepicker")) return "";
+            picker.datepicker("setDate", new Date(y, m - 1, d));
+            picker.trigger("change");
+            return el.value;
+          },
+          ref,
+          Number(date[1]),
+          Number(date[2]),
+          Number(date[3]),
+        ),
+      READ_MS,
+    ).catch(() => "");
+    return shown
+      ? { ok: true, result: `set to "${shown}" through its date picker` }
+      : { ok: false, reason: "A date picker" };
+  }
+
+  /** A box that turns what you type into tags: "Add …" with tags (or their hidden inputs) beside it. */
+  private isTagInput(ref: string): Promise<boolean> {
+    return within(
+      () =>
+        this.frame.$eval(ref, (el) => {
+          const input = el as HTMLInputElement;
+          const box =
+            el.closest(".form-group, [class*='field' i], [class*='tag' i]") ??
+            el.parentElement?.parentElement ??
+            null;
+          const tags =
+            box?.querySelector(
+              "input[type=hidden][name*='['], [class*='chip' i], [class*='token' i], [class*='tag-item' i]",
+            ) !== null && box !== null;
+          return (
+            input.type !== "email" &&
+            (tags || /^(add|enter|type)\b.*\b(skill|tag|keyword)/i.test(input.placeholder))
+          );
+        }),
+      READ_MS,
+    ).catch(() => false);
+  }
+
+  /** Each item typed and confirmed with Enter; ones already there are left alone. */
+  private async addTags(ref: string, value: string): Promise<FillOutcome> {
+    const items = value.split(/\s*,\s*/).filter(Boolean);
+    const box = await this.frame.$(ref);
+    if (!box) return { ok: false, reason: "Field not found on the page" };
+    let added = 0;
+    for (const item of items) {
+      const there = await within(
+        () =>
+          this.frame.$eval(
+            ref,
+            (el, item) => {
+              const around =
+                el.closest(".form-group, [class*='field' i], [class*='tag' i]") ??
+                el.parentElement?.parentElement;
+              return (around?.textContent ?? "").toLowerCase().includes(item.toLowerCase());
+            },
+            item,
+          ),
+        READ_MS,
+      ).catch(() => false);
+      if (there) continue;
+      await box.click().catch(() => undefined);
+      await this.clearSearch(ref);
+      await this.page.keyboard.sendCharacter(item.slice(0, 80));
+      await this.page.keyboard.press("Enter");
+      await sleep(250);
+      added++;
+    }
+    const left = (await this.readBackRef(ref)).trim();
+    return left
+      ? { ok: false, reason: `"${left}" stayed in the box: its tags didn't take Enter` }
+      : { ok: true, result: `added ${added} tag(s), one at a time` };
   }
 
   /** A native select: the best-matching option, by its own value. */

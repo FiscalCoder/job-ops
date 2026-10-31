@@ -18,6 +18,7 @@ import { createBlockedSkipsRepo } from "../store/blocked-skips-repo.js";
 import { createCompanyLimitsRepo } from "../store/company-limits-repo.js";
 import { createSiteRecipesRepo } from "../store/site-recipes-repo.js";
 import { createNavigator } from "../claude/navigate.js";
+import { createPageMapper } from "../claude/page-map.js";
 import { createOperator } from "../claude/operate.js";
 import { savedAnswersForPrompt } from "../claude/questions.js";
 import { createNavigateRoutes } from "./navigate-routes.js";
@@ -166,9 +167,14 @@ export function createApp({
     claude && access
       ? createNavigator({ messages: access.messages, model: claude.draftModel })
       : null;
+  const pageMapper =
+    claude && access
+      ? createPageMapper({ messages: access.messages, model: claude.mapModel })
+      : null;
   const learned = createLearnedAnswersRepo(db);
   const limits = createCompanyLimitsRepo(db);
   const plans = createPlans({
+    pageMapper,
     jobOps,
     targets,
     schemas,

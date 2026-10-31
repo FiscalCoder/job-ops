@@ -24,6 +24,8 @@ export interface PlanEntry {
   readonly alternatives?: readonly string[];
   /** The page's heading for the group it sits in ("Professional Experience (2)"). */
   readonly group?: string;
+  /** What kind of input it really is, from Claude's page map (tags, a date picker…). */
+  readonly widget?: "tags" | "date" | "search" | "captcha";
 }
 
 export type StepState =
