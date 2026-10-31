@@ -335,8 +335,9 @@ export async function showKit(
 const CONFIRM_MS = 4_000;
 
 /**
- * "I applied" and "Skip job": update Job Ops after applying (or deciding not to) by hand.
- * Each needs a second click to confirm, so a stray click changes nothing.
+ * "I applied", "Skip job" and "Expired": update Job Ops after applying (or deciding not to, or
+ * finding the posting closed) by hand. Each needs a second click to confirm, so a stray click
+ * changes nothing.
  */
 function outcomeButtons(
   client: ApplyClient,
@@ -348,13 +349,21 @@ function outcomeButtons(
   const labels = {
     applied: ["I applied ✓", "Confirm applied"],
     skipped: ["Skip job", "Confirm skip"],
+    expired: ["Expired", "Confirm expired"],
   } as const;
   const done = {
     applied: "Marked Applied in Job Ops.",
     skipped: "Skipped in Job Ops.",
+    expired: "Marked expired in Job Ops.",
   } as const;
+  type Outcome = keyof typeof labels;
+  // Closed postings use the same "expired" Job Ops gets from autopilot's "Mark expired".
+  const record = (outcome: Outcome) =>
+    outcome === "expired"
+      ? client.expireJob(jobId, "You marked it expired from the apply kit")
+      : client.kitOutcome(jobId, outcome);
   const buttons: HTMLButtonElement[] = [];
-  const make = (outcome: "applied" | "skipped") => {
+  const make = (outcome: Outcome) => {
     let armed: ReturnType<typeof setTimeout> | null = null;
     const b = button(
       labels[outcome][0],
@@ -371,7 +380,7 @@ function outcomeButtons(
         armed = null;
         for (const each of buttons) each.disabled = true;
         try {
-          await client.kitOutcome(jobId, outcome);
+          await record(outcome);
           say(done[outcome], "ok");
           b.textContent = labels[outcome][0];
           onDone(done[outcome]);
@@ -394,7 +403,7 @@ function outcomeButtons(
       { class: "muted" },
       "Done with this job? Click twice to confirm.",
     ),
-    el("div", { class: "controls" }, make("applied"), make("skipped")),
+    el("div", { class: "controls" }, make("applied"), make("skipped"), make("expired")),
   );
 }
 

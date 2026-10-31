@@ -58,7 +58,11 @@ const jobOps = {
       tailoredSummary: "Platform engineer who ships.",
     };
   },
-  updateJob: async () => {},
+  updateJob: async (_t, _id, patch) => {
+    if (patch?.status !== "expired") return;
+    jobOpsCalls.push("expire");
+    jobStatus = "expired";
+  },
   addNote: async () => {},
   getPdf: async () => new Uint8Array(PDF),
   markApplied: async () => {
@@ -605,6 +609,26 @@ try {
           type: "email",
         },
       );
+    },
+  );
+
+  await check(
+    "Expired needs a second click, then marks the closed posting expired",
+    async () => {
+      jobStatus = "ready";
+      jobOpsCalls.length = 0;
+      await panel.bringToFront();
+      await panel.getByRole("button", { name: "Refresh" }).click();
+      await panel.getByRole("button", { name: "Apply kit" }).first().click();
+      const expired = panel.getByRole("button", { name: "Expired" });
+      await expired.scrollIntoViewIfNeeded();
+      await expired.click();
+      await panel.getByRole("button", { name: "Confirm expired" }).click();
+      await panel
+        .locator("#notice", { hasText: "Marked expired in Job Ops." })
+        .waitFor({ timeout: 10_000 });
+      await panel.getByText("No Ready jobs in Job Ops.").waitFor();
+      assert.deepEqual(jobOpsCalls, ["expire"]);
     },
   );
 
