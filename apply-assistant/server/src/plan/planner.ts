@@ -4,6 +4,7 @@ import type { LearnedAnswer } from "../store/learned-answers-repo.js";
 import { formatBankValue } from "./bank-format.js";
 import { type ActionClass, classifyField, type FieldRule } from "./classify.js";
 import { countryOf } from "./country.js";
+import { EMPLOYER_ADDRESSES_KEY, employerAddress } from "./employer-address.js";
 import type { FieldType, FormField, FormSchema } from "./gh-schema.js";
 import { findDeclineOption, pickOption, pickOptions } from "./options.js";
 import type { DegreeLevel, ResumeFacts, YearMonth } from "./resume-facts.js";
@@ -21,6 +22,8 @@ export interface PlanEntry {
   readonly ref: string;
   readonly label: string;
   readonly section: FormField["section"];
+  /** The page's heading for the group it sits in ("Professional Experience (2)"). */
+  readonly group?: string;
   readonly type: FieldType;
   readonly required: boolean;
   readonly actionClass: ActionClass;
@@ -32,6 +35,8 @@ export interface PlanEntry {
   readonly source: string;
   readonly reason?: string;
   readonly bankKey?: string;
+  /** A searched list without your answer: what else to search for, in order ("Other"). */
+  readonly alternatives?: readonly string[];
 }
 
 export interface PlanSummary {
@@ -283,19 +288,111 @@ function resolveEducation(
           : top.degree
         : top.area;
   return value
-    ? { value, source: `resume:education.${part}` }
+    ? {
+        value,
+        source: `resume:education.${part}`,
+        alternatives: educationFallbacks(part, value),
+      }
     : missing("resume:education", `No ${part} on your resume`);
+}
+
+/**
+ * What to search for when a school or discipline list doesn't have yours (Greenhouse's fixed
+ * lists): a discipline's shorter wording ("Information System Management" finds "Information
+ * Systems"), then "Other", as you'd pick yourself.
+ */
+export function educationFallbacks(
+  part: string,
+  value: string,
+): readonly string[] {
+  if (part === "school") return ["Other"];
+  if (part !== "discipline" && part !== "fieldOfStudy") return [];
+  const words = value.split(/\s+/).filter(Boolean);
+  const shorter = [];
+  for (let n = words.length - 1; n >= 2; n--)
+    shorter.push(words.slice(0, n).join(" "));
+  return [...shorter, "Other"];
 }
 
 /** A resume month as Workday types it: "09/2025" (null when the month isn't known). */
 const monthYear = (point: YearMonth | null) =>
   point?.month ? `${String(point.month).padStart(2, "0")}/${point.year}` : null;
 
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+/** A resume month as a dropdown may list it: "December", "Dec", "12". */
+function monthAnswer(point: YearMonth | null, source: string): Resolved | null {
+  const name = point?.month ? MONTHS[point.month - 1] : undefined;
+  if (!point?.month || !name) return null;
+  return {
+    value: name,
+    alternatives: [
+      name.slice(0, 3),
+      String(point.month).padStart(2, "0"),
+      String(point.month),
+    ],
+    source,
+  };
+}
+
+/**
+ * One part of a split date (iCIMS: month and day dropdowns, a year box). Resumes have no day,
+ * so the 1st stands in for it.
+ */
+function datePart(
+  point: YearMonth | null,
+  part: string,
+  source: string,
+): Resolved | null {
+  if (!point) return null;
+  if (part.endsWith("Month")) return monthAnswer(point, source);
+  if (part.endsWith("Day")) return point.month ? { value: "1", source } : null;
+  if (part.endsWith("Year")) return { value: String(point.year), source };
+  return null;
+}
+
+/** Where the job was: your saved address for that employer, else the city on your resume. */
+function employerPlace(
+  part: string,
+  job: ResumeFacts["experience"][number],
+  bank: PlanInput["bank"],
+): string | null {
+  const saved = employerAddress(bank.get(EMPLOYER_ADDRESSES_KEY), job.company);
+  switch (part) {
+    case "employerAddress":
+      return saved?.street || null;
+    case "employerCity":
+      return saved?.city || job.location || null;
+    case "employerZip":
+      return saved?.postalCode || null;
+    case "employerState":
+      return saved?.state || null;
+    case "employerCountry":
+      return saved?.country || null;
+    default:
+      return null;
+  }
+}
+
 /** One part of the n-th job / degree on your resume; "skip" when it doesn't apply. */
 function resolveHistory(
   rule: Extract<FieldRule, { kind: "history" }>,
   field: FormField,
   resume: ResumeFacts,
+  bank: PlanInput["bank"],
 ): Resolved | "skip" {
   const source = `resume:${rule.section}.${rule.index}.${rule.part}`;
   const answer = (value: string | null | undefined): Resolved | "skip" =>
@@ -308,6 +405,19 @@ function resolveHistory(
     const job = resume.experience[rule.index];
     // More entries on the page than jobs on your resume: those are yours.
     if (!job) return "skip";
+    if (/^start(Month|Day|Year)$/.test(rule.part))
+      return datePart(job.start, rule.part, source) ?? answer(null);
+    if (/^end(Month|Day|Year)$/.test(rule.part))
+      return job.current
+        ? "skip"
+        : (datePart(job.end, rule.part, source) ?? answer(null));
+    if (rule.part.startsWith("employer")) {
+      const place = employerPlace(rule.part, job, bank);
+      // Not saved for this employer: left empty, never your own address.
+      return place
+        ? { value: place, source: `${source} (${EMPLOYER_ADDRESSES_KEY})` }
+        : "skip";
+    }
     switch (rule.part) {
       case "jobTitle":
         return answer(job.title);
@@ -335,7 +445,13 @@ function resolveHistory(
     // A search on some sites ("school"), a text box on others (Walmart's "schoolName").
     case "school":
     case "schoolName":
-      return answer(degree.school);
+      return degree.school
+        ? {
+            value: degree.school,
+            source,
+            alternatives: educationFallbacks("school", degree.school),
+          }
+        : answer(null);
     case "degree":
       return degree.level
         ? {
@@ -345,7 +461,17 @@ function resolveHistory(
           }
         : answer(degree.degree);
     case "fieldOfStudy":
-      return answer(degree.area);
+      return degree.area
+        ? {
+            value: degree.area,
+            source,
+            alternatives: educationFallbacks("fieldOfStudy", degree.area),
+          }
+        : answer(null);
+    case "graduated":
+      return degree.endYear && degree.endYear > new Date().getFullYear()
+        ? { value: "No", source }
+        : { value: "Yes", source };
     case "firstYearAttended":
       return answer(degree.startYear ? String(degree.startYear) : null);
     case "lastYearAttended":
@@ -446,7 +572,7 @@ function resolveRule(
     case "fixed":
       return { value: rule.value, source: "rule:fixed" };
     case "history":
-      return resolveHistory(rule, field, input.resume);
+      return resolveHistory(rule, field, input.resume, input.bank);
     case "skills":
       return resolveSkills(input.resume);
     case "located-in":
@@ -546,6 +672,7 @@ interface Typed {
   readonly value: PlanEntry["value"];
   readonly optionValues: PlanEntry["optionValues"];
   readonly reason?: string;
+  readonly alternatives?: readonly string[];
 }
 
 /** Fits a resolved value to the field type (option matching for selects). */
@@ -574,8 +701,16 @@ function fitToField(field: FormField, resolved: Resolved): Typed {
         optionValues: [resolved.option.value],
       };
     const text = Array.isArray(value) ? (value[0] ?? "") : (value as string);
+    // Choices found by searching on the page: what to search for when yours isn't listed.
     if (field.options.length === 0)
-      return { status: "fill", value: text, optionValues: null };
+      return {
+        status: "fill",
+        value: text,
+        optionValues: null,
+        ...(resolved.alternatives?.length
+          ? { alternatives: resolved.alternatives }
+          : {}),
+      };
     const option = [text, ...(resolved.alternatives ?? [])]
       .map((candidate) => pickOption(field.options, candidate))
       .find((found) => found !== null);
@@ -632,6 +767,7 @@ function planField(
     ref: field.ref,
     label: field.label,
     section: field.section,
+    ...(field.group ? { group: field.group } : {}),
     type: field.type,
     required: field.required,
     actionClass,
@@ -644,7 +780,11 @@ function planField(
       value: null,
       optionValues: null,
       source: rule.kind,
-      reason: rule.kind === "hidden" ? "Filled by the page" : "Optional",
+      reason:
+        rule.kind === "hidden" ||
+        (rule.kind === "history" && rule.part === "kept")
+          ? "Filled by the page"
+          : "Optional",
     };
 
   const typed = fitToField(field, resolved);
@@ -665,6 +805,7 @@ function planField(
     source: resolved.source,
     ...(typed.reason ? { reason: typed.reason } : {}),
     ...(resolved.bankKey ? { bankKey: resolved.bankKey } : {}),
+    ...(typed.alternatives ? { alternatives: typed.alternatives } : {}),
   };
 }
 

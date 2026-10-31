@@ -1,15 +1,23 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { readGenericPage, shownValue } from "../src/fill/generic-driver";
+import {
+  focusSearchBox,
+  PLACEHOLDER,
+  readGenericPage,
+  shownValue,
+} from "../src/fill/generic-driver";
 import { labelKey } from "../src/fill/site-help";
 import { isSupportedPosting, pagedFill } from "../src/track/job-match";
 
 /** Any company's own application page, read generically. */
 
-if (!globalThis.CSS?.escape)
-  vi.stubGlobal("CSS", {
-    escape: (s: string) => s.replace(/["\\#.:]/g, "\\$&"),
-  });
+// As the browser's: other characters escaped, and a leading digit as a code point (iCIMS ids).
+vi.stubGlobal("CSS", {
+  escape: (s: string) =>
+    s
+      .replace(/[^\w-]/g, "\\$&")
+      .replace(/^(-?)(\d)/, (_, dash: string, d: string) => `${dash}\\3${d} `),
+});
 
 // jsdom has no layout: everything with a box counts as visible here.
 Object.defineProperty(HTMLElement.prototype, "offsetParent", {
@@ -122,6 +130,73 @@ describe("react-select dropdowns", () => {
       <div class="rbt-token">Hybrid<button type="button">×</button></div>
       <div><input id="wm" aria-autocomplete="list"><input aria-hidden="true" class="rbt-input-hint" readonly></div></div></div></div>`;
     expect(shownValue("#wm")).toBe("Remote, Hybrid");
+  });
+});
+
+/**
+ * iCIMS (Atlassian): one fieldset per job, already filled from the uploaded resume; dropdowns are
+ * a link standing in for a hidden select, with a search box that lists choices as you type.
+ */
+const ICIMS_JOB = (id: string, n: number, employer: string, state: string) => `
+<fieldset class="iCIMS_CollectionGroup"><legend><span id="rcf3211_${id}_label">Professional Experience (${n})<span class="Field_Required"><span>* </span><span class="sr-only">required.</span></span></span></legend>
+  <div data-collection="rcf3211" data-index="${n}"><label for="${id}_PersonProfileFields.rcf3212">Employer</label>
+    <input type="text" id="${id}_PersonProfileFields.rcf3212" value="${employer}" aria-required="true"></div>
+  <div data-collection="rcf3211" data-index="${n}"><label id="label_${id}_PersonProfileFields.rcf3217" for="${id}_PersonProfileFields.rcf3217">State</label>
+    <select id="${id}_PersonProfileFields.rcf3217" hidden><option selected=""></option></select>
+    <a id="${id}_PersonProfileFields.rcf3217_icimsDropdown" role="combobox" aria-labelledby="label_${id}_PersonProfileFields.rcf3217" tabindex="0"><span class="dropdown-text">${state}</span></a>
+    <div id="${id}_PersonProfileFields.rcf3217_icimsDropdown_ctnr" class="dropdown-container">
+      <input type="text" class="dropdown-search" placeholder="— Type to Search —" role="combobox" hidden>
+      <ul role="listbox"></ul></div></div>
+  <div data-collection="rcf3211" data-index="${n}"><label for="${id}_PersonProfileFields.rcf3214_Month">Start Date Month</label>
+    <select id="${id}_PersonProfileFields.rcf3214_Month"><option value="0"></option><option value="01">Jan</option><option value="12" selected>Dec</option></select></div>
+</fieldset>`;
+
+describe("iCIMS work history", () => {
+  it("each field knows its job's block and what it shows; prompts and blank choices aren't values", () => {
+    document.body.innerHTML = `<form>${ICIMS_JOB("34393095", 2, "Hueint", "— Make a Selection —")}${ICIMS_JOB("-4", 3, "", "Karnataka")}</form>`;
+    const fields = readGenericPage().fields;
+    expect(
+      fields.map((f) => [f.label, f.kind, f.block?.heading, f.value ?? ""]),
+    ).toEqual([
+      ["Employer", "text", "Professional Experience (2)", "Hueint"],
+      ["State", "dropdown", "Professional Experience (2)", ""],
+      ["Start Date Month", "dropdown", "Professional Experience (2)", "Dec"],
+      ["Employer", "text", "Professional Experience (3)", ""],
+      ["State", "dropdown", "Professional Experience (3)", "Karnataka"],
+      ["Start Date Month", "dropdown", "Professional Experience (3)", "Dec"],
+    ]);
+    expect(new Set(fields.map((f) => f.block?.id)).size).toBe(2);
+    expect(fields[2]?.options).toEqual(["Jan", "Dec"]);
+    // The read-back of an untouched dropdown shows nothing picked, not its prompt.
+    expect(shownValue(fields[1]?.ref ?? "")).toBe("");
+    expect(shownValue(fields[4]?.ref ?? "")).toBe("Karnataka");
+  });
+
+  it("an opened dropdown's own search box is found and focused, never another field", () => {
+    document.body.innerHTML = `<form>${ICIMS_JOB("34393095", 2, "Hueint", "")}</form>`;
+    const search = document.querySelector<HTMLInputElement>(".dropdown-search");
+    const ref = readGenericPage().fields[1]?.ref ?? "";
+    // Closed: hidden, so nothing to type into.
+    expect(focusSearchBox(ref)).toBe(false);
+    // Opened (jsdom has no layout: a shown box gets a rect).
+    search?.removeAttribute("hidden");
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return (this.hidden ? [] : [{}]) as unknown as DOMRectList;
+    });
+    expect(focusSearchBox(ref)).toBe(true);
+    expect(document.activeElement).toBe(search);
+    vi.restoreAllMocks();
+  });
+});
+
+describe("dropdown prompts", () => {
+  it("are never choices", () => {
+    for (const prompt of ["— Make a Selection —", "Select…", "Please select", "-- Choose one --", "No states available"])
+      expect(PLACEHOLDER.test(prompt), prompt).toBe(true);
+    for (const choice of ["Tamil Nadu", "Selection Committee", "Other"])
+      expect(PLACEHOLDER.test(choice), choice).toBe(false);
   });
 });
 

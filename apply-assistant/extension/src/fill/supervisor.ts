@@ -20,6 +20,10 @@ export interface PlanEntry {
   readonly optionValues: readonly string[] | null;
   readonly source: string;
   readonly reason?: string;
+  /** A searched list without your answer: what else to search for, in order ("Other"). */
+  readonly alternatives?: readonly string[];
+  /** The page's heading for the group it sits in ("Professional Experience (2)"). */
+  readonly group?: string;
 }
 
 export type StepState =
@@ -127,6 +131,34 @@ export function startRun(
     autoApproved: false,
     phase: steps.length ? "filling" : "review",
   };
+}
+
+/** The field you chose to fill from: its ref, else its label and which of that label it is. */
+export interface FillFrom {
+  readonly ref: string;
+  readonly label: string;
+  /** 0 for the first field with this label, 1 for the second ("Employer" in each job). */
+  readonly nth: number;
+}
+
+/**
+ * "Fill from here": the entries from that field on, in the order a run fills them. Found by its
+ * ref, else by its label (a page read again may mark fields afresh); not found, all of them.
+ */
+export function startingFrom(
+  entries: readonly PlanEntry[],
+  from: FillFrom,
+  resumeFirst: boolean,
+): PlanEntry[] {
+  const ordered = startRun(entries, { countdownSeconds: 0, resumeFirst }).steps.map(
+    (s) => s.entry,
+  );
+  let index = ordered.findIndex((e) => e.ref === from.ref);
+  if (index < 0) {
+    const same = ordered.flatMap((e, i) => (e.label === from.label ? [i] : []));
+    index = same[from.nth] ?? same[0] ?? -1;
+  }
+  return index < 0 ? ordered : ordered.slice(index);
 }
 
 const current = (state: RunState): Step | undefined =>

@@ -39,6 +39,8 @@ export interface FormField {
   readonly required: boolean;
   readonly options: readonly FieldOption[];
   readonly section: FieldSection;
+  /** The page's own heading for the group it sits in ("Professional Experience (2)"). */
+  readonly group?: string;
 }
 
 export interface FormSchema {

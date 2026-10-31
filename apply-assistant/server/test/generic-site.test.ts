@@ -64,7 +64,7 @@ const bank = new Map([
 describe("a company's own page, planned from its labels", () => {
   it("names, email, phone, resume, city and consent from what you've saved; gender declines", () => {
     const plan = buildPlan({
-      schema: parseGenericPage(careersPage, "Senior Engineer"),
+      schema: parseGenericPage(careersPage, "Senior Engineer", resumeFacts(fakeDesignResume)),
       resume: resumeFacts(fakeDesignResume),
       bank,
     });
@@ -102,7 +102,7 @@ describe("a company's own page, planned from its labels", () => {
       ],
     };
     const plan = buildPlan({
-      schema: parseGenericPage(oracle, "Senior Engineer"),
+      schema: parseGenericPage(oracle, "Senior Engineer", resumeFacts(fakeDesignResume)),
       resume: resumeFacts(fakeDesignResume),
       bank,
     });
@@ -124,6 +124,7 @@ describe("a company's own page, planned from its labels", () => {
           ],
         },
         "Senior Engineer",
+        resumeFacts(fakeDesignResume),
       ),
       resume: resumeFacts(fakeDesignResume),
       bank,
@@ -132,6 +133,155 @@ describe("a company's own page, planned from its labels", () => {
     expect(in2("#a")?.source).toBe("jobops:tailored-pdf");
     expect(in2("#b")?.status).toBe("skip");
     expect(in2("#c")?.status).toBe("needs-you");
+  });
+});
+
+/** iCIMS: one fieldset per job, often already filled from the resume you uploaded. */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1));
+
+function jobBlock(id: string, n: number, shown: Partial<Record<string, string>> = {}): Field[] {
+  const block = { id, heading: `Professional Experience (${n})` };
+  const at = (suffix: string, label: string, kind: Field["kind"], options: string[] = []) =>
+    field(`#${id}_${suffix}`, label, kind, {
+      block,
+      options,
+      ...(shown[suffix] ? { value: shown[suffix] } : {}),
+    });
+  return [
+    at("employer", "Employer", "text"),
+    at("address", "Address", "text"),
+    at("city", "City", "text"),
+    at("zip", "Zip", "text"),
+    at("country", "Country", "dropdown"),
+    at("state", "State", "dropdown"),
+    at("title", "Title", "text"),
+    at("startMonth", "Start Date Month", "dropdown", MONTHS),
+    at("startDay", "Start Date Day", "dropdown", DAYS),
+    at("startYear", "Start Date Year", "text"),
+    at("endMonth", "End Date Month", "dropdown", MONTHS),
+    at("endDay", "End Date Day", "dropdown", DAYS),
+    at("endYear", "End Date Year", "text"),
+    at("description", "Description", "textarea"),
+  ];
+}
+
+describe("work history blocks on a company's page (iCIMS)", () => {
+  const icims: WorkdayPage = {
+    system: "generic",
+    step: "/jobs/1/candidate · Engineer",
+    fields: [
+      field("#home-address", "Address", "text"),
+      // The site parsed your resume: the older job is in the first block.
+      ...jobBlock("b1", 1, { employer: "Beta Pvt Ltd", title: "Engineer" }),
+      ...jobBlock("b2", 2, { title: "Senior Engineer", startYear: "2023" }),
+      ...jobBlock("b3", 3),
+    ],
+  };
+  const withAddresses = new Map([
+    ...bank,
+    ["location.address_line1", "12 Home Street"],
+    [
+      "history.employer_addresses",
+      "Beta | 5 Office Park, Baner | Pune | Maharashtra | 411045 | India\nAcme | | Remote | | | ",
+    ],
+  ]);
+  const plan = buildPlan({
+    schema: parseGenericPage(icims, "Engineer", resumeFacts(fakeDesignResume)),
+    resume: resumeFacts(fakeDesignResume),
+    bank: withAddresses,
+  });
+  const of = (ref: string) => plan.entries.find((e) => e.ref === ref);
+
+  it("each block is the job it already shows, filled from that job", () => {
+    expect(of("#b1_employer")).toMatchObject({ status: "fill", value: "Beta" });
+    expect(of("#b1_title")?.value).toBe("Engineer");
+    expect(of("#b1_startMonth")).toMatchObject({ value: "Jan", optionValues: ["Jan"] });
+    expect(of("#b1_startDay")?.value).toBe("1");
+    expect(of("#b1_startYear")?.value).toBe("2020");
+    expect(of("#b1_endMonth")?.value).toBe("Aug");
+    expect(of("#b1_endYear")?.value).toBe("2023");
+    expect(of("#b1_description")?.value).toBe("Shipped things");
+    // Matched by title and start year: Acme, still there, so no end date.
+    expect(of("#b2_employer")?.value).toBe("Acme");
+    expect(of("#b2_endMonth")?.status).toBe("skip");
+    expect(of("#b2_endYear")?.status).toBe("skip");
+  });
+
+  it("the employer's saved address, never yours; nothing saved leaves it empty", () => {
+    expect(of("#b1_address")?.value).toBe("5 Office Park, Baner");
+    expect(of("#b1_city")?.value).toBe("Pune");
+    expect(of("#b1_zip")?.value).toBe("411045");
+    expect(of("#b1_state")?.value).toBe("Maharashtra");
+    expect(of("#b1_country")?.value).toBe("India");
+    expect(of("#b2_address")?.status).toBe("skip");
+    expect(of("#b2_zip")?.status).toBe("skip");
+    // Your own address still goes where the page asks for yours.
+    expect(of("#home-address")?.value).not.toBe("5 Office Park, Baner");
+  });
+
+  it("a block with no job left is left alone", () => {
+    for (const entry of plan.entries.filter((e) => e.ref.startsWith("#b3_")))
+      expect(entry.status, entry.label).toBe("skip");
+  });
+
+  it("a block showing the wrong employer is still the job its title and dates show", () => {
+    // An earlier fill put Acme in both blocks; the second's title and start year are Beta's.
+    const damaged = buildPlan({
+      schema: parseGenericPage(
+        {
+          ...icims,
+          fields: [
+            ...jobBlock("x1", 1, { employer: "Acme", title: "Mr.", startYear: "2026" }),
+            ...jobBlock("x2", 2, { employer: "Acme", title: "Engineer", startYear: "2020" }),
+          ],
+        },
+        "Engineer",
+        resumeFacts(fakeDesignResume),
+      ),
+      resume: resumeFacts(fakeDesignResume),
+      bank,
+    });
+    const at = (ref: string) => damaged.entries.find((e) => e.ref === ref);
+    expect(at("#x1_employer")?.value).toBe("Acme");
+    expect(at("#x1_title")?.value).toBe("Senior Engineer");
+    expect(at("#x1_startYear")?.value).toBe("2023");
+    expect(at("#x2_employer")?.value).toBe("Beta");
+  });
+
+  it("a pick the site made from its searched list is kept; an empty one is filled", () => {
+    const parsed = buildPlan({
+      schema: parseGenericPage(
+        {
+          ...icims,
+          fields: jobBlock("k1", 1, { employer: "Beta", country: "India" }),
+        },
+        "Engineer",
+        resumeFacts(fakeDesignResume),
+      ),
+      resume: resumeFacts(fakeDesignResume),
+      bank: withAddresses,
+    });
+    const at = (ref: string) => parsed.entries.find((e) => e.ref === ref);
+    expect(at("#k1_country")).toMatchObject({
+      status: "skip",
+      reason: "Filled by the page",
+    });
+    expect(at("#k1_state")?.value).toBe("Maharashtra");
+  });
+});
+
+describe("searched lists without your answer", () => {
+  it("try a discipline's shorter wording, then Other; a school, Other", async () => {
+    const { educationFallbacks } = await import("../src/plan/planner.js");
+    expect(educationFallbacks("discipline", "Information System Management")).toEqual([
+      "Information System",
+      "Other",
+    ]);
+    expect(educationFallbacks("school", "Ramakrishna Mission Vivekananda College")).toEqual([
+      "Other",
+    ]);
+    expect(educationFallbacks("degree", "B.Com")).toEqual([]);
   });
 });
 

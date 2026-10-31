@@ -69,12 +69,16 @@ export class AshbyDriver extends TrustedDriver {
             )
           : { ok: false, reason: "Tailored PDF not loaded" };
       const wanted = Array.isArray(value) ? value : [value as string];
-      if (entry.type === "select" || entry.type === "multiselect")
-        return await this.choose(entry.ref, wanted);
+      // A yes/no question: two buttons over a hidden checkbox.
+      if ((await this.buttons(entry.ref)).length)
+        return await this.press(entry.ref, wanted[0] ?? "");
+      // A long list of choices is a type-ahead ("Start typing..."), not radio buttons.
       const combobox = await this.frame.$(
         `${ashbyBox(entry.ref)} input[role=combobox]`,
       );
       if (combobox) return await this.typeAhead(combobox, wanted[0] ?? "");
+      if (entry.type === "select" || entry.type === "multiselect")
+        return await this.choose(entry.ref, wanted);
       const element = await this.frame.$(byId(entry.ref));
       if (!element)
         return {
@@ -88,6 +92,41 @@ export class AshbyDriver extends TrustedDriver {
     } catch (error) {
       return failed(error);
     }
+  }
+
+  /** A yes/no question's buttons ("Yes", "No"), and which one is pressed. */
+  private async buttons(ref: string) {
+    return this.frame.$$eval(
+      `${ashbyBox(ref)} button[aria-pressed]`,
+      (buttons) =>
+        buttons.map((b) => ({
+          label: (b.textContent ?? "").trim(),
+          pressed: b.getAttribute("aria-pressed") === "true",
+        })),
+    );
+  }
+
+  /** Presses the yes/no button worded like your answer, then checks it stayed pressed. */
+  private async press(ref: string, wanted: string): Promise<FillOutcome> {
+    const before = await this.buttons(ref);
+    const index = bestOption(
+      before.map((b) => b.label),
+      wanted,
+    );
+    const target = index === null ? undefined : before[index];
+    if (index === null || !target)
+      return { ok: false, reason: `No choice matching "${wanted}"` };
+    if (!target.pressed) {
+      const handles = await this.frame.$$(
+        `${ashbyBox(ref)} button[aria-pressed]`,
+      );
+      await handles[index]?.click();
+      await sleep(150);
+    }
+    const now = await this.buttons(ref);
+    return now[index]?.pressed
+      ? { ok: true, result: `picked "${target.label}"` }
+      : { ok: false, reason: `"${target.label}" didn't stay selected` };
   }
 
   /** Radio or checkbox options of a question, with their visible labels. */
@@ -197,6 +236,17 @@ export class AshbyDriver extends TrustedDriver {
 
   async readBack(entry: PlanEntry): Promise<string> {
     if (entry.type === "file") return "";
+    const buttons = await this.buttons(entry.ref).catch(() => []);
+    if (buttons.length)
+      return buttons
+        .filter((b) => b.pressed)
+        .map((b) => b.label)
+        .join(", ");
+    const combobox = await this.frame.$(
+      `${ashbyBox(entry.ref)} input[role=combobox]`,
+    );
+    if (combobox)
+      return combobox.evaluate((el) => (el as HTMLInputElement).value ?? "");
     if (entry.type === "select" || entry.type === "multiselect")
       return (await this.options(entry.ref))
         .filter((o) => o.checked)

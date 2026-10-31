@@ -155,6 +155,7 @@ export class GreenhouseDriver extends TrustedDriver {
         return await this.select(
           element,
           String(Array.isArray(value) ? value[0] : value),
+          entry.alternatives,
         );
       return await this.typeText(
         element,
@@ -261,13 +262,30 @@ export class GreenhouseDriver extends TrustedDriver {
     return null;
   }
 
+  /**
+   * Your answer, else the plan's fallbacks in order (a school that isn't on Greenhouse's list:
+   * "Other"), each searched for afresh.
+   */
   private async select(
     element: ElementHandle,
     wanted: string,
+    fallbacks: readonly string[] = [],
   ): Promise<FillOutcome> {
-    const picked = await this.pick(element, wanted);
+    let picked: string | null = null;
+    for (const candidate of [wanted, ...fallbacks]) {
+      picked = await this.pick(element, candidate);
+      if (picked) break;
+      await element.click();
+      await this.page.keyboard.down("Control");
+      await this.page.keyboard.press("a");
+      await this.page.keyboard.up("Control");
+      await this.page.keyboard.press("Backspace");
+    }
     if (!picked)
-      return { ok: false, reason: `No choice matching "${wanted}" appeared` };
+      return {
+        ok: false,
+        reason: `No choice matching "${[wanted, ...fallbacks].join('", "')}" appeared`,
+      };
     await sleep(150);
     const shown = await element.evaluate(
       (el) =>

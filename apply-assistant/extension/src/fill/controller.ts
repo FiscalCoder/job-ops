@@ -11,6 +11,7 @@ import { setSupervised, trackTab } from "../track/tabs";
 import { attachDriver, formUrlFor, resumeFirst } from "./drivers";
 import { decisionEvent, pageCapture, watchPage } from "./run-trace";
 import {
+  type FillFrom,
   maskValue,
   type NextAction,
   nextAction,
@@ -19,6 +20,7 @@ import {
   type RunState,
   reduce,
   type Step,
+  startingFrom,
   startRun,
 } from "./supervisor";
 import {
@@ -236,6 +238,8 @@ export class RunController {
   private reviewTraced = false;
   /** Workday: the wizard step the current steps belong to. */
   private pageStep = "";
+  /** The resume upload goes first (systems that fill fields from it). */
+  private readonly resumeFirst: boolean;
   private readonly stopWatching: () => void;
 
   private constructor(
@@ -253,6 +257,7 @@ export class RunController {
     private readonly page: Page,
   ) {
     this.state = startRun(entries, runOptions);
+    this.resumeFirst = runOptions.resumeFirst;
     this.stopWatching = watchPage(page, trace);
     chrome.tabs.onRemoved.addListener(this.onTabRemoved);
   }
@@ -688,6 +693,56 @@ export class RunController {
       this.nextPage((await wizard.step()) || this.pageStep || "this page"))();
   }
 
+  /**
+   * "Fill from…": start again at the field you chose; the fields before it stay as they are.
+   * Page by page, the page on screen is read and planned afresh first (so what you or the site
+   * changed meanwhile is seen); on a single form, the run's own steps go again from there.
+   */
+  fillFrom(seq: number): void {
+    const step = this.state.steps.find((s) => s.seq === seq);
+    if (!step || this.busy || this.closed || this.tabClosed) return;
+    this.clearTimer();
+    const from: FillFrom = {
+      ref: step.entry.ref,
+      label: step.entry.label,
+      nth: this.state.steps.filter(
+        (s) => s.seq < seq && s.entry.label === step.entry.label,
+      ).length,
+    };
+    this.trace.event(
+      "decision",
+      `You asked to fill from step ${seq} (${step.entry.label})`,
+      { stepSeq: seq, data: { ...from } },
+    );
+    const wizard = this.wizard;
+    if (wizard) {
+      void (async () =>
+        this.nextPage(
+          (await wizard.step()) || this.pageStep || "this page",
+          from,
+        ))();
+      return;
+    }
+    void (async () => {
+      await this.logFinishedSteps();
+      const entries = startingFrom(
+        this.state.steps.map((s) => s.entry),
+        from,
+        this.resumeFirst,
+      );
+      this.state = {
+        ...startRun(entries, {
+          countdownSeconds: this.state.countdownSeconds,
+          resumeFirst: this.resumeFirst,
+          firstSeq: Math.max(0, ...this.state.steps.map((s) => s.seq)) + 1,
+        }),
+        autoApproved: this.state.autoApproved,
+      };
+      this.notice = null;
+      void this.loop();
+    })();
+  }
+
   /** While a step waits for you: you may have filled the rest and moved on, or submitted. */
   private async watchPage(): Promise<void> {
     if (
@@ -702,8 +757,11 @@ export class RunController {
     this.timer = setTimeout(() => void this.watchPage(), REVIEW_POLL_MS);
   }
 
-  /** You clicked Save and Continue (or Back): plan the page now on screen and fill it. */
-  private async nextPage(step: string): Promise<void> {
+  /**
+   * You clicked Save and Continue (or Back): plan the page now on screen and fill it, from the
+   * field you chose when you asked to fill from one.
+   */
+  private async nextPage(step: string, from?: FillFrom): Promise<void> {
     const wizard = this.wizard;
     if (!wizard || this.closed) return;
     this.clearTimer();
@@ -725,12 +783,13 @@ export class RunController {
     });
     try {
       await sleep(PAGE_SETTLE_MS);
-      const entries = await planPagedPage(this.client, this.job.jobId, wizard);
+      const planned = await planPagedPage(this.client, this.job.jobId, wizard);
+      const entries = from ? startingFrom(planned, from, true) : planned;
       this.state = begin(entries);
       this.trace.event(
         "page",
-        `On ${wizard.system === "workday" ? "Workday page" : "page"} "${step}" with ${entries.length} plan entries`,
-        { data: { step, entries: entries.length } },
+        `On ${wizard.system === "workday" ? "Workday page" : "page"} "${step}" with ${entries.length} plan entries${from ? ` (from "${from.label}")` : ""}`,
+        { data: { step, entries: entries.length, ...(from ? { from } : {}) } },
       );
       void this.snapshot(`page: ${step}`);
     } catch (error) {

@@ -31,6 +31,8 @@ export interface BankKeyDef {
   readonly protected: boolean;
   readonly example: string;
   readonly hint?: string;
+  /** Several lines (one per employer): edited in a text area. */
+  readonly multiline?: boolean;
 }
 
 const def = (
@@ -39,7 +41,7 @@ const def = (
   group: string,
   kind: BankKind,
   example: string,
-  options: { protected?: boolean; hint?: string } = {},
+  options: { protected?: boolean; hint?: string; multiline?: boolean } = {},
 ): BankKeyDef => ({
   key,
   label,
@@ -48,6 +50,7 @@ const def = (
   example,
   protected: options.protected ?? false,
   ...(options.hint ? { hint: options.hint } : {}),
+  ...(options.multiline ? { multiline: true } : {}),
 });
 
 export const BANK_KEYS: readonly BankKeyDef[] = [
@@ -172,6 +175,17 @@ export const BANK_KEYS: readonly BankKeyDef[] = [
     "yesno",
     "No",
     { hint: "Usually No; you can change it on a single application." },
+  ),
+  def(
+    "history.employer_addresses",
+    "Your employers' office addresses",
+    "History",
+    "text",
+    "Athenahealth | Global Infocity Park, 40 MGR Road, Perungudi | Chennai | Tamil Nadu | 600096 | India",
+    {
+      hint: "One employer per line: Company | Street | City | State | PIN | Country. Forms that ask where each job was get these, never your own address.",
+      multiline: true,
+    },
   ),
   def(
     "history.restrictive_covenants",

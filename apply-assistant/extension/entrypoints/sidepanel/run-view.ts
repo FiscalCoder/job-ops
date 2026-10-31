@@ -244,6 +244,42 @@ function currentCard(
   );
 }
 
+/**
+ * "Fill from…": every field of this page (or form), grouped under the page's own headings
+ * ("Professional Experience (2)"); picking one fills again from there.
+ */
+function fillFromPicker(
+  steps: readonly Step[],
+  fillFrom: (seq: number) => void,
+): HTMLElement {
+  const picker = el("select", {
+    "aria-label": "Fill from a field",
+    title: "Start filling again from the field you pick; the ones before it stay as they are",
+  }) as HTMLSelectElement;
+  picker.append(el("option", { value: "" }, "Fill from…"));
+  let group: HTMLElement = picker;
+  let heading: string | undefined;
+  for (const step of steps) {
+    if (step.entry.group !== heading) {
+      heading = step.entry.group;
+      group = heading ? el("optgroup", { label: heading }) : picker;
+      if (heading) picker.append(group);
+    }
+    group.append(
+      el(
+        "option",
+        { value: String(step.seq) },
+        `${step.seq}. ${step.entry.label.slice(0, 60)}`,
+      ),
+    );
+  }
+  picker.addEventListener("change", () => {
+    const seq = Number(picker.value);
+    if (seq) fillFrom(seq);
+  });
+  return picker;
+}
+
 export function renderRun(
   box: HTMLElement,
   view: RunView,
@@ -252,6 +288,8 @@ export function renderRun(
   tell?: Tell,
   /** Page by page: read the page on screen again and fill it. */
   refill?: () => void,
+  /** Fill again from the field with this step number. */
+  fillFrom?: (seq: number) => void,
 ): void {
   const { state, action } = view;
   const finished = state.steps.filter((s) => STATE_LABEL[s.state]);
@@ -269,6 +307,9 @@ export function renderRun(
             : button("Pause", () => send({ type: "pause" })),
           view.page && refill && !view.busy
             ? button("Fill this page", refill, true)
+            : null,
+          fillFrom && !view.busy && state.steps.length
+            ? fillFromPicker(state.steps, fillFrom)
             : null,
           button("Abort", () => send({ type: "abort" })),
           // You submitted it yourself, at any point: the run ends and the job is marked applied.

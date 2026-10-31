@@ -460,6 +460,7 @@ function inputFor(def, current) {
     );
   if (def.kind === "list")
     return el("textarea", { ...common, rows: "2" }, current);
+  if (def.multiline) return el("textarea", { ...common, rows: "4" }, current);
   if (def.kind === "date")
     return el("input", { ...common, type: "date", value: current });
   if (def.kind === "days")

@@ -1,5 +1,7 @@
 import type { FieldType, FormField, FormSchema } from "./form-schema.js";
 import { schemaHash } from "./form-schema.js";
+import { historyCanonicals } from "./history-blocks.js";
+import type { ResumeFacts } from "./resume-facts.js";
 import type { WorkdayPage } from "./workday-schema.js";
 
 /**
@@ -63,8 +65,15 @@ function typeOf(field: PageField): FieldType {
   }
 }
 
+/**
+ * Longer than a field name: a question that only mentions one ("If you answered Yes, provide
+ * the Atlassian email you used") goes to your answers and Claude like any other question.
+ */
+const MAX_NAME_LENGTH = 50;
+
 function canonicalOf(field: PageField): string | undefined {
   const label = field.label.replace(/\*$/, "").trim();
+  if (field.kind !== "file" && label.length > MAX_NAME_LENGTH) return undefined;
   return BY_LABEL.find(
     ([pattern, , kinds]) => kinds.includes(field.kind) && pattern.test(label),
   )?.[1];
@@ -85,10 +94,15 @@ function uploadMeanings(fields: readonly PageField[]): (string | undefined)[] {
   });
 }
 
-export function parseGenericPage(page: WorkdayPage, title: string): FormSchema {
+export function parseGenericPage(
+  page: WorkdayPage,
+  title: string,
+  resume: ResumeFacts,
+): FormSchema {
   const meanings = uploadMeanings(page.fields);
+  const history = historyCanonicals(page.fields, resume);
   const fields: FormField[] = page.fields.map((f, i) => {
-    const canonical = meanings[i];
+    const canonical = history.get(f.ref) ?? meanings[i];
     const label = f.label.replace(/\*$/, "").trim();
     return {
       ref: f.ref,
@@ -105,6 +119,7 @@ export function parseGenericPage(page: WorkdayPage, title: string): FormSchema {
         return { label: text, value: text };
       }),
       section: canonical && DEMOGRAPHIC.has(canonical) ? "demographic" : "main",
+      ...(f.block ? { group: f.block.heading } : {}),
     };
   });
   return {

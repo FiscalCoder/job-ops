@@ -38,6 +38,12 @@ export const workdayPageSchema = z.object({
         required: z.boolean(),
         // Country dropdowns list ~250 choices.
         options: z.array(z.string().max(300)).max(500),
+        /** Company pages: the repeated group it sits in ("Professional Experience (2)"). */
+        block: z
+          .object({ id: z.string().max(200), heading: z.string().max(200) })
+          .optional(),
+        /** Company pages: what it shows now (a block filled from your uploaded resume). */
+        value: z.string().max(300).optional(),
       }),
     )
     .max(200),

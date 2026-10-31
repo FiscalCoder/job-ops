@@ -6,6 +6,7 @@ import {
   type RunEvent,
   type RunState,
   reduce,
+  startingFrom,
   startRun,
 } from "../src/fill/supervisor";
 
@@ -261,5 +262,43 @@ describe("maskValue", () => {
     expect(maskValue(["English", "Tamil"])).toBe("E***(14)");
     expect(maskValue("No")).toBe("**");
     expect(maskValue(null)).toBeNull();
+  });
+});
+
+describe("startingFrom (Fill from…)", () => {
+  const page = [
+    entry("resume", { type: "file" }),
+    entry("#a1", { label: "Employer", group: "Professional Experience (1)" }),
+    entry("#a2", { label: "Title", group: "Professional Experience (1)" }),
+    entry("#b1", { label: "Employer", group: "Professional Experience (2)" }),
+    entry("#b2", { label: "Title", group: "Professional Experience (2)" }),
+  ];
+  const refs = (entries: PlanEntry[]) => entries.map((e) => e.ref);
+
+  it("the chosen field and everything after it, in the order a run fills them", () => {
+    expect(refs(startingFrom(page, { ref: "#b1", label: "Employer", nth: 1 }, true))).toEqual([
+      "#b1",
+      "#b2",
+    ]);
+    // The resume goes last on single forms, so it comes after the chosen field.
+    expect(refs(startingFrom(page, { ref: "#a2", label: "Title", nth: 0 }, false))).toEqual([
+      "#a2",
+      "#b1",
+      "#b2",
+      "resume",
+    ]);
+  });
+
+  it("a page read again with new marks: found by its label and which of that label it was", () => {
+    const reread = page.map((e) => ({ ...e, ref: `${e.ref}-new` }));
+    expect(
+      refs(startingFrom(reread, { ref: "#b1", label: "Employer", nth: 1 }, true)),
+    ).toEqual(["#b1-new", "#b2-new"]);
+  });
+
+  it("a field no longer there: the whole page", () => {
+    expect(
+      startingFrom(page, { ref: "#gone", label: "Gone", nth: 0 }, true),
+    ).toHaveLength(5);
   });
 });

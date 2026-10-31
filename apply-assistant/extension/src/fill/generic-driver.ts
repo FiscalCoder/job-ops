@@ -40,7 +40,15 @@ export interface GenericField {
   readonly kind: GenericKind;
   readonly required: boolean;
   readonly options: readonly string[];
+  /** The repeated group it sits in (iCIMS: one fieldset per job, "Professional Experience (2)"). */
+  readonly block?: { readonly id: string; readonly heading: string };
+  /** What it shows now (a block the site filled from your uploaded resume). */
+  readonly value?: string;
 }
+
+/** A dropdown's prompt, not a choice ("— Make a Selection —", "Select…"). */
+export const PLACEHOLDER =
+  /^[\s—–\-.…]*(make a selection|select( one| an option)?|choose( one| an option)?|please (select|choose)( one)?|none selected|type to search|no \w+ available)[\s—–\-.…]*$/i;
 
 /** A search box is cleared key by key; longer text than this isn't a dropdown's. */
 const MAX_CLEAR_CHARS = 120;
@@ -157,6 +165,39 @@ export function readGenericPage(): GenericPage {
     text(input.closest("label")) ||
     input.getAttribute("aria-label") ||
     input.value;
+  // Kept in step with PLACEHOLDER (this runs inside the page, on its own).
+  const PROMPT =
+    /^[\s—–\-.…]*(make a selection|select( one| an option)?|choose( one| an option)?|please (select|choose)( one)?|none selected|type to search|no \w+ available)[\s—–\-.…]*$/i;
+  const fieldsets = [...document.querySelectorAll("fieldset")];
+  /** The fieldset with a heading it sits in: a job or degree on iCIMS. */
+  const blockOf = (el: HTMLElement) => {
+    const box = el.closest("fieldset");
+    const legend = box?.querySelector(":scope > legend");
+    // "Professional Experience (2)* required." → "Professional Experience (2)"
+    const heading = text(legend).replace(/\s*\*.*$/, "").trim();
+    if (!box || !heading) return undefined;
+    return {
+      id: box.id || legend?.id || `fieldset-${fieldsets.indexOf(box)}`,
+      heading: heading.slice(0, 200),
+    };
+  };
+  /** What a field shows now: typed text, the picked option, a dropdown's shown pick. */
+  const valueOf = (el: HTMLElement, tag: string): string => {
+    const input = el as HTMLInputElement;
+    if (input.type === "radio" || input.type === "checkbox") return "";
+    if (input.type === "file") return "";
+    const raw =
+      tag === "select"
+        ? [...(el as unknown as HTMLSelectElement).selectedOptions]
+            .filter((o) => o.value !== "")
+            .map((o) => o.text)
+            .join(", ")
+        : tag === "input" || tag === "textarea"
+          ? input.value
+          : text(el);
+    const value = raw.replace(/\s+/g, " ").trim();
+    return PROMPT.test(value) ? "" : value.slice(0, 300);
+  };
 
   const fields: GenericField[] = [];
   const seen = new Set<string>();
@@ -196,7 +237,8 @@ export function readGenericPage(): GenericPage {
       kind = "dropdown";
       options = [...(el as unknown as HTMLSelectElement).options]
         .filter((o) => o.value !== "" && !o.disabled)
-        .map((o) => o.text.trim());
+        .map((o) => o.text.trim())
+        .filter((o) => o !== "" && !PROMPT.test(o));
     } else if (tag === "textarea") kind = "textarea";
     else if (input.type === "radio") {
       kind = "radio";
@@ -218,6 +260,8 @@ export function readGenericPage(): GenericPage {
       members.some((m) => m.required) ||
       el.getAttribute("aria-required") === "true" ||
       /\*\s*$/.test(label);
+    const block = blockOf(el);
+    const value = valueOf(el, tag);
     fields.push({
       ref,
       key: el.getAttribute("name") || el.id || ref,
@@ -225,6 +269,8 @@ export function readGenericPage(): GenericPage {
       kind,
       required,
       options: options.map((o) => o.slice(0, 300)).slice(0, 500),
+      ...(block ? { block } : {}),
+      ...(value ? { value } : {}),
     });
   }
   const heading = [...document.querySelectorAll("h1, h2")]
@@ -237,6 +283,39 @@ export function readGenericPage(): GenericPage {
     fields,
     sections: [],
   };
+}
+
+/**
+ * After a dropdown opened: the search box it opened, focused (true), or none. Its own box, the
+ * one it points to (aria-owns / aria-controls), or one just beside it. Runs inside the page.
+ */
+export function focusSearchBox(ref: string): boolean {
+  const field = document.querySelector<HTMLElement>(ref);
+  if (!field) return false;
+  // Only a box that says it's a search ("— Type to Search —"), never a neighbouring field.
+  const isSearch = (el: Element | null): el is HTMLInputElement =>
+    el instanceof HTMLInputElement &&
+    el !== field &&
+    /^(text|search)$/.test(el.type) &&
+    el.getClientRects().length > 0 &&
+    (el.getAttribute("role") === "combobox" ||
+      /search|filter/i.test(
+        `${el.type} ${el.className} ${el.placeholder} ${el.getAttribute("aria-label") ?? ""}`,
+      ));
+  if (isSearch(document.activeElement)) return true;
+  const owned = ["aria-owns", "aria-controls"]
+    .map((name) => field.getAttribute(name))
+    .flatMap((ids) => (ids ?? "").split(/\s+/))
+    .map((id) => (id ? document.getElementById(id) : null));
+  const near = [field.nextElementSibling, field.parentElement, ...owned];
+  for (const box of near) {
+    const found = [box, ...(box?.querySelectorAll("input") ?? [])].find(isSearch);
+    if (found) {
+      found.focus();
+      return true;
+    }
+  }
+  return false;
 }
 
 type DomKind =
@@ -295,7 +374,15 @@ export function shownValue(selector: string): string {
   }
   if (input.type === "file")
     return [...(input.files ?? [])].map((f) => f.name).join(", ");
-  if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") return text(el);
+  // A dropdown showing its prompt ("— Make a Selection —") shows nothing picked (as PLACEHOLDER).
+  if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") {
+    const said = text(el);
+    return /^[\s—–\-.…]*(make a selection|select( one| an option)?|choose( one| an option)?|please (select|choose)( one)?|none selected|type to search|no \w+ available)[\s—–\-.…]*$/i.test(
+      said,
+    )
+      ? ""
+      : said;
+  }
   if (input.value) return input.value;
   // A searchable dropdown shows its picks beside the (emptied) input, often a level or two up
   // (react-select: a sibling of the input's own container; a typeahead's tokens). Every pick
@@ -438,7 +525,7 @@ export class GenericDriver extends TrustedDriver {
     const first = wanted[0] ?? "";
     switch (kind) {
       case "select":
-        return this.select(entry.ref, first);
+        return this.select(entry.ref, first, entry.alternatives);
       case "radio":
       case "checkbox":
         return this.choose(entry.ref, wanted);
@@ -464,7 +551,11 @@ export class GenericDriver extends TrustedDriver {
   }
 
   /** A native select: the best-matching option, by its own value. */
-  private async select(ref: string, wanted: string): Promise<FillOutcome> {
+  private async select(
+    ref: string,
+    wanted: string,
+    alternatives: readonly string[] = [],
+  ): Promise<FillOutcome> {
     const handle = await this.frame.$(ref);
     if (!handle) return { ok: false, reason: "Dropdown not found" };
     const options = await handle.evaluate((el) =>
@@ -473,11 +564,11 @@ export class GenericDriver extends TrustedDriver {
         value: o.value,
       })),
     );
-    const index = bestOption(
-      options.map((o) => (o.value === "" ? "" : o.text)),
-      wanted,
-    );
-    const option = index === null ? undefined : options[index];
+    const labels = options.map((o) => (o.value === "" ? "" : o.text));
+    const index = [wanted, ...alternatives]
+      .map((w) => bestOption(labels, w))
+      .find((i): i is number => i !== null);
+    const option = index === undefined ? undefined : options[index];
     if (!option) return { ok: false, reason: `No choice matching "${wanted}"` };
     await handle.select(option.value);
     return this.verify(ref, option.text);
@@ -547,12 +638,15 @@ export class GenericDriver extends TrustedDriver {
     if (selectionMatches(await this.readBackRef(ref), wanted))
       return { ok: true, result: "already set" };
     await input.click().catch(() => undefined);
-    await this.clearSearch(ref);
-    await this.page.keyboard.sendCharacter(wanted.slice(0, 80));
-    const picked = await pickOpenChoice(this.frame, wanted);
-    if (picked) {
-      await sleep(200);
-      return this.verify(ref, picked);
+    // Your answer, then the plan's fallbacks ("Other" when your school isn't listed).
+    for (const candidate of [wanted, ...(entry.alternatives ?? [])]) {
+      await this.clearSearch(ref);
+      await this.page.keyboard.sendCharacter(candidate.slice(0, 80));
+      const picked = await pickOpenChoice(this.frame, candidate);
+      if (picked) {
+        await sleep(200);
+        return this.verify(ref, picked);
+      }
     }
     const chosen = await this.chooseFromList(entry, all);
     if (chosen) return chosen;
@@ -563,7 +657,11 @@ export class GenericDriver extends TrustedDriver {
     return this.verify(ref, wanted);
   }
 
-  /** A dropdown that isn't a select (a div with role=combobox): open it and pick. */
+  /**
+   * A dropdown that isn't a select (a div or link with role=combobox): open it and pick. Some
+   * open a search box of their own and list choices only once you type (iCIMS: a state list
+   * that loads for the country picked): type your answer there, then the plan's fallbacks.
+   */
   private async custom(
     entry: PlanEntry,
     all: readonly string[],
@@ -575,12 +673,35 @@ export class GenericDriver extends TrustedDriver {
     if (selectionMatches(await this.readBackRef(ref), wanted))
       return { ok: true, result: "already set" };
     await handle.click();
-    const picked = await pickOpenChoice(this.frame, wanted);
-    if (picked) return this.verify(ref, picked);
+    await sleep(250);
+    if (await this.frame.evaluate(focusSearchBox, ref).catch(() => false)) {
+      for (const candidate of [wanted, ...(entry.alternatives ?? [])]) {
+        await this.retype(candidate);
+        const found = await pickOpenChoice(this.frame, candidate);
+        if (found) return this.verify(ref, found);
+      }
+      await this.retype("");
+    } else {
+      const picked = await pickOpenChoice(this.frame, wanted);
+      if (picked) return this.verify(ref, picked);
+    }
     const chosen = await this.chooseFromList(entry, all);
     if (chosen) return chosen;
     await this.page.keyboard.press("Escape");
     return { ok: false, reason: `No choice matching "${wanted}"` };
+  }
+
+  /** Replaces what the focused search box holds with this text. */
+  private async retype(text: string): Promise<void> {
+    const length = await this.frame
+      .evaluate(
+        () => (document.activeElement as HTMLInputElement | null)?.value?.length ?? 0,
+      )
+      .catch(() => 0);
+    await this.page.keyboard.press("End");
+    for (let i = 0; i < Math.min(length, MAX_CLEAR_CHARS); i++)
+      await this.page.keyboard.press("Backspace");
+    if (text) await this.page.keyboard.sendCharacter(text.slice(0, 80));
   }
 
   /**
@@ -669,7 +790,12 @@ export class GenericDriver extends TrustedDriver {
       await this.page.keyboard.press("ArrowDown");
       choices = await visibleChoices(this.frame, 1_000);
     }
-    if (!choices.length) return null;
+    // A list's prompt row ("— Make a Selection —") is never a choice.
+    choices = choices.filter((c) => !PLACEHOLDER.test(c));
+    if (!choices.length) {
+      await this.page.keyboard.press("Escape");
+      return null;
+    }
     const shown = await this.readBackRef(ref);
     const ours = wanted
       .map((w) => bestOption(choices, w))

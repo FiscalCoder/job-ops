@@ -493,7 +493,7 @@ export function createPlans(deps: PlansDeps) {
       const { job, resume } = await jobAndResume(token, jobId);
       const generic = page.system === "generic";
       const schema = generic
-        ? parseGenericPage(page, job.title)
+        ? parseGenericPage(page, job.title, resume)
         : parseWorkdayPage(page, job.title);
       const { plan: planned, fromClaude } = await planSchema(
         jobId,

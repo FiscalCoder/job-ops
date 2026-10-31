@@ -146,6 +146,7 @@ async function startFill(
                 : {}),
             }),
           () => activeRun?.refillPage(),
+          (seq) => activeRun?.fillFrom(seq),
         ),
     };
     activeRun =
