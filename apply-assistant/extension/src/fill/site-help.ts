@@ -47,7 +47,41 @@ export interface SiteHelp {
   readonly recipes: ReadonlyMap<string, SiteRecipe>;
   /** How a recipe (or Claude's steps, which become one) did. */
   record(label: string, steps: readonly ActStep[], ok: boolean): Promise<void>;
+  /** Steps that worked on this kind of widget on any site (by widgetKind). */
+  widget?(kind: string): Promise<SiteRecipe | null>;
+  /** How steps did on this kind of widget (only steps with nothing site-specific). */
+  recordWidget?(kind: string, steps: readonly ActStep[], ok: boolean): Promise<void>;
 }
+
+/**
+ * What kind of widget a field is, the same on every site that uses it: its tag, role and the
+ * class names a widget library gives it and its wrapper ("a.combobox.dropdown-select" for
+ * iCIMS's dropdowns). "" when nothing tells it apart from a plain field. Runs inside the page.
+ */
+export function widgetKind(selector: string): string {
+  const el = document.querySelector(selector);
+  if (!el) return "";
+  const PLAIN =
+    /^(form-control|form-group|input|field|control|required|valid|invalid|active|focus|focused|open|hidden|visible|ng-.*|is-.*|has-.*|col-.*|row|w-.*|mb-.*|mt-.*|p-.*|m-.*)$/i;
+  const tokens = [el, el.parentElement]
+    .flatMap((e) => [...(e?.classList ?? [])])
+    .filter((t) => /^[a-z][a-z-]{2,29}$/i.test(t) && !PLAIN.test(t))
+    .map((t) => t.toLowerCase());
+  const unique = [...new Set(tokens)].sort().slice(0, 4);
+  if (!unique.length) return "";
+  const role = el.getAttribute("role") ?? "-";
+  return `${el.tagName}.${role}.${unique.join(".")}`
+    .toLowerCase()
+    .replace(/[^a-z0-9.-]/g, "-")
+    .slice(0, 180);
+}
+
+/** Steps worth trying on another site: no ids or numbered names that only exist on this one. */
+export const portableSteps = (steps: readonly ActStep[]): boolean =>
+  steps.length > 0 &&
+  steps.every(
+    (s) => s.action !== "click" || (!/#|\d/.test(s.value) && s.value.length <= 120),
+  );
 
 /** The field being rescued, as its driver sees it. */
 export interface RescueTarget {
@@ -199,19 +233,36 @@ export async function rescueField(
   failure: string,
 ): Promise<FillOutcome | null> {
   const recipe = help.recipes.get(labelKey(entry.label));
+  let tried = failure;
   if (recipe && recipe.worked > recipe.failed) {
     const ok = await runSteps(target, recipe.steps, wanted);
     await help.record(entry.label, recipe.steps, ok).catch(() => {});
     if (ok) return { ok: true, result: "filled with this site's saved steps" };
+    tried = `${tried}; this site's saved steps (${describeSteps(recipe.steps)}) didn't set it`;
+  }
+  // Steps that worked on the same kind of widget on another site.
+  const kind = help.widget
+    ? await target.frame.evaluate(widgetKind, target.selector).catch(() => "")
+    : "";
+  const shared = kind ? await help.widget?.(kind).catch(() => null) : null;
+  if (shared && shared.worked > shared.failed) {
+    const ok = await runSteps(target, shared.steps, wanted);
+    await help.recordWidget?.(kind, shared.steps, ok).catch(() => {});
+    if (ok) {
+      await help.record(entry.label, shared.steps, true).catch(() => {});
+      return { ok: true, result: "filled with steps that worked on this kind of field on another site" };
+    }
+    tried = `${tried}; steps from this kind of field elsewhere (${describeSteps(shared.steps)}) didn't set it`;
   }
   const html = await target.frame
     .evaluate(fieldHtml, target.selector, MAX_HTML_CHARS)
     .catch(() => "");
   if (!html) return null;
   const steps = await help
-    .act({ label: entry.label, wanted, html, failure })
+    .act({ label: entry.label, wanted, html, failure: tried })
     .catch(() => [] as ActStep[]);
-  if (!steps.length) return null;
+  if (!steps.length)
+    return { ok: false, reason: `${tried}; Claude found no steps from the field's HTML` };
   // Kept without your answer: "{value}" in its place.
   const general = steps.map((s) => ({
     ...s,
@@ -219,9 +270,33 @@ export async function rescueField(
   }));
   const ok = await runSteps(target, general, wanted);
   await help.record(entry.label, general, ok).catch(() => {});
-  return ok
-    ? { ok: true, result: `filled with Claude's steps (${steps.length})` }
-    : { ok: false, reason: `${failure}; Claude's steps didn't set it either` };
+  // Shared with every site using this kind of widget, when nothing in them is this site's own.
+  if (ok && kind && portableSteps(general))
+    await help.recordWidget?.(kind, general, true).catch(() => {});
+  if (ok) return { ok: true, result: `filled with Claude's steps (${steps.length})` };
+  const shown = await target.frame
+    .evaluate(shownText, target.selector)
+    .catch(() => "");
+  // Everything tried, for whoever goes next (Claude on the page, or you): never the same again.
+  return {
+    ok: false,
+    reason: `${tried}; Claude's steps (${describeSteps(general)}) didn't set it either; the field shows "${shown.slice(0, 60)}"`,
+  };
+}
+
+/** Steps as one line for the next attempt to read: click ".x" → type "{value}" → press Enter. */
+export function describeSteps(steps: readonly ActStep[]): string {
+  return steps
+    .map((s) => `${s.action} ${JSON.stringify(s.value.slice(0, 60))}`)
+    .join(" → ")
+    .slice(0, 400);
+}
+
+/** What a field shows (its value or text); runs inside the page. */
+function shownText(selector: string): string {
+  const el = document.querySelector<HTMLInputElement>(selector);
+  if (!el) return "";
+  return (el.value ?? el.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
 /**

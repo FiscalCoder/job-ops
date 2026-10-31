@@ -80,6 +80,8 @@ export type RunEvent =
   | { type: "fill-failed"; reason: string }
   | { type: "pause" }
   | { type: "resume" }
+  /** Fields you changed yourself while paused: kept as yours, not filled over. */
+  | { type: "changed-by-you"; seqs: readonly number[] }
   | { type: "submitted" }
   | { type: "abort" };
 
@@ -201,6 +203,51 @@ const advance = (state: RunState): RunState => {
   };
 };
 
+/** Steps not filled yet that you may fill yourself meanwhile (never one being filled now). */
+const OPEN_STATES: ReadonlySet<StepState> = new Set([
+  "pending",
+  "countdown",
+  "awaiting-you",
+]);
+
+/**
+ * Fields you changed while paused become yours ("you did it") and aren't filled over; the run
+ * resumes at the first field still open.
+ */
+function keepYourChanges(state: RunState, seqs: ReadonlySet<number>): RunState {
+  const steps = state.steps.map((step, index) =>
+    index >= state.cursor && seqs.has(step.seq) && OPEN_STATES.has(step.state)
+      ? {
+          ...step,
+          state: "you-did-it" as const,
+          decision: "you-did-it" as const,
+          decidedBy: "you" as const,
+          note: undefined,
+          result: "changed by you while paused",
+        }
+      : step,
+  );
+  let cursor = state.cursor;
+  while (steps[cursor]?.state === "you-did-it") cursor++;
+  return {
+    ...state,
+    steps,
+    cursor,
+    phase: cursor >= steps.length ? "review" : state.phase,
+  };
+}
+
+/** Steps whose field shows something other than before the pause (by step number). */
+export function changedSince(
+  before: ReadonlyMap<number, string>,
+  now: ReadonlyMap<number, string>,
+): number[] {
+  const norm = (s: string | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
+  return [...before.keys()].filter(
+    (seq) => now.has(seq) && norm(before.get(seq)) !== norm(now.get(seq)),
+  );
+}
+
 export function reduce(state: RunState, event: RunEvent): RunState {
   if (state.phase === "finished") return state;
   switch (event.type) {
@@ -214,6 +261,8 @@ export function reduce(state: RunState, event: RunEvent): RunState {
       return { ...state, phase: "finished", outcome: "submitted" };
     case "approve-remaining-auto":
       return reduce({ ...state, autoApproved: true }, { type: "approve" });
+    case "changed-by-you":
+      return keepYourChanges(state, new Set(event.seqs));
     default:
       break;
   }

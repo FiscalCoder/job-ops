@@ -23,6 +23,10 @@
       </form>
     </section>
 
+    <section id="autopilot" class="card" hidden>
+      <div id="autopilot-status"></div>
+      <div id="autopilot-ask"></div>
+    </section>
     <section id="run-box" class="card" hidden></section>
     <section id="kit-box" class="card" hidden></section>
 
@@ -63,6 +67,7 @@
       <div class="card">
         <div class="row">
           <strong>Queue</strong>
+          <button type="button" id="autopilot-start" class="primary" title="Apply to the queue for you, highest score first; you check and submit each">Autopilot</button>
           <button type="button" id="refresh">Refresh</button>
         </div>
         <ul id="queue" class="list"></ul>

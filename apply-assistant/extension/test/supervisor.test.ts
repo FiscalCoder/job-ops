@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  changedSince,
   maskValue,
   nextAction,
   type PlanEntry,
@@ -300,5 +301,44 @@ describe("startingFrom (Fill from…)", () => {
     expect(
       startingFrom(page, { ref: "#gone", label: "Gone", nth: 0 }, true),
     ).toHaveLength(5);
+  });
+});
+
+describe("pause, fix by hand, resume", () => {
+  it("fields you changed while paused are yours; the run resumes at the first still open", () => {
+    const state = run([entry("a"), entry("b"), entry("c"), entry("d")], 0);
+    const paused = apply(state, { type: "pause" });
+    const back = apply(
+      paused,
+      { type: "changed-by-you", seqs: [1, 2, 4] },
+      { type: "resume" },
+    );
+    expect(back.steps.map((s) => s.state)).toEqual([
+      "you-did-it",
+      "you-did-it",
+      "pending",
+      "you-did-it",
+    ]);
+    expect(back.cursor).toBe(2);
+    expect(back.steps[0]?.result).toBe("changed by you while paused");
+  });
+
+  it("everything left changed by you: straight to review", () => {
+    const back = apply(run([entry("a")], 0), { type: "changed-by-you", seqs: [1] });
+    expect(back.phase).toBe("review");
+  });
+
+  it("only fields whose shown value differs count, spaces aside", () => {
+    const before = new Map([
+      [1, "Chennai"],
+      [2, ""],
+      [3, "Tamil  Nadu"],
+    ]);
+    const now = new Map([
+      [1, "Chennai"],
+      [2, "Hueint"],
+      [3, "Tamil Nadu"],
+    ]);
+    expect(changedSince(before, now)).toEqual([2]);
   });
 });

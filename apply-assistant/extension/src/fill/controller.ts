@@ -11,6 +11,7 @@ import { setSupervised, trackTab } from "../track/tabs";
 import { attachDriver, formUrlFor, resumeFirst } from "./drivers";
 import { decisionEvent, pageCapture, watchPage } from "./run-trace";
 import {
+  changedSince,
   type FillFrom,
   maskValue,
   type NextAction,
@@ -31,12 +32,20 @@ import {
   TrustedDriver,
 } from "./trusted";
 import { GenericDriver } from "./generic-driver";
-import { labelKey, recipeHost, type SiteHelp } from "./site-help";
+import {
+  labelKey,
+  recipeHost,
+  type SiteHelp,
+  type SiteRecipe,
+} from "./site-help";
 import {
   type Chooser,
   type EntriesToAdd,
   WorkdayDriver,
 } from "./workday-driver";
+
+/** The saved steps' name for a kind of widget (any field of it, on any site). */
+const WIDGET_LABEL = "Any field of this kind";
 
 /** A form filled page by page as you reach each page: Workday, or any company's own site. */
 type PagedDriver = WorkdayDriver | GenericDriver;
@@ -95,7 +104,7 @@ const REDIRECT_SETTLE_MS = 1_500;
 const MAX_REDIRECTS = 3;
 
 /** Waits for the tab's load and any redirect right after it. */
-async function waitForTabSettled(tabId: number): Promise<void> {
+export async function waitForTabSettled(tabId: number): Promise<void> {
   for (let i = 0; i < MAX_REDIRECTS; i++) {
     await new Promise((resolve) => setTimeout(resolve, REDIRECT_SETTLE_MS));
     const tab = await chrome.tabs.get(tabId).catch(() => null);
@@ -108,7 +117,10 @@ async function waitForTabSettled(tabId: number): Promise<void> {
  * The tab to fill: a new one on the form, or the tab you're on (moved to the form only when
  * it shows something else, so nothing you already typed there is reloaded away).
  */
-async function openForm(url: string, tabId?: number): Promise<chrome.tabs.Tab> {
+export async function openForm(
+  url: string,
+  tabId?: number,
+): Promise<chrome.tabs.Tab> {
   if (tabId === undefined) {
     const tab = await chrome.tabs.create({ url, active: true });
     if (tab.id !== undefined) {
@@ -174,6 +186,8 @@ interface StartOptions {
   readonly job: QueueItem;
   readonly countdownSeconds: number;
   readonly onChange: (view: RunView) => void;
+  /** Autopilot: a field the fill can't set goes to Claude on the page by itself, once. */
+  readonly autopilot?: boolean;
 }
 
 /** Records why the run couldn't start (with a snapshot when a page is open). */
@@ -188,6 +202,9 @@ async function failStart(
   await trace.close();
   return new Error(message);
 }
+
+/** Claude's operate budget for the application is used up (the server's limit messages). */
+const BUDGET_SPENT = /budget|cost limit/i;
 
 /** Workday's last page: nothing to fill, you check everything and submit. */
 const FINAL_STEP = /^review$/i;
@@ -240,6 +257,12 @@ export class RunController {
   private pageStep = "";
   /** The resume upload goes first (systems that fill fields from it). */
   private readonly resumeFirst: boolean;
+  /** Autopilot: failed or unanswered fields go to Claude on the page by themselves. */
+  private readonly autopilot: boolean;
+  /** Steps already handed to Claude by autopilot: never twice (no loops). */
+  private readonly escalated = new Set<number>();
+  /** Claude's budget for this application is spent: no more hand-overs. */
+  private claudeSpent = false;
   private readonly stopWatching: () => void;
 
   private constructor(
@@ -251,13 +274,18 @@ export class RunController {
     private readonly startHost: string,
     private readonly tabId: number,
     entries: readonly PlanEntry[],
-    runOptions: { countdownSeconds: number; resumeFirst: boolean },
+    runOptions: {
+      countdownSeconds: number;
+      resumeFirst: boolean;
+      autopilot?: boolean;
+    },
     private readonly onChange: (view: RunView) => void,
     private readonly trace: TraceRecorder,
     private readonly page: Page,
   ) {
     this.state = startRun(entries, runOptions);
     this.resumeFirst = runOptions.resumeFirst;
+    this.autopilot = runOptions.autopilot ?? false;
     this.stopWatching = watchPage(page, trace);
     chrome.tabs.onRemoved.addListener(this.onTabRemoved);
   }
@@ -373,6 +401,7 @@ export class RunController {
     attach: (page: Page) => Promise<FormDriver | null>;
     plan: (driver: FormDriver) => Promise<PlanEntry[]>;
     resumeFirst: boolean;
+    autopilot?: boolean;
   }): Promise<RunController> {
     const { client, job, trace, context, tabId } = options;
     await trackTab(tabId, job.jobId);
@@ -449,6 +478,7 @@ export class RunController {
       {
         countdownSeconds: options.countdownSeconds,
         resumeFirst: options.resumeFirst,
+        autopilot: options.autopilot ?? false,
       },
       options.onChange,
       trace,
@@ -484,8 +514,60 @@ export class RunController {
     return isPaged(this.driver) ? this.driver : null;
   }
 
+  /** What each open field showed when you paused (by step number). */
+  private shownAtPause: Map<number, string> | null = null;
+
+  /** The fields not filled yet and what each shows now. */
+  private async shownOpenFields(): Promise<Map<number, string>> {
+    const shown = new Map<number, string>();
+    for (const step of this.state.steps.slice(this.state.cursor)) {
+      if (step.state === "running" || step.entry.type === "file") continue;
+      const value = await this.driver.readBack(step.entry).catch(() => null);
+      if (value !== null) shown.set(step.seq, value);
+    }
+    return shown;
+  }
+
+  /**
+   * Resume after a pause: fields you changed meanwhile are yours and aren't filled over; the
+   * run goes on from the first one still open.
+   */
+  private async resumeKeepingYourChanges(before: Map<number, string>) {
+    this.busy = true;
+    this.emit();
+    try {
+      const changed = changedSince(before, await this.shownOpenFields());
+      if (changed.length) {
+        const labels = this.state.steps
+          .filter((s) => changed.includes(s.seq))
+          .map((s) => s.entry.label);
+        this.trace.event(
+          "decision",
+          `You changed ${changed.length} field(s) while paused; kept as yours: ${labels.join(", ").slice(0, 300)}`,
+          { data: { seqs: changed } },
+        );
+        this.apply({ type: "changed-by-you", seqs: changed });
+      }
+    } finally {
+      this.busy = false;
+    }
+    this.apply({ type: "resume" });
+    void this.loop();
+  }
+
   /** Your controls from the side panel. */
   dispatch(event: RunEvent): void {
+    if (event.type === "resume" && this.shownAtPause && !this.busy) {
+      const before = this.shownAtPause;
+      this.shownAtPause = null;
+      this.trace.event("decision", "You resumed the run");
+      void this.resumeKeepingYourChanges(before);
+      return;
+    }
+    if (event.type === "pause" && !this.state.paused)
+      void this.shownOpenFields().then((shown) => {
+        if (this.state.paused) this.shownAtPause = shown;
+      });
     if (
       this.busy &&
       event.type !== "pause" &&
@@ -590,6 +672,18 @@ export class RunController {
         return;
       }
       case "wait-for-you":
+        // Autopilot: a required field with no answer of yours goes to Claude with your saved
+        // answers. Claude's drafted answers and consents still wait for your click.
+        if (
+          action.step.entry.required &&
+          (action.step.entry.status === "needs-you" ||
+            action.step.value === null) &&
+          this.escalate(
+            action.step,
+            action.step.note ?? "no saved answer",
+          )
+        )
+          return this.loop();
         await this.mark(
           action.step,
           action.step.note ? "needs you" : "waiting for your click",
@@ -910,11 +1004,14 @@ export class RunController {
           },
         );
       else await this.traceFailure(step, outcome.reason);
+      if (!outcome.ok && step.operate && BUDGET_SPENT.test(outcome.reason))
+        this.claudeSpent = true;
       this.apply(
         outcome.ok
           ? { type: "filled", result: outcome.result }
           : { type: "fill-failed", reason: outcome.reason },
       );
+      if (!outcome.ok) this.escalate(step, outcome.reason);
     } catch (error) {
       await this.traceFailure(step, errorText(error));
       this.apply({ type: "fill-failed", reason: errorText(error) });
@@ -923,6 +1020,31 @@ export class RunController {
       this.busy = false;
     }
     void this.loop();
+  }
+
+  /**
+   * Autopilot: the field goes to Claude on the page by itself, with everything already tried
+   * (in the step's note). Once per field and within the application's budget; after that it
+   * waits for you.
+   */
+  private escalate(step: Step, why: string): boolean {
+    if (
+      !this.autopilot ||
+      this.claudeSpent ||
+      this.escalated.has(step.seq) ||
+      step.entry.type === "file" ||
+      !this.driver.operate ||
+      this.state.paused
+    )
+      return false;
+    this.escalated.add(step.seq);
+    this.trace.event(
+      "escalate",
+      `Autopilot: Claude takes over "${step.entry.label}" on the page (${why.slice(0, 160)})`,
+      { stepSeq: step.seq },
+    );
+    this.apply({ type: "let-claude" });
+    return true;
   }
 
   /** "Let Claude do it": Claude works the field on the page; Pause or Abort stops it. */
@@ -1047,8 +1169,32 @@ async function siteHelp(
 ): Promise<SiteHelp> {
   const saved = await client.recipes(host).catch(() => []);
   const recipes = new Map(saved.map((r) => [r.labelKey, r]));
+  // A kind of widget's steps are kept like a site's, under "widget.<kind>" (any site).
+  const widgets = new Map<string, Promise<SiteRecipe | null>>();
+  const widgetHost = (kind: string) => `widget.${kind}`;
   return {
     recipes,
+    widget: (kind) => {
+      let found = widgets.get(kind);
+      if (!found) {
+        found = client
+          .recipes(widgetHost(kind))
+          .then((list) => list.find((r) => r.labelKey === labelKey(WIDGET_LABEL)) ?? null)
+          .catch(() => null);
+        widgets.set(kind, found);
+      }
+      return found;
+    },
+    recordWidget: async (kind, steps, ok) => {
+      widgets.delete(kind);
+      await client.recordRecipe({
+        host: widgetHost(kind),
+        label: WIDGET_LABEL,
+        steps,
+        ok,
+        jobId,
+      });
+    },
     act: async (ask) => (await client.act(jobId, ask)).steps,
     record: async (label, steps, ok) => {
       await client.recordRecipe({ host, label, steps, ok, jobId });

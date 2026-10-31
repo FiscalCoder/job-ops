@@ -269,7 +269,7 @@ function fillFromPicker(
       el(
         "option",
         { value: String(step.seq) },
-        `${step.seq}. ${step.entry.label.slice(0, 60)}`,
+        `${step.seq}. ${step.entry.label.slice(0, 48)}`,
       ),
     );
   }

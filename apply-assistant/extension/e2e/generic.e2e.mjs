@@ -265,7 +265,7 @@ try {
   // you; you skip it.
   const skip = panel.getByRole("button", { name: "Skip" });
   await panel
-    .getByText("Claude's steps didn't set it either", { exact: false })
+    .getByText("didn't set it either", { exact: false })
     .waitFor({ timeout: 90_000 });
   check(
     "a step that would click Submit is refused",
@@ -345,7 +345,7 @@ try {
   await panel.locator("#here").getByRole("button", { name: "Fill this page" }).waitFor({ timeout: 15_000 });
   await panel.locator("#here").getByRole("button", { name: "Fill this page" }).click();
   await panel
-    .getByText("Claude's steps didn't set it either", { exact: false })
+    .getByText("didn't set it either", { exact: false })
     .waitFor({ timeout: 90_000 });
   const notice = await form.evaluate(() => document.querySelector(".dd").textContent);
   check(

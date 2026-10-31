@@ -2,7 +2,7 @@ import type { AddressInfo } from "node:net";
 import type Anthropic from "@anthropic-ai/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MessagesApi } from "../src/claude/answerer.js";
-import { createOperator, MAX_TURNS } from "../src/claude/operate.js";
+import { createOperator, JOB_COST_CAP, MAX_TURNS } from "../src/claude/operate.js";
 import { createApp } from "../src/http/app.js";
 import { type JobOpsApi, JobOpsError, type JobOpsJob } from "../src/jobops/client.js";
 import { openStore } from "../src/store/db.js";
@@ -225,13 +225,14 @@ describe("Claude operating one field", () => {
   });
 
   it("stops at the application's budget, and won't start again on that job", async () => {
-    // About $0.21 a turn at these token counts.
+    // About $0.20 a turn at these token counts: sessions go on until the cap is reached.
     const operator = createOperator({
       messages: { create: async () => reply([{ type: "text", text: "done" }], "end_turn", 100_000) },
       model: "claude-sonnet-5-5",
     });
-    expect((await operator.start("u1", "job-1", start)).done).toBe(true);
-    expect((await operator.start("u1", "job-1", start)).done).toBe(true);
+    const allowed = Math.ceil(JOB_COST_CAP / 0.2);
+    for (let i = 0; i < allowed; i++)
+      expect((await operator.start("u1", "job-1", start)).done).toBe(true);
     await expect(operator.start("u1", "job-1", start)).rejects.toThrow(/budget/);
     // Another job has its own.
     expect((await operator.start("u1", "job-2", start)).done).toBe(true);

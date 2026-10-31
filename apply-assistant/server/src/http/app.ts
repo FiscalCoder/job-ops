@@ -17,8 +17,10 @@ import { createFormSchemasRepo } from "../store/form-schemas-repo.js";
 import { createBlockedSkipsRepo } from "../store/blocked-skips-repo.js";
 import { createCompanyLimitsRepo } from "../store/company-limits-repo.js";
 import { createSiteRecipesRepo } from "../store/site-recipes-repo.js";
+import { createNavigator } from "../claude/navigate.js";
 import { createOperator } from "../claude/operate.js";
 import { savedAnswersForPrompt } from "../claude/questions.js";
+import { createNavigateRoutes } from "./navigate-routes.js";
 import { createOperateRoutes } from "./operate-routes.js";
 import { createLearnedAnswersRepo } from "../store/learned-answers-repo.js";
 import { createClaudeAccess } from "../claude/access.js";
@@ -160,6 +162,10 @@ export function createApp({
     claude && access
       ? createOperator({ messages: access.messages, model: claude.draftModel })
       : null;
+  const navigator =
+    claude && access
+      ? createNavigator({ messages: access.messages, model: claude.draftModel })
+      : null;
   const learned = createLearnedAnswersRepo(db);
   const limits = createCompanyLimitsRepo(db);
   const plans = createPlans({
@@ -212,6 +218,10 @@ export function createApp({
           new Map(answers.list().map((a) => [a.key, a.value])),
         ),
     }),
+  );
+  app.use(
+    requireUser,
+    createNavigateRoutes({ navigator, answerer, jobOps, trace: record }),
   );
   const runs = createRunsRepo(db);
   app.use(

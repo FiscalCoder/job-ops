@@ -196,7 +196,7 @@ try {
   await panel.bringToFront();
   await panel.locator("#here").getByRole("button", { name: "Fill this page" }).click();
   // Date of Birth has no saved answer: it waits for you, and Claude is offered at once.
-  await panel.getByText("Date of Birth", { exact: false }).first().waitFor({ timeout: 60_000 });
+  await panel.locator(".step-card").getByText("Date of Birth", { exact: false }).first().waitFor({ timeout: 60_000 });
   await panel.getByRole("button", { name: "Skip" }).waitFor({ timeout: 60_000 });
   check(
     "Let Claude do it is offered on a step waiting for you, before anything failed",

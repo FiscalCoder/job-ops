@@ -91,6 +91,26 @@ export type OperateRequest =
     };
 
 /** Claude's next actions on the field (a computer member, or the element tool by ref). */
+/** A page on the way to a job's form, for Claude (AUTOPILOT_PLAN.md §C). */
+export interface NavigateRequest {
+  readonly url: string;
+  readonly title: string;
+  /** One line per clickable element: "e3 | button | Apply now | https://…". */
+  readonly outline: string;
+  readonly text: string;
+  /** Steps so far and what each did. */
+  readonly history: readonly string[];
+  readonly screenshot: { data: string; mediaType: "image/jpeg" | "image/png" };
+}
+
+export interface NavigateAnswer {
+  readonly action: "click" | "form" | "closed" | "login" | "stuck";
+  readonly ref: string;
+  readonly why: string;
+  readonly cost: number;
+  readonly spent: number;
+}
+
 export interface OperateTurn {
   readonly session: string;
   readonly calls: readonly {
@@ -326,6 +346,28 @@ export class ApplyClient implements TraceApi {
   stopOperate(jobId: string, session: string): Promise<unknown> {
     return this.request(`/plans/${encodeURIComponent(jobId)}/operate/stop`, {
       session,
+    });
+  }
+
+  /** Autopilot: Claude's next step from the job's link to its form. */
+  navigate(jobId: string, page: NavigateRequest): Promise<NavigateAnswer> {
+    return this.request(`/plans/${encodeURIComponent(jobId)}/navigate`, page);
+  }
+
+  /** What Claude has cost on this job since a time (ISO): autopilot's bar. */
+  jobCost(
+    jobId: string,
+    since: string,
+  ): Promise<{ cost: number; calls: number; unpriced: number }> {
+    return this.request(
+      `/trace/jobs/${encodeURIComponent(jobId)}/cost?since=${encodeURIComponent(since)}`,
+    );
+  }
+
+  /** A posting you agreed is closed (or its link broken): expired in Job Ops. */
+  expireJob(jobId: string, reason: string): Promise<unknown> {
+    return this.request(`/jobs/${encodeURIComponent(jobId)}/expire`, {
+      reason,
     });
   }
 

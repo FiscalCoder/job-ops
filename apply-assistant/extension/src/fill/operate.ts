@@ -309,7 +309,7 @@ export async function operateField(
     let turn = await api.turn({
       label: entry.label,
       wanted,
-      failure,
+      failure: failure.slice(0, 2_000),
       outline: await outline(),
       screenshot,
     });

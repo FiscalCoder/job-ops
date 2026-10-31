@@ -74,7 +74,7 @@ export const MAX_TURNS = 8;
 export const MAX_ACTIONS = 20;
 /** Dollars: one field, and one application (all its fields). */
 export const FIELD_COST_CAP = 0.15;
-export const JOB_COST_CAP = 0.3;
+export const JOB_COST_CAP = 0.6;
 const SESSION_TTL_MS = 10 * 60_000;
 const JOB_WINDOW_MS = 24 * 60 * 60_000;
 const MAX_TOKENS = 4_000;
@@ -88,7 +88,8 @@ export const operateStart = z.object({
   label: z.string().trim().min(1).max(500),
   /** "" when there's no saved answer: Claude picks what fits you. */
   wanted: z.string().max(2_000),
-  failure: z.string().max(500).default(""),
+  /** Everything already tried on this field and how each failed (never to be repeated). */
+  failure: z.string().max(2_000).default(""),
   outline: z.string().max(20_000),
   screenshot: image,
 });
@@ -168,7 +169,7 @@ ${savedAnswers || "(none)"}
 
 Field: ${request.label} (marked with a blue outline on the page)
 Set it to: ${request.wanted || "(no saved answer: pick what fits the candidate)"}
-The usual way failed: ${request.failure || "unknown"}
+Already tried, and how each failed (don't repeat these; try a different way): ${request.failure || "unknown"}
 
 Outline of the field's area:
 ${request.outline || "(nothing found)"}`,

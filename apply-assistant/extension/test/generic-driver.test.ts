@@ -300,3 +300,32 @@ describe("pagedFill", () => {
     expect(pagedFill("http://careers.acme.com/apply")).toBeNull();
   });
 });
+
+describe("the same kind of widget on another site", () => {
+  it("is named by its tag, role and library class names, not by ids or layout classes", async () => {
+    const { widgetKind } = await import("../src/fill/site-help");
+    document.body.innerHTML = `<div class="iCIMS_InfoData col-6"><a id="x1_dd" class="dropdown-select" role="combobox">State</a></div>
+      <div class="iCIMS_InfoData"><a id="y2_dd" class="dropdown-select" role="combobox">Country</a></div>
+      <input id="plain" class="form-control">`;
+    const first = widgetKind("#x1_dd");
+    expect(first).toBe("a.combobox.dropdown-select");
+    // Another field of the same kind (another site would give the same).
+    expect(widgetKind("#y2_dd")).toBe(first);
+    // A plain field has nothing to tell it apart: not shared.
+    expect(widgetKind("#plain")).toBe("");
+  });
+
+  it("only steps with nothing site-specific are shared", async () => {
+    const { portableSteps } = await import("../src/fill/site-help");
+    expect(
+      portableSteps([
+        { action: "click", value: ".dropdown-select" },
+        { action: "type", value: "{value}" },
+        { action: "press", value: "Enter" },
+      ]),
+    ).toBe(true);
+    expect(portableSteps([{ action: "click", value: "#x1_dd" }])).toBe(false);
+    expect(portableSteps([{ action: "click", value: "[name=rcf3217]" }])).toBe(false);
+    expect(portableSteps([])).toBe(false);
+  });
+});

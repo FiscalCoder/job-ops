@@ -1,3 +1,4 @@
+import { Autopilot, type RunEnd } from "../../src/autopilot/runner";
 import { RunController, type RunView } from "../../src/fill/controller";
 import { ALL_SITES, activeTab } from "../../src/kit/page-fill";
 import {
@@ -20,6 +21,11 @@ import { isSupportedPosting, pagedFill } from "../../src/track/job-match";
 import { resolveTab } from "../../src/track/tabs";
 import { renderHere } from "./here-view";
 import { askClaude } from "./ask-claude";
+import {
+  askOnBar,
+  autoExpireSetting,
+  renderAutopilotBar,
+} from "./autopilot-view";
 import { setUpClaudeSettings } from "./claude-settings";
 import { setUpImport } from "./import-view";
 import { showKit } from "./kit-view";
@@ -88,8 +94,13 @@ async function startFill(
   item: QueueItem,
   tabId?: number,
   paged: "workday" | "generic" | null = null,
+  /** Autopilot: Claude takes over stuck fields by itself; told when the run ends. */
+  auto?: { onEnd: (end: RunEnd) => void },
 ) {
-  if (!client || activeRun) return;
+  if (!client || activeRun) {
+    auto?.onEnd("failed");
+    return;
+  }
   const box = $("run-box");
   box.hidden = false;
   $("main").hidden = true;
@@ -119,12 +130,28 @@ async function startFill(
     el("p", { class: "muted" }, "Opening the posting and finding the form…"),
   );
   box.replaceChildren(runPart, askClaude(client, job.jobId));
+  // Autopilot goes on to the next job a moment after this run ends (you see how it ended).
+  let ended = false;
+  const endFor = (end: RunEnd, after: number) => {
+    if (!auto || ended) return;
+    ended = true;
+    setTimeout(() => {
+      closeRun();
+      auto.onEnd(end);
+    }, after);
+  };
   try {
     const options = {
       client,
       job,
       countdownSeconds: await countdownSetting(),
-      onChange: (view: RunView) =>
+      ...(auto ? { autopilot: true } : {}),
+      onChange: (view: RunView) => {
+        if (view.action.kind === "finished")
+          endFor(
+            view.state.outcome === "submitted" ? "submitted" : "aborted",
+            AUTOPILOT_NEXT_MS,
+          );
         renderRunView(
           runPart,
           view,
@@ -147,7 +174,8 @@ async function startFill(
             }),
           () => activeRun?.refillPage(),
           (seq) => activeRun?.fillFrom(seq),
-        ),
+        );
+      },
     };
     activeRun =
       pagedHow && tabId !== undefined
@@ -167,7 +195,55 @@ async function startFill(
       el("button", { type: "button" }, "Back"),
     );
     box.querySelector("button")?.addEventListener("click", closeRun);
+    endFor("failed", AUTOPILOT_ERROR_MS);
   }
+}
+
+/** How long a finished run (or one that couldn't start) shows before autopilot moves on. */
+const AUTOPILOT_NEXT_MS = 2_000;
+const AUTOPILOT_ERROR_MS = 5_000;
+
+let autopilot: Autopilot | null = null;
+
+/** Autopilot over the queue: highest score first; you check and submit each application. */
+async function startAutopilot() {
+  if (!client || autopilot?.running || activeRun) return;
+  const statusBox = $("autopilot-status");
+  const askBox = $("autopilot-ask");
+  askBox.replaceChildren();
+  const pilot: Autopilot = new Autopilot({
+    client,
+    queue: async () => {
+      await loadQueue();
+      return queueItems;
+    },
+    fill: (item, tabId, paged) =>
+      new Promise<RunEnd>((resolve) => {
+        void startFill(item, tabId, paged ?? null, { onEnd: resolve });
+      }),
+    ask: (question) => askOnBar(askBox, question),
+    status: (status) =>
+      void autoExpireSetting().then((auto) =>
+        renderAutopilotBar(
+          statusBox,
+          status,
+          {
+            stop: () => {
+              pilot.stop();
+              void activeRun?.stop();
+            },
+            skip: () => {
+              pilot.skip();
+              void activeRun?.stop();
+            },
+          },
+          auto,
+        ),
+      ),
+    autoExpire: autoExpireSetting,
+  });
+  autopilot = pilot;
+  await pilot.run();
 }
 
 const POSTING_WAIT_MS = 20_000;
@@ -671,6 +747,7 @@ function queueRow(item: QueueItem, showEmployer: boolean): HTMLElement {
 }
 
 $("refresh").addEventListener("click", () => void loadQueue());
+$("autopilot-start").addEventListener("click", () => void startAutopilot());
 
 interface Entry {
   readonly label: string;

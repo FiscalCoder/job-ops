@@ -163,6 +163,26 @@ export function createTraceRoutes({ jobOps, runs, trace }: TraceRoutesDeps) {
     });
   });
 
+  /**
+   * What Claude has cost on this job (since `since`, an ISO time, when given): autopilot shows it
+   * on its bar while the job runs. A call whose price isn't known counts as 0 and is counted.
+   */
+  router.get("/trace/jobs/:jobId/cost", (req, res) => {
+    const jobId = String(req.params.jobId);
+    const since = typeof req.query.since === "string" ? req.query.since : "";
+    const usage = trace
+      .events(jobId)
+      .filter((e) => e.kind === "claude-usage" && (!since || e.ts >= since));
+    const priced = usage.map(
+      (e) => (e.data as { cost?: number | null } | null)?.cost ?? null,
+    );
+    sendOk(res, {
+      cost: Math.round(priced.reduce<number>((sum, c) => sum + (c ?? 0), 0) * 10_000) / 10_000,
+      calls: usage.length,
+      unpriced: priced.filter((c) => c === null).length,
+    });
+  });
+
   /** Everything about one job in one JSON document: what to hand over when something broke. */
   router.get(
     "/trace/jobs/:jobId/export",
