@@ -68,6 +68,7 @@ function educationPart(label: string): string {
 
 interface Block {
   readonly id: string;
+  readonly heading: string;
   readonly section: Section;
   readonly fields: readonly { readonly field: PageField; readonly part: string }[];
 }
@@ -93,7 +94,7 @@ function blocksOf(fields: readonly PageField[]): Block[] {
     // A real entry names its employer or school.
     const anchor = section === "experience" ? "companyName" : "school";
     return parts.some((p) => p.part === anchor)
-      ? [{ id, section, fields: parts }]
+      ? [{ id, heading, section, fields: parts }]
       : [];
   });
 }
@@ -208,4 +209,35 @@ export function historyCanonicals(
         );
   }
   return names;
+}
+
+/** The most blocks of one kind added for you on one page. */
+const MAX_ADD = 6;
+
+/**
+ * Fewer blocks on the page than jobs (or degrees) on your resume: how many more to add with
+ * the site's own "Add More (Professional Experience)", by the section's name. A section the
+ * page doesn't have at all isn't added.
+ */
+export function blocksToAdd(
+  fields: readonly PageField[],
+  resume: ResumeFacts,
+): { section: string; count: number }[] {
+  const blocks = blocksOf(fields);
+  return (["experience", "education"] as const).flatMap((section) => {
+    const mine = blocks.filter((b) => b.section === section);
+    const first = mine[0];
+    const wanted =
+      section === "experience"
+        ? resume.experience.length
+        : resume.education.length;
+    if (!first || wanted <= mine.length) return [];
+    return [
+      {
+        // "Professional Experience (1)" → "Professional Experience"
+        section: first.heading.replace(/\s*\(\d+\)\s*$/, "").trim(),
+        count: Math.min(wanted - mine.length, MAX_ADD),
+      },
+    ];
+  });
 }

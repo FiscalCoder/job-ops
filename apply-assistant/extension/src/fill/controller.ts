@@ -769,6 +769,9 @@ export class RunController {
   /** Workday moved to another page: the step you're on now, when it changed. */
   private async movedTo(): Promise<string | null> {
     const wizard = this.wizard;
+    // Signing in reloaded the page: the form is in a new frame.
+    if (wizard instanceof GenericDriver && (await wizard.findFormFrame()))
+      return (await wizard.step()) || "this page";
     const step = (await wizard?.step()) ?? "";
     if (step && step !== this.pageStep) return step;
     // Some sites swap in the next part in place, with the same address and heading.
@@ -783,8 +786,10 @@ export class RunController {
     if (!wizard || this.busy || this.closed || this.tabClosed) return;
     this.clearTimer();
     this.trace.event("decision", "You asked to fill the page on screen");
-    void (async () =>
-      this.nextPage((await wizard.step()) || this.pageStep || "this page"))();
+    void (async () => {
+      if (wizard instanceof GenericDriver) await wizard.findFormFrame();
+      await this.nextPage((await wizard.step()) || this.pageStep || "this page");
+    })();
   }
 
   /**
@@ -810,11 +815,13 @@ export class RunController {
     );
     const wizard = this.wizard;
     if (wizard) {
-      void (async () =>
-        this.nextPage(
+      void (async () => {
+        if (wizard instanceof GenericDriver) await wizard.findFormFrame();
+        await this.nextPage(
           (await wizard.step()) || this.pageStep || "this page",
           from,
-        ))();
+        );
+      })();
       return;
     }
     void (async () => {

@@ -9,12 +9,17 @@ import {
   type FillOutcome,
   FORM_WAIT_MS,
   failed,
+  READ_MS,
   type ResumeFile,
   selectionMatches,
   sleep,
   TrustedDriver,
+  within,
 } from "./trusted";
-import type { Chooser } from "./workday-driver";
+import type { Chooser, EntriesToAdd } from "./workday-driver";
+
+/** How long a block added with the site's Add More may take to appear (or the page to reload). */
+const ADD_WAIT_MS = 10_000;
 
 /**
  * Any company's own application page (no known system). Fields are read generically (labels,
@@ -418,6 +423,28 @@ export function shownValue(selector: string): string {
   return "";
 }
 
+const FIELD_COUNT_MS = 3_000;
+
+function fieldCount(frame: Frame): Promise<number> {
+  if (frame.detached) return Promise.resolve(0);
+  return within(
+    () => frame.$$eval("input:not([type=hidden]), select, textarea", (l) => l.length),
+    FIELD_COUNT_MS,
+  ).catch(() => 0);
+}
+
+/** The frame with the most form fields now, if any has one. */
+async function formFrame(
+  page: Page,
+): Promise<{ frame: Frame; count: number } | null> {
+  let best: { frame: Frame; count: number } | null = null;
+  for (const frame of page.frames()) {
+    const count = await fieldCount(frame);
+    if (count > 0 && (!best || count > best.count)) best = { frame, count };
+  }
+  return best;
+}
+
 export class GenericDriver extends TrustedDriver {
   readonly system = "generic" as const;
   protected readonly errorSelector =
@@ -429,17 +456,24 @@ export class GenericDriver extends TrustedDriver {
   static async attach(page: Page): Promise<GenericDriver | null> {
     const deadline = Date.now() + FORM_WAIT_MS;
     while (Date.now() < deadline) {
-      let best: { frame: Frame; count: number } | null = null;
-      for (const frame of page.frames()) {
-        const count = await frame
-          .$$eval("input:not([type=hidden]), select, textarea", (l) => l.length)
-          .catch(() => 0);
-        if (count > 0 && (!best || count > best.count)) best = { frame, count };
-      }
+      const best = await formFrame(page);
       if (best) return new GenericDriver(page, best.frame);
       await sleep(400);
     }
     return null;
+  }
+
+  /**
+   * The form moved to another frame: signing in (iCIMS through LinkedIn) reloads the page and
+   * its iframe, and the frame read before is gone or blank. True when the run now reads another.
+   */
+  async findFormFrame(): Promise<boolean> {
+    if (!this.frame.detached && (await fieldCount(this.frame)) > 0) return false;
+    const best = await formFrame(this.page);
+    if (!best || best.frame === this.frame) return false;
+    this.frame = best.frame;
+    this.lastRefs = [];
+    return true;
   }
 
   protected boxFor(ref: string): string {
@@ -447,14 +481,14 @@ export class GenericDriver extends TrustedDriver {
   }
 
   step(): Promise<string> {
-    return this.frame.evaluate(genericStep).catch(() => "");
+    return within(() => this.frame.evaluate(genericStep), READ_MS).catch(() => "");
   }
 
   /** The fields of the page last read, to notice when the site swaps them for the next part. */
   private lastRefs: readonly string[] = [];
 
   async readPage(): Promise<GenericPage> {
-    const page = await this.frame.evaluate(readGenericPage);
+    const page = await within(() => this.frame.evaluate(readGenericPage), READ_MS);
     this.lastRefs = page.fields.map((f) => f.ref);
     return page;
   }
@@ -465,8 +499,8 @@ export class GenericDriver extends TrustedDriver {
    */
   async swapped(): Promise<boolean> {
     if (!this.lastRefs.length) return false;
-    const gone = await this.frame
-      .evaluate(
+    const gone = await within(
+      () => this.frame.evaluate(
         (refs) =>
           refs.filter((ref) => {
             const el = document.querySelector(ref);
@@ -479,13 +513,89 @@ export class GenericDriver extends TrustedDriver {
             );
           }).length,
         this.lastRefs,
-      )
-      .catch(() => 0);
+      ),
+      READ_MS,
+    ).catch(() => 0);
     return gone * 2 > this.lastRefs.length;
   }
 
-  /** Workday's Add buttons; nothing to add on a company's own page. */
-  async addEntries(): Promise<void> {}
+  /**
+   * Fewer job blocks than jobs on your resume: clicks the site's "Add More (Professional
+   * Experience)" until the section has that many more. iCIMS may reload the page for it: the
+   * form is found again in its new frame.
+   */
+  async addEntries(add: readonly EntriesToAdd[]): Promise<void> {
+    for (const { section, count } of add)
+      for (let i = 0; i < count; i++) {
+        const before = await this.blockCount(section);
+        const button = await this.addButton(section);
+        if (!button) break;
+        await button.click();
+        const deadline = Date.now() + ADD_WAIT_MS;
+        let added = false;
+        while (!added && Date.now() < deadline) {
+          await sleep(400);
+          await this.findFormFrame();
+          added = (await this.blockCount(section)) > before;
+        }
+        if (!added) break;
+      }
+  }
+
+  /** Blocks headed with the section's name ("Professional Experience (2)"). */
+  private blockCount(section: string): Promise<number> {
+    return within(
+      () =>
+        this.frame.evaluate(
+          (name) =>
+            [...document.querySelectorAll("fieldset > legend")].filter((l) =>
+              (l.textContent ?? "")
+                .replace(/\s+/g, " ")
+                .trim()
+                .toLowerCase()
+                .startsWith(name.toLowerCase()),
+            ).length,
+          section,
+        ),
+      READ_MS,
+    ).catch(() => 0);
+  }
+
+  /** The visible "Add …" control that names the section (the last one, below its blocks). */
+  private async addButton(section: string) {
+    const found = await within(
+      () =>
+        this.frame.evaluate((name) => {
+          for (const el of document.querySelectorAll("[data-ac-add]"))
+            el.removeAttribute("data-ac-add");
+          const button = [
+            ...document.querySelectorAll<HTMLElement>(
+              "a, button, [role=button], input[type=button]",
+            ),
+          ]
+            .filter((el) => {
+              const label = (
+                el.textContent ||
+                (el as HTMLInputElement).value ||
+                ""
+              )
+                .replace(/\s+/g, " ")
+                .trim()
+                .toLowerCase();
+              return (
+                /^add\b/.test(label) &&
+                label.includes(name.toLowerCase()) &&
+                el.checkVisibility({ visibilityProperty: true })
+              );
+            })
+            .at(-1);
+          button?.setAttribute("data-ac-add", "1");
+          return button !== undefined;
+        }, section),
+      READ_MS,
+    ).catch(() => false);
+    return found ? this.frame.$("[data-ac-add='1']").catch(() => null) : null;
+  }
 
   async fill(
     entry: PlanEntry,

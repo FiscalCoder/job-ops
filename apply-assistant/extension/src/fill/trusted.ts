@@ -73,13 +73,35 @@ export const failed = (error: unknown): FillOutcome => ({
   reason: `Couldn't fill: ${error instanceof Error ? error.message : String(error)}`,
 });
 
+/** A read of a frame that was swapped out (the page reloaded) can wait forever: it gives up. */
+export const READ_MS = 10_000;
+
+/**
+ * What `read` resolves to, or an error once `ms` pass. A swapped-out frame throws at once
+ * ("detached Frame"): that's a rejection here too.
+ */
+export async function within<T>(read: () => Promise<T>, ms: number): Promise<T> {
+  const promise = read();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("the page didn't answer; it may have reloaded")),
+      ms,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+const SUBMITTED_CHECK_MS = 3_000;
+
 const CONFIRMATION =
   /thank you for (applying|your application)|thanks for applying|application (has been |was )?(successfully )?(submitted|received)/i;
 
 export abstract class TrustedDriver implements FormDriver {
   protected constructor(
     protected readonly page: Page,
-    protected readonly frame: Frame,
+    /** Not fixed: a company's site may move the form into a new frame (after signing in). */
+    protected frame: Frame,
   ) {}
 
   /** CSS selector of the outline target for a field (its container). */
@@ -247,7 +269,9 @@ export abstract class TrustedDriver implements FormDriver {
   async problems(): Promise<string[]> {
     return this.frame
       .evaluate((errorSelector) => {
+        // Hidden messages don't count (iCIMS always carries a hidden "Please Enable Cookies").
         const errors = [...document.querySelectorAll(errorSelector)]
+          .filter((el) => el.checkVisibility({ visibilityProperty: true }))
           .map((el) => el.textContent?.trim() ?? "")
           .filter(Boolean);
         // Only a visible challenge counts; forms often carry an invisible reCAPTCHA badge.
@@ -277,8 +301,9 @@ export abstract class TrustedDriver implements FormDriver {
 
   async submitted(): Promise<boolean> {
     for (const frame of this.page.frames()) {
-      const done = await frame
-        .evaluate(
+      if (frame.detached) continue;
+      const done = await within(
+        () => frame.evaluate(
           (pattern) =>
             /\/confirmation\b/.test(location.pathname) ||
             // Oracle: its thank-you dialog, then your candidate profile.
@@ -290,8 +315,9 @@ export abstract class TrustedDriver implements FormDriver {
             ].some((el) => el.offsetParent !== null) ||
             new RegExp(pattern, "i").test(document.body?.innerText ?? ""),
           CONFIRMATION.source,
-        )
-        .catch(() => false);
+        ),
+        SUBMITTED_CHECK_MS,
+      ).catch(() => false);
       if (done) return true;
     }
     return false;

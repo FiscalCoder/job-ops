@@ -28,6 +28,7 @@ import {
   type PlanInput,
   summarise,
 } from "./planner.js";
+import { blocksToAdd } from "./history-blocks.js";
 import { normalizeQuestion } from "./question-norm.js";
 import { type ResumeFacts, resumeFacts } from "./resume-facts.js";
 import { parseFormSchema } from "./schemas.js";
@@ -510,12 +511,15 @@ export function createPlans(deps: PlansDeps) {
         resume,
       );
       const { summary } = plan;
-      const add = generic ? [] : entriesToAdd(page, resume);
+      // Fewer job or degree blocks than on your resume: the site's Add More, then planned again.
+      const add = generic
+        ? blocksToAdd(page.fields, resume)
+        : entriesToAdd(page, resume);
       trace({
         jobId,
         kind: "plan",
         message: add.length
-          ? `Workday page "${page.step}": adding ${add.map((a) => `${a.count} to ${a.section.replace(/-section$/, "").replace(/-/g, " ")}`).join(", ")} for your resume first`
+          ? `${generic ? "Page" : "Workday page"} "${page.step}": adding ${add.map((a) => `${a.count} to ${a.section.replace(/-section$/, "").replace(/-/g, " ")}`).join(", ")} for your resume first`
           : `Plan built for ${generic ? "page" : "Workday page"} "${page.step}": ${summary.fill} to fill, ${summary.needsYou} need you`,
         data: {
           ats: generic ? "generic" : "workday",

@@ -269,6 +269,18 @@ describe("work history blocks on a company's page (iCIMS)", () => {
     });
     expect(at("#k1_state")?.value).toBe("Maharashtra");
   });
+
+  it("fewer blocks than jobs on your resume: one more is added with the site's Add More", async () => {
+    const { blocksToAdd } = await import("../src/plan/history-blocks.js");
+    const resume = resumeFacts(fakeDesignResume);
+    // The site's saved profile had the older job only: your current one (Acme) has no block.
+    expect(
+      blocksToAdd(jobBlock("o1", 1, { employer: "Beta Pvt Ltd" }), resume),
+    ).toEqual([{ section: "Professional Experience", count: 1 }]);
+    expect(blocksToAdd(icims.fields, resume)).toEqual([]);
+    // A page without work history blocks gets none.
+    expect(blocksToAdd(careersPage.fields, resume)).toEqual([]);
+  });
 });
 
 describe("searched lists without your answer", () => {
