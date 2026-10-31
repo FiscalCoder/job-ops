@@ -492,6 +492,17 @@ export class GenericDriver extends TrustedDriver {
   /** Set by the run: a search that finds nothing worded like your answer. */
   chooser: Chooser | null = null;
 
+  /** The form another driver (Greenhouse, Ashby…) is on: fields its plan doesn't cover. */
+  static on(where: { readonly page: Page; readonly frame: Frame }): GenericDriver {
+    return new GenericDriver(where.page, where.frame);
+  }
+
+  /**
+   * Reading only what's left: fields outside the boxes another driver's plan covers (marked
+   * data-ac-site) that are still empty (a box ticked, a choice picked or text typed is kept).
+   */
+  onlyOpen = false;
+
   /** Attaches to the frame with the most form fields (forms are often in an iframe). */
   static async attach(page: Page): Promise<GenericDriver | null> {
     const deadline = Date.now() + FORM_WAIT_MS;
@@ -528,9 +539,65 @@ export class GenericDriver extends TrustedDriver {
   private lastRefs: readonly string[] = [];
 
   async readPage(): Promise<GenericPage> {
-    const page = await within(() => this.frame.evaluate(readGenericPage), READ_MS);
+    const read = await within(() => this.frame.evaluate(readGenericPage), READ_MS);
+    const page = this.onlyOpen ? { ...read, fields: await this.open(read.fields) } : read;
     this.lastRefs = page.fields.map((f) => f.ref);
     return page;
+  }
+
+  private async open(
+    fields: readonly GenericField[],
+  ): Promise<GenericField[]> {
+    const taken = await within(
+      () =>
+        this.frame.evaluate(
+          (refs) =>
+            refs.filter((ref) => {
+              const els = [...document.querySelectorAll<HTMLInputElement>(ref)];
+              const el = els[0];
+              if (!el || el.closest("[data-ac-site]")) return true;
+              if (el.type === "radio" || el.type === "checkbox")
+                return els.some((e) => e.checked);
+              if (el.type === "file") return (el.files?.length ?? 0) > 0;
+              return (el.value ?? "").trim() !== "";
+            }),
+          fields.map((f) => f.ref),
+        ),
+      READ_MS,
+    ).catch(() => fields.map((f) => f.ref));
+    const skip = new Set(taken);
+    return fields.filter((f) => !skip.has(f.ref) && !f.value);
+  }
+
+  /** The field (by this reader's ref) whose input is inside that box: another driver's field. */
+  async refInside(box: string): Promise<string | null> {
+    const page = await within(() => this.frame.evaluate(readGenericPage), READ_MS).catch(
+      () => null,
+    );
+    if (!page) return null;
+    return within(
+      () =>
+        this.frame.evaluate(
+          (box, refs) => {
+            let outer: Element | null;
+            try {
+              outer = document.querySelector(box);
+            } catch {
+              return null;
+            }
+            if (!outer) return null;
+            return (
+              refs.find((ref) => {
+                const el = document.querySelector(ref);
+                return el !== null && (el === outer || outer.contains(el));
+              }) ?? null
+            );
+          },
+          box,
+          page.fields.map((f) => f.ref),
+        ),
+      READ_MS,
+    ).catch(() => null);
   }
 
   /**

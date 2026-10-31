@@ -26,6 +26,7 @@ import {
   startRun,
 } from "./supervisor";
 import {
+  failed,
   type FillOutcome,
   type FormDriver,
   type ResumeFile,
@@ -213,6 +214,17 @@ const FINAL_STEP = /^review$/i;
 const PAGE_SETTLE_MS = 1_500;
 
 /** The server's plan for the page on screen (none on Workday's final Review page). */
+/** Claude picks among a list's choices when none is worded like your answer. */
+function chooserFor(client: ApplyClient, jobId: string): Chooser {
+  return async (label, wanted, choices) => {
+    const answer = await client
+      .choose(jobId, { label, wanted, options: choices })
+      .catch(() => null);
+    const value = answer?.value;
+    return (typeof value === "string" ? value : value?.[0]) ?? null;
+  };
+}
+
 /** Filling the page again: from a field you chose, or only one section of it. */
 type PageChoice =
   | { readonly kind: "from"; readonly from: FillFrom }
@@ -278,14 +290,16 @@ export class RunController {
   private pageStep = "";
   /** The resume upload goes first (systems that fill fields from it). */
   private readonly resumeFirst: boolean;
-  /** Autopilot: failed or unanswered fields go to Claude on the page by themselves. */
+  /** Autopilot: unanswered fields go to Claude, drafts are approved, optional ones skipped. */
   private readonly autopilot: boolean;
-  /** Steps already handed to Claude by autopilot: never twice (no loops). */
+  /** Steps already handed to Claude by themselves: never twice (no loops). */
   private readonly escalated = new Set<number>();
   /** Claude's budget for this application is spent: no more hand-overs. */
   private claudeSpent = false;
   /** Autopilot checked this page's filled fields once at review (redone what didn't hold). */
   private rechecked = false;
+  /** The site's plan is done and the page was read for fields it doesn't cover. */
+  private restRead = false;
   private readonly stopWatching: () => void;
 
   private constructor(
@@ -293,7 +307,8 @@ export class RunController {
     private readonly job: QueueItem,
     private readonly runId: string,
     private readonly browser: Browser,
-    private readonly driver: FormDriver,
+    /** The site's driver; the generic one once the site's plan is done (the rest of the page). */
+    private driver: FormDriver,
     private readonly startHost: string,
     private readonly tabId: number,
     entries: readonly PlanEntry[],
@@ -353,13 +368,32 @@ export class RunController {
     }
     if (tab.id === undefined)
       throw await failStart(trace, "Couldn't open the posting", context);
+    // Its system's driver first; no form of that kind on the page (Okta's own careers page
+    // behind a Greenhouse posting): the generic reader, planning the page as it is.
+    let generic = false;
     return RunController.launch({
       ...options,
       trace,
       context,
       tabId: tab.id,
-      attach: (page) => attachDriver(ats, page),
-      plan: async () => entries,
+      attach: async (page) => {
+        const driver = await attachDriver(ats, page);
+        if (driver) return driver;
+        const fallback = await GenericDriver.attach(page);
+        if (!fallback) return null;
+        generic = true;
+        fallback.chooser = chooserFor(client, job.jobId);
+        trace.event(
+          "fallback",
+          `No ${ats} form on ${page.url()}: reading the page's own form instead`,
+          { data: { ats, url: page.url() } },
+        );
+        return fallback;
+      },
+      plan: (driver) =>
+        generic
+          ? planPagedPage(client, job.jobId, driver as PagedDriver)
+          : Promise.resolve(entries),
       resumeFirst: resumeFirst(ats),
     });
   }
@@ -381,13 +415,7 @@ export class RunController {
       { data: context },
     );
     await chrome.tabs.update(tabId, { active: true });
-    const chooser: Chooser = async (label, wanted, choices) => {
-      const answer = await client
-        .choose(job.jobId, { label, wanted, options: choices })
-        .catch(() => null);
-      const value = answer?.value;
-      return (typeof value === "string" ? value : value?.[0]) ?? null;
-    };
+    const chooser = chooserFor(client, job.jobId);
     return RunController.launch({
       ...options,
       trace,
@@ -708,6 +736,7 @@ export class RunController {
       case "fill":
         return this.fill(action.step);
       case "review":
+        if (await this.fillTheRest()) return this.loop();
         if (await this.recheck()) return this.loop();
         await this.driver.highlight(
           null,
@@ -761,6 +790,86 @@ export class RunController {
     if (nextAction(this.state).kind !== "paused") return;
     if (await this.submittedMeanwhile()) return;
     this.timer = setTimeout(() => void this.watchPaused(), REVIEW_POLL_MS);
+  }
+
+  /**
+   * A field the site's driver (Greenhouse, Ashby, Lever) couldn't fill, tried by the generic
+   * driver on the same input: its typed search, Enter, the plan's fallbacks. Null when there's
+   * no site driver or no input in the field's box.
+   */
+  private async genericTry(
+    step: Step,
+    reason: string,
+  ): Promise<FillOutcome | null> {
+    const site = this.driver;
+    if (
+      !(site instanceof TrustedDriver) ||
+      site instanceof GenericDriver ||
+      step.entry.type === "file"
+    )
+      return null;
+    const generic = GenericDriver.on(site.where());
+    generic.chooser = chooserFor(this.client, this.job.jobId);
+    const ref = await generic.refInside(site.boxSelector(step.entry.ref));
+    if (!ref) return null;
+    const outcome = await generic
+      .fill({ ...step.entry, ref }, step.value)
+      .catch((error: unknown) => failed(error));
+    this.trace.event(
+      "generic-try",
+      `${step.entry.label}: the site's filler couldn't (${reason.slice(0, 120)}); the generic one ${outcome.ok ? `did: ${outcome.result}` : `couldn't either: ${outcome.reason}`}`,
+      { stepSeq: step.seq, data: { ref, ok: outcome.ok } },
+    );
+    return outcome.ok
+      ? { ok: true, result: `${outcome.result} (generic filler)` }
+      : { ok: false, reason: `${reason}; the generic filler: ${outcome.reason}` };
+  }
+
+  /**
+   * The site's plan is done (Greenhouse, Ashby, Lever): the page is read for fields it doesn't
+   * cover and that are still empty (Greenhouse's Employment), and those are filled from the
+   * page, as a company's own page is; the run goes on with the generic driver. Once per run.
+   */
+  private async fillTheRest(): Promise<boolean> {
+    const site = this.driver;
+    if (
+      this.restRead ||
+      this.wizard ||
+      this.state.paused ||
+      !(site instanceof TrustedDriver)
+    )
+      return false;
+    this.restRead = true;
+    await site.markCovered(this.state.steps.map((s) => s.entry.ref));
+    const generic = GenericDriver.on(site.where());
+    generic.onlyOpen = true;
+    generic.chooser = chooserFor(this.client, this.job.jobId);
+    generic.help = site.help;
+    let entries: PlanEntry[];
+    try {
+      entries = (
+        await planPagedPage(this.client, this.job.jobId, generic)
+      ).filter((e) => e.status !== "skip");
+    } catch (error) {
+      this.trace.event(
+        "error",
+        `Couldn't read the rest of the page: ${errorText(error)}`,
+      );
+      return false;
+    } finally {
+      generic.onlyOpen = false;
+    }
+    if (!entries.length) return false;
+    this.trace.event(
+      "rest-of-page",
+      `The site's plan is done; ${entries.length} more field(s) it doesn't cover are filled from the page: ${entries.map((e) => e.label).join(", ").slice(0, 300)}`,
+      { data: { fields: entries.length } },
+    );
+    await this.logFinishedSteps();
+    this.driver = generic;
+    this.pageStep = await generic.step();
+    this.restartWith(entries);
+    return true;
   }
 
   /**
@@ -1063,6 +1172,9 @@ export class RunController {
             step.value,
             this.resume ?? undefined,
           );
+      // The site's driver couldn't: the generic one, on the same field.
+      if (!outcome.ok && !step.operate)
+        outcome = (await this.genericTry(step, outcome.reason)) ?? outcome;
       // Not filled the usual way: this site's saved steps, then Claude's.
       if (!outcome.ok && !step.operate)
         outcome =
@@ -1089,7 +1201,8 @@ export class RunController {
           ? { type: "filled", result: outcome.result }
           : { type: "fill-failed", reason: outcome.reason },
       );
-      if (!outcome.ok) this.escalate(step, outcome.reason);
+      // Plain code failed: Claude tries it (not again when this was Claude's own try).
+      if (!outcome.ok && !step.operate) this.escalate(step, outcome.reason);
     } catch (error) {
       await this.traceFailure(step, errorText(error));
       this.apply({ type: "fill-failed", reason: errorText(error) });
@@ -1132,9 +1245,13 @@ export class RunController {
     return true;
   }
 
+  /**
+   * A field plain code (and saved steps) couldn't fill goes to Claude on the page, once, in any
+   * run (you no longer press "Let Claude do it"); not while paused or once Claude's budget for
+   * this application is spent.
+   */
   private escalate(step: Step, why: string): boolean {
     if (
-      !this.autopilot ||
       this.claudeSpent ||
       this.escalated.has(step.seq) ||
       step.entry.type === "file" ||
@@ -1145,7 +1262,7 @@ export class RunController {
     this.escalated.add(step.seq);
     this.trace.event(
       "escalate",
-      `Autopilot: Claude takes over "${step.entry.label}" on the page (${why.slice(0, 160)})`,
+      `Claude takes over "${step.entry.label}" on the page (${why.slice(0, 160)})`,
       { stepSeq: step.seq },
     );
     this.apply({ type: "let-claude" });

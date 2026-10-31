@@ -307,7 +307,10 @@ export async function operateField(
   try {
     const screenshot = await capture();
     let turn = await api.turn({
-      label: entry.label,
+      // A field without a label (Rippling's phone country) is the one outlined on the page.
+      label:
+        entry.label.trim().slice(0, 500) ||
+        "The field outlined in blue on the page (it has no label)",
       wanted,
       failure: failure.slice(0, 2_000),
       outline: await outline(),

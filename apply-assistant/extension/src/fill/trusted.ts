@@ -109,6 +109,35 @@ export abstract class TrustedDriver implements FormDriver {
   /** CSS selector of the outline target for a field (its container). */
   protected abstract boxFor(ref: string): string;
 
+  /** The page and the form's frame (a generic driver works the same form after this one). */
+  where(): { readonly page: Page; readonly frame: Frame } {
+    return { page: this.page, frame: this.frame };
+  }
+
+  /** The field's box on the page, as a selector (it contains the field's own input). */
+  boxSelector(ref: string): string {
+    return this.boxFor(ref);
+  }
+
+  /** Marks these fields' boxes as covered by this driver's plan (the generic reader skips them). */
+  async markCovered(refs: readonly string[]): Promise<void> {
+    await within(
+      () =>
+        this.frame.evaluate((boxes) => {
+          for (const box of boxes) {
+            let found: NodeListOf<Element>;
+            try {
+              found = document.querySelectorAll(box);
+            } catch {
+              continue;
+            }
+            for (const el of found) el.setAttribute("data-ac-site", "1");
+          }
+        }, refs.map((ref) => this.boxFor(ref))),
+      READ_MS,
+    ).catch(() => undefined);
+  }
+
   abstract fill(
     entry: PlanEntry,
     value: string | readonly string[] | null,

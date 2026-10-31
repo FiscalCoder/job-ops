@@ -266,6 +266,14 @@ async function startAutopilot() {
   await pilot.run();
 }
 
+const isGreenhouse = (url: string) => {
+  try {
+    return /(^|\.)greenhouse\.io$/.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+};
+
 const POSTING_WAIT_MS = 20_000;
 const POSTING_POLL_MS = 2_000;
 
@@ -285,6 +293,8 @@ async function matchPosting(
   // lookup starts here instead of guessing the company's board.
   if (pageKey(item.applicationLink ?? "") !== here)
     await client?.saveApplicationLink(item.jobId, url).catch(() => null);
+  // Greenhouse's own plan leaves out its Employment section: the page reader fills it all.
+  if (isGreenhouse(url)) return null;
   const deadline = Date.now() + POSTING_WAIT_MS;
   for (;;) {
     const current = queueItems.find((i) => i.jobId === item.jobId) ?? item;

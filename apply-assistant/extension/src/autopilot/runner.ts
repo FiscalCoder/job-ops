@@ -231,7 +231,10 @@ export class Autopilot {
           const end = await this.deps.fill(
             item,
             outcome.tabId,
-            ats ? null : (pagedFill(outcome.url) ?? "generic"),
+            // Greenhouse's own plan leaves out its Employment section: read from the page.
+            ats && item.target.ats !== "greenhouse"
+              ? null
+              : (pagedFill(outcome.url) ?? "generic"),
           );
           await this.afterRun(item, end);
           return;

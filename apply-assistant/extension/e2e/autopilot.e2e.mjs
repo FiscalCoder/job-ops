@@ -139,10 +139,14 @@ const SITES = {
   ),
   "https://careers.acme.example:8443/apply/2": FORM,
   "https://careers.gh.example:8443/apply/5": GH_FORM,
+  "https://careers.okta.example:8443/opportunity/7": FORM,
+  "https://careers.ghsite.example:8443/apply/6": GH_FORM,
 };
 
 const VALUES = { "Atlassian leverages technologies such as ICIMS artificial intelligence features to automatically process Talent Data, including your CV": "Proceed", "Full name": "Testy", Email: "testy@example.com", Phone: "9876543210", State: "Tamil Nadu" };
 const navigateAsks = [];
+/** Jobs that reach the queue after autopilot is done. */
+const later = [];
 /** The run's trail, as the extension sends it. */
 const trail = [];
 /** Saved steps by host and question, as the server keeps them. */
@@ -199,7 +203,14 @@ function ghPlan(read) {
 
 function stubServer(route, url) {
   const req = route.request();
-  if (url.pathname === "/queue") return ok(route, JOBS);
+  if (url.pathname === "/queue") return ok(route, [...JOBS, ...later]);
+  // Okta-like: matched to a Greenhouse posting whose page is the company's own form.
+  if (url.pathname === "/plans/okta" && req.method() === "GET")
+    return ok(route, {
+      schemaHash: "gh",
+      summary: { fill: 1 },
+      entries: [{ ref: "first_name", label: "First Name", section: "main", type: "text", required: true, actionClass: "auto", status: "fill", value: "Testy", optionValues: null, source: "bank:stub" }],
+    });
   const nav = /^\/plans\/(\w+)\/navigate$/.exec(url.pathname);
   if (nav) {
     const ask = req.postDataJSON();
@@ -214,7 +225,19 @@ function stubServer(route, url) {
     expired.push({ job: exp[1], ...req.postDataJSON() });
     return ok(route, { jobId: exp[1], status: "expired" });
   }
-  if (url.pathname === "/plans/gh/page") return ok(route, ghPlan(req.postDataJSON()));
+  if (url.pathname === "/plans/gh/page" || url.pathname === "/plans/ghsite/page")
+    return ok(route, ghPlan(req.postDataJSON()));
+  // Greenhouse's own plan for a Greenhouse form: its refs, and no Employment section.
+  if (url.pathname === "/plans/ghsite" && req.method() === "GET")
+    return ok(route, {
+      schemaHash: "ghsite",
+      summary: { fill: 3 },
+      entries: [
+        { ref: "first_name", label: "First Name", section: "main", type: "text", required: true, actionClass: "auto", status: "fill", value: "Testy", optionValues: null, source: "bank:stub" },
+        { ref: "gh_email", label: "Email", section: "main", type: "text", required: true, actionClass: "auto", status: "fill", value: "testy@example.com", optionValues: null, source: "bank:stub" },
+        { ref: "school--0", label: "School", section: "education", type: "select", required: true, actionClass: "auto", status: "fill", value: "Other", optionValues: null, source: "bank:stub" },
+      ],
+    });
   if (url.pathname === "/kit/gh")
     return ok(route, {
       job: { jobId: "gh", title: "Engineer", employer: "gh", location: null, applyUrl: "https://careers.gh.example:8443/apply/5", tailoredSummary: null },
@@ -310,7 +333,7 @@ const formStates = async () =>
   Promise.all(
     context
       .pages()
-      .filter((p) => /\/(form|apply)\//.test(p.url()))
+      .filter((p) => /\/(form|apply|opportunity)\//.test(p.url()))
       .map((p) =>
         p.evaluate(() => ({
           url: location.href,
@@ -434,6 +457,9 @@ try {
   await panel.locator("#autopilot-status").getByText("Engineer gh").waitFor({ timeout: 30_000 });
   await reviewing();
   const gh = context.pages().find((p) => p.url().includes("careers.gh.example"));
+  // The page is checked once more at review: wait for the field it cleared to be filled again.
+  for (let i = 0; i < 40 && (await gh?.evaluate(() => document.getElementById("city").value)) !== "Chennai"; i++)
+    await new Promise((r) => setTimeout(r, 250));
   const ghShown = await gh?.evaluate(() => ({
     companies: [...document.querySelectorAll("[id^=company-name-]")].map((i) => i.value),
     current: [...document.querySelectorAll("[name^=current-role-]")].map((i) => i.checked),
@@ -504,12 +530,88 @@ try {
   await applied.click();
   await panel.getByText("Autopilot finished", { exact: false }).waitFor({ timeout: 30_000 });
   check("autopilot finishes when the queue is done", true);
+
+  // 5. A job matched to a Greenhouse posting whose page is the company's own form (Okta): no
+  // Greenhouse form there, so the page's own form is read and filled (site driver → generic).
+  later.push({
+    jobId: "okta", score: 60, title: "Engineer", employer: "okta", applicationLink: null,
+    jobUrl: "https://careers.okta.example:8443/opportunity/7",
+    plan: { summary: { fill: 1 }, builtAt: "2026-10-31T00:00:00Z" },
+    target: { status: "matched", ats: "greenhouse", postingUrl: "https://careers.okta.example:8443/opportunity/7" },
+  });
+  await panel.locator("#autopilot-status").getByRole("button", { name: "Close" }).click();
+  await panel.locator("#refresh").click();
+  await panel.locator("#queue li", { hasText: "plan ready" }).first().click();
+  await panel.getByRole("button", { name: "Start supervised fill" }).click();
+  await reviewing();
+  const okta = (await formStates()).find((f) => f.url.includes("okta"));
+  const fellBack = await (async () => {
+    for (let i = 0; i < 40 && !trail.some((e) => e.kind === "fallback"); i++)
+      await new Promise((r) => setTimeout(r, 250));
+    return trail.find((e) => e.kind === "fallback")?.message ?? "";
+  })();
+  check(
+    "no Greenhouse form on the posting's page: its own form is read and filled instead",
+    okta?.name === "Testy" && okta.email === "testy@example.com" && /No greenhouse form/.test(fellBack),
+    `${JSON.stringify(okta)} · ${fellBack}`,
+  );
+  await panel.locator("#run-box").getByRole("button", { name: "Abort" }).click();
+  await panel.locator("#run-box").getByRole("button", { name: "Close" }).click();
+
+  // 6. Greenhouse's own driver and plan, then the generic driver: a field Greenhouse's filler
+  // can't set (a list that searches only on Enter), and a section its plan doesn't have
+  // (Employment: a job added with Add another, both filled).
+  later.push({
+    jobId: "ghsite", score: 55, title: "Engineer", employer: "ghsite", applicationLink: null,
+    jobUrl: "https://careers.ghsite.example:8443/apply/6",
+    plan: { summary: { fill: 3 }, builtAt: "2026-10-31T00:00:00Z" },
+    target: { status: "matched", ats: "greenhouse", postingUrl: "https://careers.ghsite.example:8443/apply/6" },
+  });
+  await panel.locator("#refresh").click();
+  await panel.locator("#queue li", { hasText: "AI 55" }).first().click();
+  await panel.getByRole("button", { name: "Start supervised fill" }).click();
+  const heardOf = async (kind) => {
+    for (let i = 0; i < 160 && !trail.some((e) => e.kind === kind); i++)
+      await new Promise((r) => setTimeout(r, 250));
+    return trail.filter((e) => e.kind === kind).map((e) => e.message).join(" | ");
+  };
+  const rest = await heardOf("rest-of-page");
+  // Not autopilot: Claude's drafted answer waits for your Approve; the optional one, your Skip.
+  const runBox = panel.locator("#run-box");
+  await runBox.getByRole("button", { name: "Approve" }).click({ timeout: 60_000 });
+  await runBox.locator(".step-card", { hasText: "Pronouns" }).waitFor({ timeout: 30_000 });
+  await runBox.getByRole("button", { name: "Skip" }).click();
+  await reviewing();
+  const site = context.pages().find((p) => p.url().includes("careers.ghsite.example"));
+  for (let i = 0; i < 40 && (await site?.evaluate(() => document.getElementById("company-name-1")?.value)) !== "EduFund"; i++)
+    await new Promise((r) => setTimeout(r, 250));
+  const siteShown = await site?.evaluate(() => ({
+    first: document.getElementById("first_name").value,
+    school: document.getElementById("school--0").value,
+    companies: [...document.querySelectorAll("[id^=company-name-]")].map((i) => i.value),
+    current: [...document.querySelectorAll("[name^=current-role-]")].map((i) => i.checked),
+  }));
+  const tried = await heardOf("generic-try");
+  check(
+    "a field Greenhouse's filler can't set is set by the generic one before Claude",
+    siteShown?.school === "Other" && /School: .*the generic one did/.test(tried),
+    `${siteShown?.school} · ${tried.slice(0, 200)}`,
+  );
+  check(
+    "the rest of the page (Employment, not in Greenhouse's plan) is filled from the page afterwards",
+    siteShown?.first === "Testy" &&
+      JSON.stringify(siteShown?.companies) === '["Athenahealth","EduFund"]' &&
+      JSON.stringify(siteShown?.current) === "[true,false]" &&
+      /Company name/.test(rest) && !/First Name/.test(rest),
+    `${JSON.stringify(siteShown)} · ${rest.slice(0, 200)}`,
+  );
   check("no errors in the side panel", errors.length === 0, errors.join("; "));
 } catch (error) {
   failures.push(String(error));
   console.log(`FAIL ${error}`);
   const shown = (await panel?.locator("body").innerText().catch(() => "")) ?? "";
   console.log(`Side panel: ${shown.replace(/\s*\n\s*/g, " / ").slice(0, 1500)}`);
+  console.log(`Queue: ${((await panel?.locator("#queue").innerText().catch(() => "")) ?? "").replace(/\s*\n\s*/g, " / ")}`);
   console.log(`Trail:\n  ${trail.map((e) => `${e.kind}: ${e.message}`).slice(-40).join("\n  ")}`);
   console.log(JSON.stringify(navigateAsks.map(({ url, title, text, outline, history }) => ({ url, title, text, outline, history }))));
 } finally {

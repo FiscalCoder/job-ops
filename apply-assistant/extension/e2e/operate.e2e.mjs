@@ -1,7 +1,7 @@
-// "Let Claude do it" through the built extension, on a FAKE company page: a dropdown that
-// opens only from its chevron, so the fill and Claude's HTML steps both fail. You press
-// "Let Claude do it"; a stub server plays Claude's turns (scripted tool calls, as the computer
-// toolset and the element tool send them). Clicks on Submit or another field and a ctrl+w are
+// Claude working a field through the built extension, on a FAKE company page: a dropdown that
+// opens only from its chevron, so the fill and Claude's HTML steps both fail, and Claude takes
+// the field over by itself (no "Let Claude do it" press). A stub server plays Claude's turns
+// (scripted tool calls, as the computer toolset and the element tool send them). Clicks on Submit or another field and a ctrl+w are
 // refused; opening the list by ref and clicking the option by pixel set it; what worked is
 // saved as the site's steps. Nothing real is contacted, and no real Claude is called.
 //   node e2e/operate.e2e.mjs
@@ -240,11 +240,7 @@ try {
   await fill.waitFor({ timeout: 15_000 });
   await fill.click();
 
-  // Offered on every step that waits; this one is the field the fill couldn't set.
-  await panel.getByText("No choice matching", { exact: false }).waitFor({ timeout: 90_000 });
-  const letClaude = panel.getByRole("button", { name: "Let Claude do it" });
-  check("a field the fill and Claude's HTML steps couldn't set offers Let Claude do it", true);
-  await letClaude.click();
+  // The field the fill and Claude's HTML steps couldn't set goes to Claude by itself.
   await panel
     .getByText("Check this page, then continue or submit it there yourself", { exact: false })
     .waitFor({ timeout: 60_000 });
@@ -314,8 +310,9 @@ try {
   for (let i = 0; i < 40 && !trail.some((e) => /set by Claude/.test(e.message)); i++)
     await new Promise((r) => setTimeout(r, 250));
   check(
-    "your click on Let Claude do it and the result are in the trail",
-    trail.some((e) => e.kind === "decision" && /asked Claude to work/.test(e.message)) &&
+    "Claude took the field over by itself (nothing pressed); that and the result are in the trail",
+    trail.some((e) => e.kind === "escalate" && /Claude takes over "Preferred contact"/.test(e.message)) &&
+      !trail.some((e) => e.kind === "decision" && /asked Claude to work/.test(e.message)) &&
       trail.some((e) => e.kind === "step-filled" && /set by Claude/.test(e.message)),
     trail.filter((e) => /decision|step-/.test(e.kind)).map((e) => e.message).join(" | "),
   );

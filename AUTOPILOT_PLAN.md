@@ -191,3 +191,20 @@ Also:
 Next:
 - after the first real autopilot runs, read the `navigate` / `escalate` / `operate` / `recipe` trail events
 - decide with the user whether Claude's drafted answers and consents are approved automatically on autopilot
+
+### H. Order of tries: site driver → generic reader → Claude (asked 2026-10-31)
+
+- H1 ☑ Page: the site's driver finds no form of its kind (Okta's own page behind a Greenhouse
+  posting) → the generic reader plans and fills the page (`start()` → trace "fallback").
+- H2 ☑ Field: what plain code and saved steps can't set goes to Claude by itself in every run,
+  once. A field without a label is described to Claude as the outlined one (it used to be
+  refused: "A field with its screenshot… is needed").
+- H2b ☑ Greenhouse forms ("Fill this page", autopilot) are read generically, because
+  Greenhouse's plan has no Employment section.
+- H3 ☑ Rest of the page: after a site plan, fields it doesn't cover and that are still empty
+  are planned by the generic reader. Only empty ones, so the site plan's answers are never
+  overwritten.
+- H4 ☑ Field: a site driver's failed field is tried by the generic driver on the same element
+  before Claude. Needs the site ref (Greenhouse `school--0`, Ashby `data-field-path`) mapped to
+  the element. Done via `boxFor`: the input inside the site field's box (`genericTry`); H3 is
+  `fillTheRest` (boxes marked `data-ac-site`, `GenericDriver.onlyOpen`).
