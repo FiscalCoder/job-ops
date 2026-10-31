@@ -112,6 +112,13 @@ export function renderAutopilotBar(
         )
       : null,
     status.note ? el("p", { class: "muted" }, status.note) : null,
+    status.notOpened && !finished
+      ? el(
+          "p",
+          { class: "muted" },
+          `Not opened: ${status.notOpened} job(s) only on LinkedIn or a job board (no company link)`,
+        )
+      : null,
     status.cost === undefined || finished ? null : costLine(status.cost),
     autoExpireToggle(autoExpire),
   ];

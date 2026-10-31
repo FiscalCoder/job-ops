@@ -55,6 +55,8 @@ const message = (error: unknown) =>
 
 let client: ApplyClient | null = null;
 let activeRun: RunController | null = null;
+/** Closes the run on screen (as its Close button does). */
+let closeActiveRun: (() => void) | null = null;
 
 const COUNTDOWN_CHOICES = ["3", "1", "0"];
 
@@ -119,6 +121,7 @@ async function startFill(
   const closeRun = () => {
     void kit.close();
     activeRun = null;
+    closeActiveRun = null;
     box.hidden = true;
     $("main").hidden = false;
     // The plan shown before the run is stale (the job may now be applied): reopen it from the queue.
@@ -126,6 +129,7 @@ async function startFill(
     $("plan").replaceChildren();
     void loadQueue();
   };
+  closeActiveRun = closeRun;
   // The run re-renders its part; Ask Claude below it keeps what you typed.
   const runPart = el(
     "div",
@@ -216,6 +220,9 @@ const AUTOPILOT_ERROR_MS = 5_000;
 let autopilot: Autopilot | null = null;
 
 /** Autopilot over the queue: highest score first; you check and submit each application. */
+/** How often autopilot looks whether the run on screen has ended. */
+const RUN_ON_SCREEN_POLL_MS = 1_000;
+
 async function startAutopilot() {
   if (!client || autopilot?.running || activeRun) return;
   const statusBox = $("autopilot-status");
@@ -227,10 +234,18 @@ async function startAutopilot() {
       await loadQueue();
       return queueItems;
     },
-    fill: (item, tabId, paged) =>
-      new Promise<RunEnd>((resolve) => {
+    fill: async (item, tabId, paged) => {
+      // A run still on screen (one you started, or finished and not closed) would refuse this
+      // one, and autopilot would rush on to the next job: a finished one is closed, one still
+      // going is waited for.
+      while (activeRun && pilot.running) {
+        if (activeRun.ended) closeActiveRun?.();
+        else await new Promise((r) => setTimeout(r, RUN_ON_SCREEN_POLL_MS));
+      }
+      return new Promise<RunEnd>((resolve) => {
         void startFill(item, tabId, paged ?? null, { onEnd: resolve });
-      }),
+      });
+    },
     ask: (question) => askOnBar(askBox, question),
     status: (status) =>
       void autoExpireSetting().then((auto) =>

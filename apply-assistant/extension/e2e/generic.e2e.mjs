@@ -110,6 +110,17 @@ const imports = [];
 
 function stubServer(route, url) {
   const req = route.request();
+  // "Claude" taking over a field by itself (any run now): it finishes without setting it, so
+  // the step still waits for you.
+  if (url.pathname === "/plans/stub/operate")
+    return ok(route, {
+      session: "11111111-1111-4111-8111-111111111111",
+      calls: [],
+      done: true,
+      why: "stub: can't set it",
+      cost: 0.01,
+    });
+  if (url.pathname === "/plans/stub/operate/stop") return ok(route, {});
   if (url.pathname === "/test/jobs/456")
     return route.fulfill({ status: 200, contentType: "text/html", body: JOB_PAGE });
   if (url.pathname === "/jobs/import/read") {
@@ -265,7 +276,7 @@ try {
   // you; you skip it.
   const skip = panel.getByRole("button", { name: "Skip" });
   await panel
-    .getByText("didn't set it either", { exact: false })
+    .getByText(/didn't set it either|Claude couldn't set it/)
     .waitFor({ timeout: 90_000 });
   check(
     "a step that would click Submit is refused",
@@ -345,7 +356,7 @@ try {
   await panel.locator("#here").getByRole("button", { name: "Fill this page" }).waitFor({ timeout: 15_000 });
   await panel.locator("#here").getByRole("button", { name: "Fill this page" }).click();
   await panel
-    .getByText("didn't set it either", { exact: false })
+    .getByText(/didn't set it either|Claude couldn't set it/)
     .waitFor({ timeout: 90_000 });
   const notice = await form.evaluate(() => document.querySelector(".dd").textContent);
   check(

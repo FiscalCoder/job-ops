@@ -83,7 +83,7 @@ export function readGenericPage(): GenericPage {
   const CAPTCHA = /recaptcha|hcaptcha|turnstile/i;
   // Words a widget calls itself, not the question ("textbox", "Drop or select (.pdf)").
   const GENERIC =
-    /^(textbox|text|input|search|select|combobox|listbox|choose file|upload|drop or select\b.*)$/i;
+    /^(textbox|text|input|search|select|combobox|listbox|choose( files?)?|upload( files?)?|attach( files?)?|browse|add files?|select files?|drop or select\b.*)$/i;
   const meaningful = (t: string | null | undefined) =>
     t && !GENERIC.test(t.trim()) ? t.trim() : "";
   const shown = (el: Element) => {
@@ -134,7 +134,9 @@ export function readGenericPage(): GenericPage {
       labelledBy(own) ||
       meaningful(text(own)) ||
       meaningful(el.getAttribute("aria-label")) ||
-      text(box?.querySelector("label, legend")) ||
+      meaningful(text(box?.querySelector("label, legend"))) ||
+      // Last: an upload whose own label is its button's word ("Attach") is named by its group.
+      labelledBy(box) ||
       questionAbove(el) ||
       meaningful(el.getAttribute("placeholder")) ||
       el.getAttribute("name") ||
@@ -761,8 +763,18 @@ export class GenericDriver extends TrustedDriver {
   ): Promise<FillOutcome> {
     const first = wanted[0] ?? "";
     switch (kind) {
-      case "select":
-        return this.select(entry.ref, first, entry.alternatives);
+      case "select": {
+        const picked = await this.select(entry.ref, first, entry.alternatives);
+        if (picked.ok) return picked;
+        // Hidden, it stands in for the page's own dropdown, whose list fills only as you use it
+        // (iCIMS's State, listed once the country is picked there): that dropdown, as you would.
+        const shown = await this.visibleStandIn(entry.ref);
+        if (!shown) return picked;
+        const used = await this.custom({ ...entry, ref: shown }, wanted);
+        return used.ok
+          ? used
+          : { ok: false, reason: `${picked.reason}; its dropdown: ${used.reason}` };
+      }
       case "radio":
       case "checkbox":
         return this.choose(entry.ref, wanted);
@@ -785,6 +797,35 @@ export class GenericDriver extends TrustedDriver {
           : ((await this.chooseFromList(entry, wanted)) ?? typed);
       }
     }
+  }
+
+  /**
+   * The visible dropdown a hidden select stands in for: iCIMS names it "<id>_icimsDropdown";
+   * otherwise a combobox beside it. Null when the select is shown itself, or there's none.
+   */
+  private visibleStandIn(ref: string): Promise<string | null> {
+    return within(
+      () =>
+        this.frame.$eval(ref, (el) => {
+          const shown = (e: Element) =>
+            (e as HTMLElement).checkVisibility({ visibilityProperty: true });
+          if (shown(el)) return null;
+          const named = el.id
+            ? document.getElementById(`${el.id}_icimsDropdown`)
+            : null;
+          const beside = el.parentElement?.querySelector(
+            "[role='combobox'], [aria-haspopup='listbox']",
+          );
+          const widget = [named, beside].find(
+            (w): w is HTMLElement => w instanceof HTMLElement && shown(w),
+          );
+          if (!widget) return null;
+          if (widget.id) return `#${CSS.escape(widget.id)}`;
+          widget.setAttribute("data-ac-standin", "1");
+          return "[data-ac-standin='1']";
+        }),
+      READ_MS,
+    ).catch(() => null);
   }
 
   /** A native select: the best-matching option, by its own value. */

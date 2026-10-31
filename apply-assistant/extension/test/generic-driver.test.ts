@@ -199,6 +199,18 @@ const GREENHOUSE_JOB = (n: number) => `<div class="employment-form"><hr>
 <div class="checkbox" id="current-role-${n}"><input type="checkbox" id="current-role-${n}_1" name="current-role-${n}" value="1"><label for="current-role-${n}_1">Current role</label></div>
 </div>`;
 
+describe("Greenhouse's uploads", () => {
+  it("are named by their group (Resume/CV), not their button's word (Attach)", () => {
+    document.body.innerHTML = `<form><div class="field-wrapper"><div role="group" aria-labelledby="upload-label-resume" class="file-upload">
+<div id="upload-label-resume" class="label upload-label">Resume/CV<span class="required">*</span></div>
+<div class="button-container"><button type="button">Attach</button><label class="visually-hidden" for="resume">Attach</label>
+<input id="resume" class="visually-hidden" type="file"></div></div></div></form>`;
+    expect(readGenericPage().fields.map((f) => [f.label, f.kind])).toEqual([
+      ["Resume/CV", "file"],
+    ]);
+  });
+});
+
 describe("Greenhouse's employment entries", () => {
   it("each numbered entry is a block headed by its section; other numbered fields aren't", () => {
     document.body.innerHTML = `<form>

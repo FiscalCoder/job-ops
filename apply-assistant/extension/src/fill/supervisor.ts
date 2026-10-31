@@ -46,7 +46,7 @@ export interface Step {
   /** Why the step is waiting for you (needs-you reason, failed read-back, ...). */
   readonly note?: string;
   readonly decision?: Decision;
-  readonly decidedBy?: "countdown" | "you";
+  readonly decidedBy?: "countdown" | "you" | "autopilot";
   readonly result?: string;
   /** Failed fill attempts on this step; after MAX_ATTEMPTS, Approve stops retrying. */
   readonly attempts?: number;
@@ -69,10 +69,11 @@ export interface RunState {
 
 export type RunEvent =
   | { type: "countdown-finished" }
-  | { type: "approve" }
+  /** by: autopilot approved it (not you), so it isn't counted as yours. */
+  | { type: "approve"; by?: "autopilot" }
   | { type: "approve-remaining-auto" }
   | { type: "edit"; value: string | readonly string[] }
-  | { type: "skip" }
+  | { type: "skip"; by?: "autopilot" }
   | { type: "i-did-it"; value?: string }
   /** A field the fill couldn't set: Claude works it on the page instead. */
   | { type: "let-claude" }
@@ -306,7 +307,7 @@ export function reduce(state: RunState, event: RunEvent): RunState {
       return replaceStep(state, {
         state: "running",
         decision: "approved",
-        decidedBy: "you",
+        decidedBy: event.by ?? "you",
       });
     case "edit":
       return replaceStep(state, {
@@ -322,7 +323,7 @@ export function reduce(state: RunState, event: RunEvent): RunState {
         replaceStep(state, {
           state: "skipped",
           decision: "skipped",
-          decidedBy: "you",
+          decidedBy: event.by ?? "you",
           result: "skipped",
         }),
       );

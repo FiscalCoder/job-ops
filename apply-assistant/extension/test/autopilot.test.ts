@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APPLY, CLOSED, NEVER, readNavPage } from "../src/autopilot/nav-page";
 import { savedRef } from "../src/autopilot/navigator";
-import { autopilotOrder, startLink } from "../src/autopilot/runner";
+import { autopilotOrder, openLink, startLink } from "../src/autopilot/runner";
 import type { QueueItem } from "../src/lib/api";
 
 /** Autopilot: reading pages on the way to a form, and which jobs it opens, in which order. */
@@ -49,6 +49,29 @@ describe("reading a page on the way to the form", () => {
     expect(readNavPage().form).toBe(false);
     document.body.innerHTML = `<h1>Sign in to apply</h1><input type="email"><input type="password"><button>Sign in</button>`;
     expect(readNavPage()).toMatchObject({ login: true, form: false });
+  });
+
+  it("a form embedded from another site (Greenhouse's frame on Avathon's page) is found by its address", () => {
+    document.body.innerHTML = `<main><h1>Careers</h1>
+      <iframe src="https://job-boards.greenhouse.io/embed/job_app?for=avathon&token=4714148005"></iframe>
+      <iframe src="https://www.youtube.com/embed/x"></iframe></main>`;
+    const page = readNavPage();
+    expect(page.form).toBe(false);
+    expect(page.embeds).toEqual([
+      "https://job-boards.greenhouse.io/embed/job_app?for=avathon&token=4714148005",
+    ]);
+  });
+
+  it("a job alert's email box beside Apply isn't the form (Danaher): Apply is clicked", () => {
+    document.body.innerHTML = `<main><h1>Full Stack Senior Software Engineer</h1>
+      <button>Apply Now</button><input type="checkbox" id="save-1-R13"><label for="alert">Enter Email address</label>
+      <input type="email" id="alert"><input type="text" id="keyword"></main>`;
+    const page = readNavPage();
+    expect(page.form).toBe(false);
+    expect(page.apply.map((a) => a.text)).toContain("Apply Now");
+    // With a name to give too, it is one.
+    document.body.innerHTML += `<input id="first_name">`;
+    expect(readNavPage().form).toBe(true);
   });
 
   it("a closed posting says so near the top", () => {
@@ -125,6 +148,13 @@ describe("which jobs, in which order", () => {
       startLink(item("b", { applicationLink: "https://www.linkedin.com/jobs/view/1" })),
     ).toBe("https://careers.acme.example/jobs/1");
     expect(startLink(item("c", { jobUrl: "https://in.indeed.com/viewjob?jk=1" }))).toBeNull();
+  });
+
+  it("a known system's posting is opened there; a job with no company link isn't opened (or counted)", () => {
+    expect(
+      openLink(item("g", { target: { status: "matched", ats: "greenhouse", postingUrl: "https://job-boards.greenhouse.io/x/jobs/1" } })),
+    ).toBe("https://job-boards.greenhouse.io/x/jobs/1");
+    expect(openLink(item("l", { jobUrl: "https://www.linkedin.com/jobs/view/9" }))).toBeNull();
   });
 });
 

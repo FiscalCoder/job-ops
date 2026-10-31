@@ -22,6 +22,12 @@ export interface NavPage {
   readonly text: string;
   /** A short fingerprint of the page, to notice when a click changed nothing. */
   readonly fingerprint: string;
+  /**
+   * Application forms embedded from another site (Greenhouse's job_app frame on a company
+   * page): their addresses, to open when nothing else leads to the form (the frame itself
+   * can't be read from here).
+   */
+  readonly embeds: readonly string[];
 }
 
 /** Wording of a closed, expired or missing posting. */
@@ -79,7 +85,12 @@ export function readNavPage(): NavPage {
     `${headings} ${text.slice(0, 1_500)}`,
   );
   const login = password && signIn && !file;
-  const form = !login && inputs.length >= 3 && (email || file);
+  const named = inputs.some((i) =>
+    /name/i.test(`${i.name} ${i.id} ${i.getAttribute("autocomplete") ?? ""}`),
+  );
+  // An email box alone is a job alert (Danaher's page), not the application: that asks for
+  // your name or a resume too.
+  const form = !login && inputs.length >= 3 && (file || (email && named));
 
   const clickables = [
     ...document.querySelectorAll<HTMLElement>(
@@ -121,5 +132,13 @@ export function readNavPage(): NavPage {
     outline: lines.join("\n").slice(0, 12_000),
     text,
     fingerprint: `${location.href}|${inputs.length}|${text.length}|${text.slice(0, 200)}`,
+    embeds: [...document.querySelectorAll<HTMLIFrameElement>("iframe[src]")]
+      .map((f) => f.src)
+      .filter((src) =>
+        /greenhouse\.io\/embed\/job_app|jobs\.lever\.co\/[^?#]+\/apply|jobs\.ashbyhq\.com\/[^?#]+\/(application|embed)|myworkdayjobs\.com\/.*\/apply/i.test(
+          src,
+        ),
+      )
+      .slice(0, 3),
   };
 }

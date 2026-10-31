@@ -34,6 +34,8 @@ export interface AutopilotStatus {
   readonly cost?: number;
   /** You paused autopilot: the current fill is paused and no next job starts. */
   readonly paused?: boolean;
+  /** Queued jobs it doesn't open: only on LinkedIn or a job board (no company link). */
+  readonly notOpened?: number;
 }
 
 export interface AutopilotDeps {
@@ -70,6 +72,13 @@ export function startLink(item: QueueItem): string | null {
   if (allowed(item.applicationLink)) return item.applicationLink;
   if (allowed(item.jobUrl)) return item.jobUrl;
   return null;
+}
+
+/** Where autopilot opens the job: its known system's posting, else its link; null if neither. */
+export function openLink(item: QueueItem): string | null {
+  return item.target.postingUrl && item.target.ats
+    ? item.target.postingUrl
+    : startLink(item);
 }
 
 /** Highest score first; companies whose limit is used up are left out. */
@@ -141,8 +150,12 @@ export class Autopilot {
     while (!this.stopped) {
       await this.whilePaused();
       if (this.stopped) break;
-      const left = autopilotOrder(await this.deps.queue()).filter(
-        (i) => !this.started.has(i.jobId),
+      const ordered = autopilotOrder(await this.deps.queue());
+      // Jobs with nowhere to open (only LinkedIn or a job board) aren't counted as jobs done:
+      // the bar says how many there are.
+      const notOpened = ordered.filter((i) => !openLink(i)).length;
+      const left = ordered.filter(
+        (i) => !this.started.has(i.jobId) && openLink(i),
       );
       const item = left[0];
       if (!item) break;
@@ -152,7 +165,13 @@ export class Autopilot {
       const total = done - 1 + left.length;
       // The bar shows what Claude has cost on this job, kept up to date while it runs.
       const since = new Date().toISOString();
-      let shown: AutopilotStatus = { item, done, total, phase: "finding the form" };
+      let shown: AutopilotStatus = {
+        item,
+        done,
+        total,
+        phase: "finding the form",
+        ...(notOpened ? { notOpened } : {}),
+      };
       let cost: number | undefined;
       const report = (status: AutopilotStatus) => {
         shown = status;
@@ -168,14 +187,13 @@ export class Autopilot {
           })
           .catch(() => {});
       }, COST_POLL_MS);
+      const counts = { item, done, total, ...(notOpened ? { notOpened } : {}) };
       await this.runJob(item, (phase, note) =>
-        report({ item, done, total, phase, ...(note ? { note } : {}) }),
+        report({ ...counts, phase, ...(note ? { note } : {}) }),
       )
         .catch((error: unknown) =>
           report({
-            item,
-            done,
-            total,
+            ...counts,
             phase: "waiting for you",
             note: `Something went wrong: ${errorText(error)}; going on to the next job`,
           }),
@@ -210,13 +228,24 @@ export class Autopilot {
     const trace = new TraceRecorder(this.deps.client, item.jobId);
     trace.event("autopilot", `Autopilot opened ${link}`, { data: { link, score: item.score } });
     const stopped = () => this.stopped || this.skipping;
-    const look = (tabId: number) =>
+    // Anything going wrong while looking is put to you, never skipped silently.
+    const look = (tabId: number): Promise<NavOutcome> =>
       findForm(tabId, {
         client: this.deps.client,
         jobId: item.jobId,
         trace,
         stopped,
         checkOnly: ats,
+        link,
+      }).catch((error: unknown) => {
+        const why = errorText(error);
+        trace.event("error", `Couldn't find the form: ${why}`);
+        return {
+          kind: "stuck",
+          tabId,
+          url: "",
+          reason: `Couldn't read the page (${why}). Open the application form yourself, then Continue`,
+        };
       });
     let outcome: NavOutcome = await look(tab.id);
     try {

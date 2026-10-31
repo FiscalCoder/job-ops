@@ -423,8 +423,8 @@ export function renderRun(
                 {},
                 el("span", { class: `badge ${tone}` }, label),
                 ` ${s.entry.label}`,
-                s.decidedBy === "you"
-                  ? el("span", { class: "muted" }, " · by you")
+                s.decidedBy === "you" || s.decidedBy === "autopilot"
+                  ? el("span", { class: "muted" }, ` · by ${s.decidedBy}`)
                   : null,
               );
             }),

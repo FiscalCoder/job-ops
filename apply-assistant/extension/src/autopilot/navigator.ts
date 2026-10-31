@@ -45,7 +45,19 @@ interface Deps {
   readonly stopped: () => boolean;
   /** Only check the page (closed? broken?), never click: a known system's posting. */
   readonly checkOnly?: boolean;
+  /** The job's link as opened: a page elsewhere means it redirected (a removed posting). */
+  readonly link?: string;
 }
+
+/** The address without its query or fragment, to compare pages. */
+const pathOf = (url: string) => {
+  try {
+    const u = new URL(url);
+    return `${u.host}${u.pathname}`.replace(/\/$/, "");
+  } catch {
+    return url;
+  }
+};
 
 async function attach(tabId: number): Promise<{ browser: Browser; page: Page | null }> {
   const browser = await connect({
@@ -69,13 +81,28 @@ const allTabIds = async () =>
  * The page and every frame in it, read as one: careers pages often put the application
  * (iCIMS, Greenhouse) in a frame. Refs are "<frame>:<mark>" ("0:e3" in the page itself).
  */
+/** Reads of a page still being drawn (Oracle's) before giving up, and the wait between them. */
+const READ_TRIES = 3;
+const READ_RETRY_MS = 1_500;
+
 async function readAll(page: Page): Promise<{ info: NavPage; frames: readonly Frame[] }> {
+  for (let tries = 1; ; tries++) {
+    const read = await readFrames(page);
+    if (read) return read;
+    if (tries >= READ_TRIES) throw new Error("Couldn't read the page");
+    await new Promise((r) => setTimeout(r, READ_RETRY_MS));
+  }
+}
+
+async function readFrames(
+  page: Page,
+): Promise<{ info: NavPage; frames: readonly Frame[] } | null> {
   const frames = [page.mainFrame(), ...page.mainFrame().childFrames()].slice(0, 6);
   const read = await Promise.all(
     frames.map((f) => f.evaluate(readNavPage).catch(() => null) as Promise<NavPage | null>),
   );
   const main = read[0];
-  if (!main) throw new Error("Couldn't read the page");
+  if (!main) return null;
   const prefix = (i: number, line: string) => `${i}:${line}`;
   const parts = read.flatMap((r, i) => (r ? [{ r, i }] : []));
   return {
@@ -100,6 +127,7 @@ async function readAll(page: Page): Promise<{ info: NavPage; frames: readonly Fr
         .join("\n")
         .slice(0, 3_000),
       fingerprint: parts.map(({ r }) => r.fingerprint).join("#"),
+      embeds: parts.flatMap(({ r }) => r.embeds ?? []),
     },
   };
 }
@@ -223,6 +251,10 @@ async function walk(
     try {
       if (!page) return { kind: "stuck", tabId, url, reason: "No page in the tab" };
       const { info, frames } = await readAll(page);
+      // The job's link went elsewhere before anything was clicked (Atlassian's closed iCIMS
+      // posting lands on its all-jobs list): Claude is told, so a general list reads as closed.
+      if (hop === 0 && deps.link && pathOf(deps.link) !== pathOf(info.url))
+        history.push(`the job's link ${deps.link.slice(0, 150)} redirected to this page`);
       deps.trace.event("navigate", `On ${info.url.slice(0, 140)}: ${summary(info)}`, {
         data: { url: info.url, closed: info.closed, form: info.form, login: info.login, apply: info.apply.slice(0, 3) },
       });
@@ -248,6 +280,18 @@ async function walk(
       const known = savedRef(info.outline, await waysFor(host), triedTexts);
       let ref = known || (info.apply.find((a) => !triedTexts.has(a.text.toLowerCase()))?.ref ?? "");
       let by = known ? "this site's saved way" : "plain code";
+      // Nothing to click, but the form is embedded from another site (Greenhouse's frame on
+      // Avathon's page), which can't be read here: open the frame's own address instead.
+      const embed = ref ? undefined : info.embeds.find((e) => !triedTexts.has(e));
+      if (embed) {
+        triedTexts.add(embed);
+        await chrome.tabs.update(tabId, { url: embed });
+        history.push(`opened the embedded application form ${embed.slice(0, 150)}`);
+        deps.trace.event("navigate", `The form is embedded from ${hostOf(embed)}: opened it (${embed.slice(0, 150)})`, {
+          data: { embed },
+        });
+        continue;
+      }
       if (!ref) {
         const shot = await page.screenshot({ type: "jpeg", quality: SHOT_QUALITY, encoding: "base64" });
         const answer = await deps.client

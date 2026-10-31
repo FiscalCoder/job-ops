@@ -208,3 +208,32 @@ Next:
   before Claude. Needs the site ref (Greenhouse `school--0`, Ashby `data-field-path`) mapped to
   the element. Done via `boxFor`: the input inside the site field's box (`genericTry`); H3 is
   `fillTheRest` (boxes marked `data-ac-site`, `GenericDriver.onlyOpen`).
+
+### I. From real runs, 2026-10-31 afternoon (fallbacks only: what works stays as it is)
+
+- I1 ☑ An error while looking for the form (Oracle's page still being drawn) is retried, then
+  put to you as a question with the reason. It's no longer swallowed, which made autopilot jump
+  to the next job.
+- I2 ☑ A job link that redirects to a general job list (Atlassian's closed iCIMS posting) is
+  told to Claude as a redirect, and the prompt counts that as closed.
+- I3 ☑ An upload labelled with its button's word ("Attach", GitLab on Greenhouse) is named by
+  its group ("Resume/CV"), as the last label fallback.
+- I4 ☑ An email box alone (a job alert, Danaher) isn't the application: that needs a name
+  field or an upload.
+- I5 ☑ A run on a company page that leads into Workday's application switches to the Workday
+  driver. "Fill this page" makes the page you're on the run's site (no more "the tab left the
+  job's site").
+- I6 ☑ Autopilot's approvals and skips are recorded as autopilot's, not counted as yours.
+- I7 ☑ A run still on screen makes autopilot wait (a finished one is closed) instead of failing
+  the next job at once and opening job after job.
+- I8 ☑ The page check doesn't redo questions with no answer of yours (Claude would pick one).
+- I9 ☑ A Greenhouse/Lever/Ashby/Workday form embedded from another site, which can't be read,
+  is opened at its own address when nothing else leads to it (Avathon).
+- I10 ☑ A hidden select that fails is retried through the visible dropdown it stands in for
+  (iCIMS "<id>_icimsDropdown") before Claude.
+- I11 ☑ When the page reader takes over from a site's driver, the resume goes first (Toast's
+  resume waited behind a consent click).
+- I12 ☑ Claude gets a second automatic try per field, with its first try's result, as your
+  "Let Claude do it" did (School on iCIMS, a question it first declined).
+- I13 ☑ Jobs with no company link (only LinkedIn or a job board) aren't counted as jobs done;
+  the bar says how many there are ("job 38 of 82" after two applications).

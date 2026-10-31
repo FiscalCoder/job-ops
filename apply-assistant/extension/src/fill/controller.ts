@@ -6,6 +6,7 @@ import {
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import type { ApplyClient, QueueItem } from "../lib/api";
 import { samePosting } from "../lib/tab-match";
+import { isWorkdayApply } from "../track/job-match";
 import { errorText, TraceRecorder } from "../trace/recorder";
 import { setSupervised, trackTab } from "../track/tabs";
 import { attachDriver, formUrlFor, resumeFirst } from "./drivers";
@@ -214,6 +215,9 @@ const FINAL_STEP = /^review$/i;
 const PAGE_SETTLE_MS = 1_500;
 
 /** The server's plan for the page on screen (none on Workday's final Review page). */
+/** Claude works a field by itself at most this often: a first try, then one with its result. */
+const MAX_CLAUDE_TRIES = 2;
+
 /** Claude picks among a list's choices when none is worded like your answer. */
 function chooserFor(client: ApplyClient, jobId: string): Chooser {
   return async (label, wanted, choices) => {
@@ -285,6 +289,11 @@ export class RunController {
   private logged = new Set<number>();
   private resume: ResumeFile | null = null;
   private closed = false;
+
+  /** The run is over (submitted, aborted or stopped); its view may still be on screen. */
+  get ended(): boolean {
+    return this.closed;
+  }
   private reviewTraced = false;
   /** Workday: the wizard step the current steps belong to. */
   private pageStep = "";
@@ -292,8 +301,8 @@ export class RunController {
   private readonly resumeFirst: boolean;
   /** Autopilot: unanswered fields go to Claude, drafts are approved, optional ones skipped. */
   private readonly autopilot: boolean;
-  /** Steps already handed to Claude by themselves: never twice (no loops). */
-  private readonly escalated = new Set<number>();
+  /** How often each step went to Claude by itself: at most MAX_CLAUDE_TRIES (no loops). */
+  private readonly escalated = new Map<number, number>();
   /** Claude's budget for this application is spent: no more hand-overs. */
   private claudeSpent = false;
   /** Autopilot checked this page's filled fields once at review (redone what didn't hold). */
@@ -309,7 +318,8 @@ export class RunController {
     private readonly browser: Browser,
     /** The site's driver; the generic one once the site's plan is done (the rest of the page). */
     private driver: FormDriver,
-    private readonly startHost: string,
+    /** The site being filled: moves with you (Fill this page) and into Workday's application. */
+    private startHost: string,
     private readonly tabId: number,
     entries: readonly PlanEntry[],
     runOptions: {
@@ -394,7 +404,8 @@ export class RunController {
         generic
           ? planPagedPage(client, job.jobId, driver as PagedDriver)
           : Promise.resolve(entries),
-      resumeFirst: resumeFirst(ats),
+      // Read from the page, the resume goes first, as on any company's page.
+      resumeFirst: () => generic || resumeFirst(ats),
     });
   }
 
@@ -451,7 +462,8 @@ export class RunController {
     tabId: number;
     attach: (page: Page) => Promise<FormDriver | null>;
     plan: (driver: FormDriver) => Promise<PlanEntry[]>;
-    resumeFirst: boolean;
+    /** Decided once the form is attached (the driver found decides it). */
+    resumeFirst: boolean | (() => boolean);
     autopilot?: boolean;
   }): Promise<RunController> {
     const { client, job, trace, context, tabId } = options;
@@ -528,7 +540,10 @@ export class RunController {
       entries,
       {
         countdownSeconds: options.countdownSeconds,
-        resumeFirst: options.resumeFirst,
+        resumeFirst:
+          typeof options.resumeFirst === "function"
+            ? options.resumeFirst()
+            : options.resumeFirst,
         autopilot: options.autopilot ?? false,
       },
       options.onChange,
@@ -793,6 +808,29 @@ export class RunController {
   }
 
   /**
+   * A company's page led into Workday's application (Danaher → myworkdayjobs.com): Workday's
+   * own driver from here (its wizard, Add for each job, its dropdowns). True when it switched.
+   */
+  private async toWorkday(): Promise<boolean> {
+    const generic = this.driver;
+    if (!(generic instanceof GenericDriver) || !isWorkdayApply(this.page.url()))
+      return false;
+    const workday = await WorkdayDriver.attach(this.page).catch(() => null);
+    if (!workday) return false;
+    workday.chooser = chooserFor(this.client, this.job.jobId);
+    workday.searchTerms = async (label, wanted) =>
+      (await this.client.searchTerms(this.job.jobId, { label, wanted })).terms;
+    workday.help = generic.help;
+    this.driver = workday;
+    this.startHost = new URL(this.page.url()).host;
+    this.trace.event(
+      "driver",
+      `Now on Workday's application (${this.startHost}): Workday's own filler from here`,
+    );
+    return true;
+  }
+
+  /**
    * A field the site's driver (Greenhouse, Ashby, Lever) couldn't fill, tried by the generic
    * driver on the same input: its typed search, Enter, the plan's fallbacks. Null when there's
    * no site driver or no input in the field's box.
@@ -882,7 +920,14 @@ export class RunController {
     this.rechecked = true;
     const wrong: { step: Step; why: string }[] = [];
     for (const step of this.state.steps) {
-      if (step.state !== "done" || step.entry.type === "file") continue;
+      // Only answers of yours: a question you or Claude settled without one isn't redone
+      // (Claude would pick for you).
+      if (
+        step.state !== "done" ||
+        step.entry.type === "file" ||
+        step.value === null
+      )
+        continue;
       const why = (await this.driver.readBack(step.entry).catch(() => "x")).trim()
         ? await this.driver.invalid?.(step.entry.ref)
         : "empty again after it was filled";
@@ -946,6 +991,8 @@ export class RunController {
     if (!wizard || this.busy || this.closed || this.tabClosed) return;
     this.clearTimer();
     this.trace.event("decision", "You asked to fill the page on screen");
+    // The page you're on is the one to fill, whichever site it's on now.
+    this.startHost = new URL(this.page.url()).host;
     void (async () => {
       if (wizard instanceof GenericDriver) await wizard.findFormFrame();
       await this.nextPage((await wizard.step()) || this.pageStep || "this page");
@@ -1042,9 +1089,11 @@ export class RunController {
    * field you chose when you asked to fill from one.
    */
   private async nextPage(step: string, choice?: PageChoice): Promise<void> {
-    const wizard = this.wizard;
-    if (!wizard || this.closed) return;
+    if (!this.wizard || this.closed) return;
     this.clearTimer();
+    if (await this.toWorkday()) step = (await this.wizard?.step()) || step;
+    const wizard = this.wizard;
+    if (!wizard) return;
     this.busy = true;
     this.notice = null;
     this.problems = [];
@@ -1201,8 +1250,9 @@ export class RunController {
           ? { type: "filled", result: outcome.result }
           : { type: "fill-failed", reason: outcome.reason },
       );
-      // Plain code failed: Claude tries it (not again when this was Claude's own try).
-      if (!outcome.ok && !step.operate) this.escalate(step, outcome.reason);
+      // Not filled: Claude tries it; after Claude's own try, once more with what that did (as
+      // your "Let Claude do it" would: it settles a question it declined, a list it missed).
+      if (!outcome.ok) this.escalate(step, outcome.reason);
     } catch (error) {
       await this.traceFailure(step, errorText(error));
       this.apply({ type: "fill-failed", reason: errorText(error) });
@@ -1233,7 +1283,7 @@ export class RunController {
         `Autopilot left "${step.entry.label}" empty (optional, no answer of yours)`,
         { stepSeq: step.seq },
       );
-      this.apply({ type: "skip" });
+      this.apply({ type: "skip", by: "autopilot" });
       return true;
     }
     this.trace.event(
@@ -1241,7 +1291,7 @@ export class RunController {
       `Autopilot approved "${step.entry.label}" (${step.entry.source})`,
       { stepSeq: step.seq, data: { source: step.entry.source } },
     );
-    this.apply({ type: "approve" });
+    this.apply({ type: "approve", by: "autopilot" });
     return true;
   }
 
@@ -1253,16 +1303,17 @@ export class RunController {
   private escalate(step: Step, why: string): boolean {
     if (
       this.claudeSpent ||
-      this.escalated.has(step.seq) ||
+      (this.escalated.get(step.seq) ?? 0) >= MAX_CLAUDE_TRIES ||
       step.entry.type === "file" ||
       !this.driver.operate ||
       this.state.paused
     )
       return false;
-    this.escalated.add(step.seq);
+    const tries = (this.escalated.get(step.seq) ?? 0) + 1;
+    this.escalated.set(step.seq, tries);
     this.trace.event(
       "escalate",
-      `Claude takes over "${step.entry.label}" on the page (${why.slice(0, 160)})`,
+      `Claude takes over "${step.entry.label}" on the page${tries > 1 ? ", again with what its first try did" : ""} (${why.slice(0, 160)})`,
       { stepSeq: step.seq },
     );
     this.apply({ type: "let-claude" });
