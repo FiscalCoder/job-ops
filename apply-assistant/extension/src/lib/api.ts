@@ -371,6 +371,14 @@ export class ApplyClient implements TraceApi {
     });
   }
 
+  /** The job's form is this Greenhouse, Ashby or Lever posting (reached from a job board). */
+  saveApplicationLink(jobId: string, url: string): Promise<unknown> {
+    return this.request(
+      `/jobs/${encodeURIComponent(jobId)}/application-link`,
+      { url },
+    );
+  }
+
   /** A site's saved steps, by question. */
   recipes(host: string): Promise<
     readonly {

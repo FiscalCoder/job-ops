@@ -191,6 +191,37 @@ describe("iCIMS work history", () => {
   });
 });
 
+/** Greenhouse's job boards: numbered entries in a form headed "Employment", no fieldset. */
+const GREENHOUSE_JOB = (n: number) => `<div class="employment-form"><hr>
+<div class="header-row"><p class="body body--medium">Employment</p></div>
+<div class="input-wrapper"><label id="company-name-${n}-label" for="company-name-${n}">Company name<span aria-hidden="true">*</span></label><input id="company-name-${n}" aria-required="true" type="text"></div>
+<div class="input-wrapper"><label id="start-date-month-${n}-label" for="start-date-month-${n}">Start date month</label><input id="start-date-month-${n}" role="combobox" aria-labelledby="start-date-month-${n}-label"><input required tabindex="-1" aria-hidden="true" value=""></div>
+<div class="checkbox" id="current-role-${n}"><input type="checkbox" id="current-role-${n}_1" name="current-role-${n}" value="1"><label for="current-role-${n}_1">Current role</label></div>
+</div>`;
+
+describe("Greenhouse's employment entries", () => {
+  it("each numbered entry is a block headed by its section; other numbered fields aren't", () => {
+    document.body.innerHTML = `<form>
+<div class="input-wrapper"><label for="question_37942702002">How did you hear about us?</label><input id="question_37942702002"></div>
+<div class="employment--container">${GREENHOUSE_JOB(0)}${GREENHOUSE_JOB(1)}<button class="add-another-button" type="button">Add another</button></div>
+<div class="input-wrapper"><label for="answer_2">Notice period</label><input id="answer_2"></div>
+</form>`;
+    const fields = readGenericPage().fields;
+    expect(fields.map((f) => [f.label, f.kind, f.block?.id ?? ""])).toEqual([
+      ["How did you hear about us?", "text", ""],
+      ["Company name", "text", "Employment-0"],
+      ["Start date month", "search", "Employment-0"],
+      ["Current role", "checkbox", "Employment-0"],
+      ["Company name", "text", "Employment-1"],
+      ["Start date month", "search", "Employment-1"],
+      ["Current role", "checkbox", "Employment-1"],
+      // Numbered, but in the form itself: not an entry.
+      ["Notice period", "text", ""],
+    ]);
+    expect(fields[1]?.block?.heading).toBe("Employment");
+  });
+});
+
 describe("dropdown prompts", () => {
   it("are never choices", () => {
     for (const prompt of ["— Make a Selection —", "Select…", "Please select", "-- Choose one --", "No states available"])

@@ -37,6 +37,8 @@ export interface FormDriver {
   readBack(entry: PlanEntry): Promise<string>;
   /** Validation messages and visible CAPTCHAs: things a person has to look at. */
   problems(): Promise<string[]>;
+  /** Why the page marks this field invalid (its own message), or null when it doesn't. */
+  invalid?(ref: string): Promise<string | null>;
   /** True once the system shows its confirmation (you clicked Submit). */
   submitted(): Promise<boolean>;
   /** The form's frame as markup with current values, for the run trace. */
@@ -95,7 +97,7 @@ export async function within<T>(read: () => Promise<T>, ms: number): Promise<T> 
 const SUBMITTED_CHECK_MS = 3_000;
 
 const CONFIRMATION =
-  /thank you for (applying|your application)|thanks for applying|application (has been |was )?(successfully )?(submitted|received)/i;
+  /thank you for (applying|your application)|thanks for applying|application (has been |was )?(successfully )?(submitted|received)|\bapplied today\b|\b(successfully|already) applied (for|to)\b/i;
 
 export abstract class TrustedDriver implements FormDriver {
   protected constructor(
@@ -297,6 +299,30 @@ export abstract class TrustedDriver implements FormDriver {
 
   dom(): Promise<DomCapture> {
     return this.frame.evaluate(captureDom, MAX_DOM_CHARS);
+  }
+
+  async invalid(ref: string): Promise<string | null> {
+    return within(
+      () =>
+        this.frame.evaluate((ref) => {
+          const el = document.querySelector(ref);
+          if (el?.getAttribute("aria-invalid") !== "true") return null;
+          // Its message: the elements it points to as its error or description.
+          const said = ["aria-errormessage", "aria-describedby"]
+            .flatMap((a) => (el.getAttribute(a) ?? "").split(/\s+/))
+            .map((id) => (id ? document.getElementById(id) : null))
+            .filter(
+              (m): m is HTMLElement =>
+                m !== null && m.checkVisibility({ visibilityProperty: true }),
+            )
+            .map((m) => (m.textContent ?? "").replace(/\s+/g, " ").trim())
+            .find(Boolean);
+          return said
+            ? `the page says "${said.slice(0, 150)}"`
+            : "the page marks it invalid";
+        }, ref),
+      READ_MS,
+    ).catch(() => null);
   }
 
   async submitted(): Promise<boolean> {

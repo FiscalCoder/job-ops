@@ -170,3 +170,26 @@ describe("a closed posting", () => {
     expect((await call("/jobs/job-1/expire", {})).status).toBe(400);
   });
 });
+
+describe("a job board's link that led to a Greenhouse, Ashby or Lever form", () => {
+  it("becomes the job's application link, without tracking; anything else is refused", async () => {
+    updates.length = 0;
+    const { call } = await serve([]);
+    const res = await call("/jobs/job-1/application-link", {
+      url: "https://job-boards.greenhouse.io/gomotive/jobs/8742067002?utm_source=startup.jobs#application_form",
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.data).toMatchObject({ status: "saved" });
+    expect(updates).toEqual([
+      {
+        id: "job-1",
+        update: { applicationLink: "https://job-boards.greenhouse.io/gomotive/jobs/8742067002" },
+      },
+    ]);
+    const other = await call("/jobs/job-1/application-link", {
+      url: "https://startup.jobs/backend-engineer-motive-2-10573923",
+    });
+    expect(other.status).toBe(400);
+    expect((await call("/jobs/job-9/application-link", { url: "https://jobs.lever.co/acme/abc-123" })).status).toBe(404);
+  });
+});

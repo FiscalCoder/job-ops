@@ -134,8 +134,35 @@ cap, expire), and the extension e2e harness for the navigator with a fake career
 
 ## Open questions
 
-- Should Claude's free-text answers be auto-approved on autopilot? For now no: they wait for a
-  click. Ask the user after the first autopilot runs.
+- ~~Should Claude's free-text answers be auto-approved on autopilot?~~ Decided 2026-10-31: yes
+  (see G1).
+- Greenhouse's own plan (from its API) has no Employment section, so a run on it leaves the
+  section to you. Autopilot fills job-board-reached Greenhouse forms generically for now (G6).
+  Later: let the Greenhouse driver hand fields its plan doesn't cover to the generic reader.
+
+### G. Hands-off autopilot (asked 2026-10-31) ☑ built, not yet deployed
+
+- G1 ☑ No approvals on autopilot. Claude's drafted answers and consents are approved, and an
+  optional field with no answer is left empty. A required one goes to Claude once
+  (`controller.autopilotDecides`).
+- G2 ☑ "Pause autopilot" on the bar (not just Stop). It pauses the fill on screen and holds the
+  next job. Resume keeps what you changed by hand (`Autopilot.pause/resume`).
+- G3 ☑ Claude takes over one field only, then the plain code goes on. This was already so
+  (`escalate` → `let-claude` on that step).
+- G4 ☑ After the page is done (autopilot, once per page): fields that are empty again, or that
+  the page marks invalid (its own message, e.g. "End date must be in the past"), are filled
+  again. Plain code goes first, then Claude with what went wrong
+  (`controller.recheck`, `driver.invalid`).
+- G5 ☑ "Fill from… / only…": the picker's section groups start with "Only this section"
+  (`supervisor.onlySection`, `controller.fillOnly`).
+- G6 ☑ Greenhouse job-board forms: numbered entries (`company-name-0`, `current-role-0_1`)
+  under an "Employment"/"Education" heading are job blocks. "Add another" (not named after the
+  section) is found just after the section's last entry, and Current role is ticked for the
+  current job. Autopilot no longer waits 20 s to match the posting.
+- G7 ☑ Dropdowns that search only on Enter: when typing lists nothing, Enter is pressed once,
+  then the choice is picked. School falls back to "Other", then "Others".
+- G8 ☑ The kit inside a run: "Take over by hand: resume & your answers" stays folded until
+  opened (Save resume / copy path, Attach resume, answers to click or copy).
 
 ## Done so far (2026-10-31, not yet deployed)
 

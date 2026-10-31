@@ -21,6 +21,7 @@ import {
   type RunState,
   reduce,
   type Step,
+  onlySection,
   startingFrom,
   startRun,
 } from "./supervisor";
@@ -212,6 +213,26 @@ const FINAL_STEP = /^review$/i;
 const PAGE_SETTLE_MS = 1_500;
 
 /** The server's plan for the page on screen (none on Workday's final Review page). */
+/** Filling the page again: from a field you chose, or only one section of it. */
+type PageChoice =
+  | { readonly kind: "from"; readonly from: FillFrom }
+  | { readonly kind: "only"; readonly section: string };
+
+function chosen(
+  entries: readonly PlanEntry[],
+  choice: PageChoice,
+  resumeFirst: boolean,
+): PlanEntry[] {
+  return choice.kind === "from"
+    ? startingFrom(entries, choice.from, resumeFirst)
+    : onlySection(entries, choice.section, resumeFirst);
+}
+
+const describeChoice = (choice: PageChoice) =>
+  choice.kind === "from"
+    ? `from "${choice.from.label}"`
+    : `only "${choice.section}"`;
+
 async function planPagedPage(
   client: ApplyClient,
   jobId: string,
@@ -263,6 +284,8 @@ export class RunController {
   private readonly escalated = new Set<number>();
   /** Claude's budget for this application is spent: no more hand-overs. */
   private claudeSpent = false;
+  /** Autopilot checked this page's filled fields once at review (redone what didn't hold). */
+  private rechecked = false;
   private readonly stopWatching: () => void;
 
   private constructor(
@@ -673,17 +696,9 @@ export class RunController {
       }
       case "wait-for-you":
         // Autopilot: a required field with no answer of yours goes to Claude with your saved
-        // answers. Claude's drafted answers and consents still wait for your click.
-        if (
-          action.step.entry.required &&
-          (action.step.entry.status === "needs-you" ||
-            action.step.value === null) &&
-          this.escalate(
-            action.step,
-            action.step.note ?? "no saved answer",
-          )
-        )
-          return this.loop();
+        // answers; an optional one is left empty; Claude's drafted answers and consents are
+        // approved (you check the page before you submit).
+        if (this.autopilotDecides(action.step)) return this.loop();
         await this.mark(
           action.step,
           action.step.note ? "needs you" : "waiting for your click",
@@ -693,6 +708,7 @@ export class RunController {
       case "fill":
         return this.fill(action.step);
       case "review":
+        if (await this.recheck()) return this.loop();
         await this.driver.highlight(
           null,
           this.wizard?.system === "generic"
@@ -745,6 +761,41 @@ export class RunController {
     if (nextAction(this.state).kind !== "paused") return;
     if (await this.submittedMeanwhile()) return;
     this.timer = setTimeout(() => void this.watchPaused(), REVIEW_POLL_MS);
+  }
+
+  /**
+   * Autopilot, once per page at review: fields filled earlier that are empty again or that the
+   * page marks invalid ("End date must be in the past") are filled once more, plain code first
+   * and then Claude, who is told what went wrong. True when it started that.
+   */
+  private async recheck(): Promise<boolean> {
+    if (!this.autopilot || this.rechecked || this.state.paused) return false;
+    this.rechecked = true;
+    const wrong: { step: Step; why: string }[] = [];
+    for (const step of this.state.steps) {
+      if (step.state !== "done" || step.entry.type === "file") continue;
+      const why = (await this.driver.readBack(step.entry).catch(() => "x")).trim()
+        ? await this.driver.invalid?.(step.entry.ref)
+        : "empty again after it was filled";
+      if (why) wrong.push({ step, why });
+    }
+    if (!wrong.length) return false;
+    this.trace.event(
+      "recheck",
+      `Autopilot fills ${wrong.length} field(s) again: ${wrong.map((w) => `${w.step.entry.label} (${w.why})`).join("; ").slice(0, 400)}`,
+      { data: { fields: wrong.map((w) => ({ seq: w.step.seq, why: w.why })) } },
+    );
+    await this.logFinishedSteps();
+    this.restartWith(wrong.map((w) => w.step.entry));
+    // What went wrong goes with each field (Claude sees it if plain code fails again).
+    this.state = {
+      ...this.state,
+      steps: this.state.steps.map((s, i) => ({
+        ...s,
+        note: `Filled before, but ${wrong[i]?.why ?? "it didn't hold"}`,
+      })),
+    };
+    return true;
   }
 
   /** Fields filled earlier that are empty again (a re-render or another field reset them). */
@@ -800,7 +851,6 @@ export class RunController {
   fillFrom(seq: number): void {
     const step = this.state.steps.find((s) => s.seq === seq);
     if (!step || this.busy || this.closed || this.tabClosed) return;
-    this.clearTimer();
     const from: FillFrom = {
       ref: step.entry.ref,
       label: step.entry.label,
@@ -813,35 +863,55 @@ export class RunController {
       `You asked to fill from step ${seq} (${step.entry.label})`,
       { stepSeq: seq, data: { ...from } },
     );
+    this.fillAgain({ kind: "from", from });
+  }
+
+  /** "Only this section": fills that section's fields (a job, a degree) and nothing else. */
+  fillOnly(section: string): void {
+    if (this.busy || this.closed || this.tabClosed) return;
+    this.trace.event("decision", `You asked to fill only "${section}"`, {
+      data: { section },
+    });
+    this.fillAgain({ kind: "only", section });
+  }
+
+  private fillAgain(choice: PageChoice): void {
+    this.clearTimer();
     const wizard = this.wizard;
     if (wizard) {
       void (async () => {
         if (wizard instanceof GenericDriver) await wizard.findFormFrame();
         await this.nextPage(
           (await wizard.step()) || this.pageStep || "this page",
-          from,
+          choice,
         );
       })();
       return;
     }
     void (async () => {
       await this.logFinishedSteps();
-      const entries = startingFrom(
-        this.state.steps.map((s) => s.entry),
-        from,
-        this.resumeFirst,
+      this.restartWith(
+        chosen(
+          this.state.steps.map((s) => s.entry),
+          choice,
+          this.resumeFirst,
+        ),
       );
-      this.state = {
-        ...startRun(entries, {
-          countdownSeconds: this.state.countdownSeconds,
-          resumeFirst: this.resumeFirst,
-          firstSeq: Math.max(0, ...this.state.steps.map((s) => s.seq)) + 1,
-        }),
-        autoApproved: this.state.autoApproved,
-      };
-      this.notice = null;
       void this.loop();
     })();
+  }
+
+  /** The run goes on with these entries as new steps (numbered after those before). */
+  private restartWith(entries: readonly PlanEntry[]): void {
+    this.state = {
+      ...startRun(entries, {
+        countdownSeconds: this.state.countdownSeconds,
+        resumeFirst: this.resumeFirst,
+        firstSeq: Math.max(0, ...this.state.steps.map((s) => s.seq)) + 1,
+      }),
+      autoApproved: this.state.autoApproved,
+    };
+    this.notice = null;
   }
 
   /** While a step waits for you: you may have filled the rest and moved on, or submitted. */
@@ -862,7 +932,7 @@ export class RunController {
    * You clicked Save and Continue (or Back): plan the page now on screen and fill it, from the
    * field you chose when you asked to fill from one.
    */
-  private async nextPage(step: string, from?: FillFrom): Promise<void> {
+  private async nextPage(step: string, choice?: PageChoice): Promise<void> {
     const wizard = this.wizard;
     if (!wizard || this.closed) return;
     this.clearTimer();
@@ -871,6 +941,7 @@ export class RunController {
     this.problems = [];
     this.pageStep = step;
     this.reviewTraced = false;
+    this.rechecked = false;
     this.emit();
     await this.logFinishedSteps();
     const firstSeq = Math.max(0, ...this.state.steps.map((s) => s.seq)) + 1;
@@ -885,12 +956,12 @@ export class RunController {
     try {
       await sleep(PAGE_SETTLE_MS);
       const planned = await planPagedPage(this.client, this.job.jobId, wizard);
-      const entries = from ? startingFrom(planned, from, true) : planned;
+      const entries = choice ? chosen(planned, choice, true) : planned;
       this.state = begin(entries);
       this.trace.event(
         "page",
-        `On ${wizard.system === "workday" ? "Workday page" : "page"} "${step}" with ${entries.length} plan entries${from ? ` (from "${from.label}")` : ""}`,
-        { data: { step, entries: entries.length, ...(from ? { from } : {}) } },
+        `On ${wizard.system === "workday" ? "Workday page" : "page"} "${step}" with ${entries.length} plan entries${choice ? ` (${describeChoice(choice)})` : ""}`,
+        { data: { step, entries: entries.length, ...(choice ? { choice } : {}) } },
       );
       void this.snapshot(`page: ${step}`);
     } catch (error) {
@@ -1034,6 +1105,33 @@ export class RunController {
    * (in the step's note). Once per field and within the application's budget; after that it
    * waits for you.
    */
+  /** Autopilot settles a step that waits for you, without you; false when it can't. */
+  private autopilotDecides(step: Step): boolean {
+    if (!this.autopilot || this.state.paused) return false;
+    const unanswered =
+      step.entry.status === "needs-you" || step.value === null;
+    if (unanswered && step.entry.required)
+      return this.escalate(step, step.note ?? "no saved answer");
+    // Tried already and it failed: Claude had its turn (escalate), so it's yours now.
+    if (step.state === "awaiting-you") return false;
+    if (unanswered) {
+      this.trace.event(
+        "decision",
+        `Autopilot left "${step.entry.label}" empty (optional, no answer of yours)`,
+        { stepSeq: step.seq },
+      );
+      this.apply({ type: "skip" });
+      return true;
+    }
+    this.trace.event(
+      "decision",
+      `Autopilot approved "${step.entry.label}" (${step.entry.source})`,
+      { stepSeq: step.seq, data: { source: step.entry.source } },
+    );
+    this.apply({ type: "approve" });
+    return true;
+  }
+
   private escalate(step: Step, why: string): boolean {
     if (
       !this.autopilot ||

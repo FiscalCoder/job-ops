@@ -71,7 +71,8 @@ export function genericStep(): string {
     .find((h) => (h as HTMLElement).offsetParent !== null)
     ?.textContent?.replace(/\s+/g, " ")
     .trim();
-  return `${location.pathname}${heading ? ` · ${heading.slice(0, 120)}` : ""}`;
+  // At most 200 characters, as the server takes it: the address cut, the heading kept.
+  return `${location.pathname.slice(0, 76)}${heading ? ` · ${heading.slice(0, 120)}` : ""}`;
 }
 
 /** The page's fields; runs inside the page, so it stays self-contained. */
@@ -175,7 +176,7 @@ export function readGenericPage(): GenericPage {
     /^[\s—–\-.…]*(make a selection|select( one| an option)?|choose( one| an option)?|please (select|choose)( one)?|none selected|type to search|no \w+ available)[\s—–\-.…]*$/i;
   const fieldsets = [...document.querySelectorAll("fieldset")];
   /** The fieldset with a heading it sits in: a job or degree on iCIMS. */
-  const blockOf = (el: HTMLElement) => {
+  const fieldsetBlockOf = (el: HTMLElement) => {
     const box = el.closest("fieldset");
     const legend = box?.querySelector(":scope > legend");
     // "Professional Experience (2)* required." → "Professional Experience (2)"
@@ -186,6 +187,44 @@ export function readGenericPage(): GenericPage {
       heading: heading.slice(0, 200),
     };
   };
+  // Numbered entries without a fieldset (Greenhouse: "company-name-0", "current-role-0_1" in a
+  // form headed "Employment"): the entry is the number, the heading the section's above it.
+  const SECTION = /experience|employment|work history|education|academic/i;
+  const ENTRY = /[-_](\d{1,2})(?:_\d+)?$/;
+  const entryOf = (el: Element) =>
+    [el.id, el.getAttribute("name") ?? ""]
+      .map((s) => ENTRY.exec(s)?.[1])
+      .find((n) => n !== undefined);
+  const numberedBlockOf = (el: HTMLElement) => {
+    const entry = entryOf(el);
+    if (entry === undefined) return undefined;
+    let node = el.parentElement;
+    for (let depth = 0; node && depth < 8; depth++) {
+      // Up to the section only: a named field without a number means the whole form.
+      const unnumbered = [
+        ...node.querySelectorAll("input, select, textarea"),
+      ].some(
+        (f) =>
+          (f.id || f.getAttribute("name")) &&
+          f.getAttribute("type") !== "hidden" &&
+          entryOf(f) === undefined,
+      );
+      if (unnumbered) return undefined;
+      const head = [
+        ...node.querySelectorAll("h2, h3, h4, h5, h6, legend, p"),
+      ].find(
+        (h) =>
+          h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING &&
+          text(h).length < 40 &&
+          SECTION.test(text(h)),
+      );
+      if (head) return { id: `${text(head)}-${entry}`, heading: text(head) };
+      node = node.parentElement;
+    }
+    return undefined;
+  };
+  /** The job or degree a field belongs to: a fieldset with a heading, or a numbered entry. */
+  const blockOf = (el: HTMLElement) => fieldsetBlockOf(el) ?? numberedBlockOf(el);
   /** What a field shows now: typed text, the picked option, a dropdown's shown pick. */
   const valueOf = (el: HTMLElement, tag: string): string => {
     const input = el as HTMLInputElement;
@@ -284,7 +323,8 @@ export function readGenericPage(): GenericPage {
     .trim();
   return {
     system: "generic",
-    step: `${location.pathname}${heading ? ` · ${heading.slice(0, 120)}` : ""}`,
+    // As genericStep: at most 200 characters.
+    step: `${location.pathname.slice(0, 76)}${heading ? ` · ${heading.slice(0, 120)}` : ""}`,
     fields,
     sections: [],
   };
@@ -542,56 +582,76 @@ export class GenericDriver extends TrustedDriver {
       }
   }
 
-  /** Blocks headed with the section's name ("Professional Experience (2)"). */
-  private blockCount(section: string): Promise<number> {
-    return within(
-      () =>
-        this.frame.evaluate(
-          (name) =>
-            [...document.querySelectorAll("fieldset > legend")].filter((l) =>
-              (l.textContent ?? "")
-                .replace(/\s+/g, " ")
-                .trim()
-                .toLowerCase()
-                .startsWith(name.toLowerCase()),
-            ).length,
-          section,
-        ),
+  /** The section's blocks as the page reads them, each block's fields in page order. */
+  private async sectionBlocks(section: string): Promise<string[][]> {
+    const page = await within(
+      () => this.frame.evaluate(readGenericPage),
       READ_MS,
-    ).catch(() => 0);
+    ).catch(() => null);
+    const blocks = new Map<string, string[]>();
+    for (const field of page?.fields ?? [])
+      if (field.block?.heading.toLowerCase().startsWith(section.toLowerCase()))
+        blocks.set(field.block.id, [
+          ...(blocks.get(field.block.id) ?? []),
+          field.ref,
+        ]);
+    return [...blocks.values()];
   }
 
-  /** The visible "Add …" control that names the section (the last one, below its blocks). */
+  /** Blocks headed with the section's name ("Professional Experience (2)", "Employment"). */
+  private async blockCount(section: string): Promise<number> {
+    return (await this.sectionBlocks(section)).length;
+  }
+
+  /**
+   * The visible "Add …" control for the section: one that names it ("Add More (Professional
+   * Experience)", the last one below its blocks), or a plain "Add another" just after the
+   * section's last block (Greenhouse).
+   */
   private async addButton(section: string) {
+    const last = (await this.sectionBlocks(section)).at(-1)?.at(-1) ?? null;
     const found = await within(
       () =>
-        this.frame.evaluate((name) => {
-          for (const el of document.querySelectorAll("[data-ac-add]"))
-            el.removeAttribute("data-ac-add");
-          const button = [
-            ...document.querySelectorAll<HTMLElement>(
-              "a, button, [role=button], input[type=button]",
-            ),
-          ]
-            .filter((el) => {
-              const label = (
-                el.textContent ||
-                (el as HTMLInputElement).value ||
-                ""
-              )
+        this.frame.evaluate(
+          (name, lastRef) => {
+            for (const el of document.querySelectorAll("[data-ac-add]"))
+              el.removeAttribute("data-ac-add");
+            const labelOf = (el: HTMLElement) =>
+              (el.textContent || (el as HTMLInputElement).value || "")
                 .replace(/\s+/g, " ")
                 .trim()
                 .toLowerCase();
-              return (
-                /^add\b/.test(label) &&
-                label.includes(name.toLowerCase()) &&
-                el.checkVisibility({ visibilityProperty: true })
+            const adds = (root: ParentNode) =>
+              [
+                ...root.querySelectorAll<HTMLElement>(
+                  "a, button, [role=button], input[type=button]",
+                ),
+              ].filter(
+                (el) =>
+                  /^add\b/.test(labelOf(el)) &&
+                  el.checkVisibility({ visibilityProperty: true }),
               );
-            })
-            .at(-1);
-          button?.setAttribute("data-ac-add", "1");
-          return button !== undefined;
-        }, section),
+            let button = adds(document)
+              .filter((el) => labelOf(el).includes(name.toLowerCase()))
+              .at(-1);
+            // Not named: the nearest one after the section's last field, close around it.
+            const field = lastRef ? document.querySelector(lastRef) : null;
+            let node = field?.parentElement ?? null;
+            for (let depth = 0; !button && field && node && depth < 6; depth++) {
+              button = adds(node).find(
+                (el) =>
+                  field.compareDocumentPosition(el) &
+                    Node.DOCUMENT_POSITION_FOLLOWING &&
+                  /^add (another|more|new)?\b/.test(labelOf(el)),
+              );
+              node = node.parentElement;
+            }
+            button?.setAttribute("data-ac-add", "1");
+            return button !== undefined;
+          },
+          section,
+          last,
+        ),
       READ_MS,
     ).catch(() => false);
     return found ? this.frame.$("[data-ac-add='1']").catch(() => null) : null;
@@ -752,7 +812,9 @@ export class GenericDriver extends TrustedDriver {
     for (const candidate of [wanted, ...(entry.alternatives ?? [])]) {
       await this.clearSearch(ref);
       await this.page.keyboard.sendCharacter(candidate.slice(0, 80));
-      const picked = await pickOpenChoice(this.frame, candidate);
+      const picked =
+        (await pickOpenChoice(this.frame, candidate)) ??
+        (await this.pickAfterEnter(candidate));
       if (picked) {
         await sleep(200);
         return this.verify(ref, picked);
@@ -787,7 +849,9 @@ export class GenericDriver extends TrustedDriver {
     if (await this.frame.evaluate(focusSearchBox, ref).catch(() => false)) {
       for (const candidate of [wanted, ...(entry.alternatives ?? [])]) {
         await this.retype(candidate);
-        const found = await pickOpenChoice(this.frame, candidate);
+        const found =
+          (await pickOpenChoice(this.frame, candidate)) ??
+          (await this.pickAfterEnter(candidate));
         if (found) return this.verify(ref, found);
       }
       await this.retype("");
@@ -799,6 +863,16 @@ export class GenericDriver extends TrustedDriver {
     if (chosen) return chosen;
     await this.page.keyboard.press("Escape");
     return { ok: false, reason: `No choice matching "${wanted}"` };
+  }
+
+  /**
+   * Typed, and nothing is listed: some lists search only on Enter (iCIMS's state list, a school
+   * search). Enter once, then pick. Never while choices show: Enter would pick one of them.
+   */
+  private async pickAfterEnter(candidate: string): Promise<string | null> {
+    if ((await visibleChoices(this.frame, 300)).length) return null;
+    await this.page.keyboard.press("Enter");
+    return pickOpenChoice(this.frame, candidate);
   }
 
   /** Replaces what the focused search box holds with this text. */

@@ -30,6 +30,9 @@ const JOBS = [
   // The same site again: its way to the form was learned on the job before.
   { jobId: "puzzle2", score: 84, jobUrl: "https://careers.puzzle.example:8443/jobs/4" },
   { jobId: "acme", score: 80, jobUrl: "https://careers.acme.example:8443/jobs/2" },
+  // Greenhouse-like: numbered employment entries, Add another, a school search that lists only
+  // on Enter, a drafted answer and an optional one, and a field the page clears once.
+  { jobId: "gh", score: 70, jobUrl: "https://careers.gh.example:8443/apply/5" },
 ].map((j) => ({
   ...j,
   title: `Engineer ${j.jobId}`,
@@ -70,6 +73,52 @@ search.addEventListener("input", () => setTimeout(() => {
 </script>`,
 );
 
+const GH_FORM = page(
+  "Backend Engineer",
+  String.raw`<h1>Backend Engineer</h1><form onsubmit="return false">
+<p><label for="first_name">First Name</label><input id="first_name"></p>
+<p><label for="gh_email">Email</label><input id="gh_email" type="email"></p>
+<p><label for="city">City</label><input id="city"></p>
+<p><label for="why">Why do you want to work here?</label><textarea id="why"></textarea></p>
+<p><label for="pronouns">Pronouns</label><input id="pronouns"></p>
+<div class="employment--container"><div id="entries"></div><button type="button" class="add-another-button" id="add">Add another</button></div>
+<div class="education--container"><div class="education--form"><div class="education--header"><p>Education</p></div>
+<label id="school--0-label" for="school--0">School</label><input id="school--0" role="combobox" aria-autocomplete="list" aria-labelledby="school--0-label" autocomplete="off">
+<ul role="listbox" id="schools"></ul></div></div>
+</form>
+<script>
+const entry = (n) => '<div class="employment-form"><div class="header-row"><p>Employment</p></div>' +
+  '<label for="company-name-' + n + '">Company name</label><input id="company-name-' + n + '" type="text">' +
+  '<div class="checkbox"><input type="checkbox" id="current-role-' + n + '_1" name="current-role-' + n + '" value="1">' +
+  '<label for="current-role-' + n + '_1">Current role</label></div></div>';
+let count = 0;
+const add = () => document.getElementById("entries").insertAdjacentHTML("beforeend", entry(count++));
+add();
+document.getElementById("add").addEventListener("click", () => setTimeout(add, 200));
+// The school list searches only on Enter, and doesn't have yours.
+const school = document.getElementById("school--0"), schools = document.getElementById("schools");
+school.addEventListener("input", () => { schools.innerHTML = ""; });
+school.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  window.enterPressed = (window.enterPressed || 0) + 1;
+  schools.innerHTML = "";
+  for (const s of ["Anna University", "Other"].filter((s) => s.toLowerCase().includes(school.value.toLowerCase()))) {
+    const li = document.createElement("li"); li.setAttribute("role", "option"); li.textContent = s;
+    li.addEventListener("click", () => { school.value = s; schools.innerHTML = ""; });
+    schools.append(li);
+  }
+});
+// City: the page clears it once, a moment after it's first filled (a re-render).
+let cleared = false;
+document.getElementById("city").addEventListener("input", (e) => {
+  if (cleared) return;
+  cleared = true;
+  setTimeout(() => { e.target.value = ""; }, 2500);
+});
+</script>`,
+);
+
 const SITES = {
   "https://boards.closed.example:8443/acme/jobs/7": page("Acme", "<h1>The job you are looking for is no longer open.</h1>"),
   "https://careers.closed.example:8443/jobs/1": page("Careers", "<h1>Sorry, this job is no longer available</h1>"),
@@ -89,16 +138,64 @@ const SITES = {
      <button onclick="window.open('https://careers.acme.example:8443/apply/2', '_blank')">Apply now</button>`,
   ),
   "https://careers.acme.example:8443/apply/2": FORM,
+  "https://careers.gh.example:8443/apply/5": GH_FORM,
 };
 
 const VALUES = { "Atlassian leverages technologies such as ICIMS artificial intelligence features to automatically process Talent Data, including your CV": "Proceed", "Full name": "Testy", Email: "testy@example.com", Phone: "9876543210", State: "Tamil Nadu" };
 const navigateAsks = [];
+/** The run's trail, as the extension sends it. */
+const trail = [];
 /** Saved steps by host and question, as the server keeps them. */
 const recipes = new Map();
 const costAsks = [];
 const expired = [];
 const ok = (route, data) =>
   route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data }) });
+
+/** The Greenhouse-like form's plan, as the server makes it (job blocks, a drafted answer). */
+function ghPlan(read) {
+  const jobs = new Set(read.fields.filter((f) => f.block?.heading === "Employment").map((f) => f.block.id));
+  const COMPANIES = { "Employment-0": "Athenahealth", "Employment-1": "EduFund" };
+  const planned = (f) => {
+    const block = f.block?.id;
+    if (f.label === "First Name") return { value: "Testy" };
+    if (f.label === "Email") return { value: "testy@example.com" };
+    if (f.label === "City") return { value: "Chennai" };
+    if (f.label.startsWith("Why do you want"))
+      return { value: "I like it", actionClass: "confirm", source: "claude:haiku (80%): drafted" };
+    if (f.label === "Pronouns") return { value: null, status: "needs-you", required: false };
+    if (f.label === "Company name") return { value: COMPANIES[block] ?? null };
+    if (f.label === "Current role")
+      return block === "Employment-0" ? { value: "Current role", type: "select" } : { value: null, status: "skip" };
+    if (f.label === "School")
+      return { value: "Ramakrishna Mission Vivekananda College", alternatives: ["Other", "Others"] };
+    return { value: null, status: "skip" };
+  };
+  return {
+    schemaHash: "gh",
+    jobCountry: null,
+    summary: {},
+    // Two jobs on the resume, one entry on the page: Add another first.
+    add: jobs.size < 2 ? [{ section: "Employment", count: 2 - jobs.size }] : [],
+    entries: read.fields.map((f) => {
+      const p = planned(f);
+      return {
+        ref: f.ref,
+        label: f.label,
+        section: "main",
+        type: p.type ?? "text",
+        required: p.required ?? true,
+        actionClass: p.actionClass ?? "auto",
+        status: p.status ?? (p.value === null ? "skip" : "fill"),
+        value: p.value,
+        optionValues: null,
+        source: p.source ?? "bank:stub",
+        ...(p.alternatives ? { alternatives: p.alternatives } : {}),
+        ...(f.block ? { group: f.block.heading } : {}),
+      };
+    }),
+  };
+}
 
 function stubServer(route, url) {
   const req = route.request();
@@ -116,6 +213,18 @@ function stubServer(route, url) {
   if (exp) {
     expired.push({ job: exp[1], ...req.postDataJSON() });
     return ok(route, { jobId: exp[1], status: "expired" });
+  }
+  if (url.pathname === "/plans/gh/page") return ok(route, ghPlan(req.postDataJSON()));
+  if (url.pathname === "/kit/gh")
+    return ok(route, {
+      job: { jobId: "gh", title: "Engineer", employer: "gh", location: null, applyUrl: "https://careers.gh.example:8443/apply/5", tailoredSummary: null },
+      groups: [{ name: "About you", items: [{ key: "identity.first_name", label: "First name", value: "Testy" }] }],
+    });
+  if (url.pathname.startsWith("/trace") && req.method() === "POST") {
+    try {
+      trail.push(...(req.postDataJSON()?.events ?? []));
+    } catch {}
+    return ok(route, {});
   }
   if (/^\/plans\/\w+\/page$/.test(url.pathname)) {
     const read = req.postDataJSON();
@@ -318,12 +427,90 @@ try {
   await ask.getByText("You stopped this application").waitFor({ timeout: 30_000 });
   check("after you abort, you're asked whether to go on", true);
   await ask.getByRole("button", { name: "Next job" }).click();
+
+  // 4. Greenhouse-like: no approvals asked; Add another for the second job; the current one's
+  // box ticked; the school list searched with Enter, "Other" as the last resort; the field the
+  // page cleared filled again after the page was done.
+  await panel.locator("#autopilot-status").getByText("Engineer gh").waitFor({ timeout: 30_000 });
+  await reviewing();
+  const gh = context.pages().find((p) => p.url().includes("careers.gh.example"));
+  const ghShown = await gh?.evaluate(() => ({
+    companies: [...document.querySelectorAll("[id^=company-name-]")].map((i) => i.value),
+    current: [...document.querySelectorAll("[name^=current-role-]")].map((i) => i.checked),
+    school: document.getElementById("school--0").value,
+    enter: window.enterPressed || 0,
+    why: document.getElementById("why").value,
+    pronouns: document.getElementById("pronouns").value,
+    city: document.getElementById("city").value,
+  }));
+  // The trail reaches the server in batches: wait for the recheck to arrive.
+  const heard = async (pattern) => {
+    for (let i = 0; i < 40 && !pattern.test(trail.map((e) => e.message).join(" | ")); i++)
+      await new Promise((r) => setTimeout(r, 250));
+    return trail.map((e) => e.message).join(" | ");
+  };
+  const said = await heard(/Autopilot fills/);
+  check(
+    "a missing job entry is added with Add another and filled; the current job's box ticked",
+    JSON.stringify(ghShown?.companies) === '["Athenahealth","EduFund"]' &&
+      JSON.stringify(ghShown?.current) === "[true,false]",
+    JSON.stringify(ghShown),
+  );
+  check(
+    "a list that searches only on Enter is searched; a school it doesn't have: Other",
+    ghShown?.school === "Other" && ghShown.enter >= 1,
+    JSON.stringify(ghShown),
+  );
+  check(
+    "Claude's drafted answer approved by autopilot; an optional field without an answer left empty",
+    ghShown?.why === "I like it" && ghShown.pronouns === "" &&
+      /Autopilot approved "Why do you want/.test(said) && /Autopilot left "Pronouns" empty/.test(said),
+    said.slice(0, 300),
+  );
+  check(
+    "a field the page cleared after it was filled is filled again once the page is done",
+    ghShown?.city === "Chennai" && /fills 1 field\(s\) again: City/.test(said),
+    `${ghShown?.city} · ${said.match(/Autopilot fills[^|]*/)?.[0] ?? "no recheck"}`,
+  );
+  // Fill only one section: the page read again (Fill this page), then "Only this section".
+  await panel.locator("#run-box").getByRole("button", { name: "Fill this page" }).click();
+  await heard(/You asked to fill the page on screen/);
+  const picker = panel.locator("#run-box select").first();
+  await picker.locator("option", { hasText: "Only this section" }).first().waitFor({ state: "attached", timeout: 60_000 });
+  await picker.selectOption("only:Employment");
+  const onlySaid = await heard(/\(only "Employment"\)/);
+  check(
+    "Fill only a section: that section's fields and nothing else",
+    /On page "[^"]*" with 3 plan entries \(only "Employment"\)/.test(onlySaid),
+    onlySaid.match(/On page[^|]*only[^|]*/)?.[0] ?? "not asked",
+  );
+  await reviewing();
+  // Take over by hand: the kit, folded away until opened.
+  const drawer = panel.locator("#run-box .kit-drawer");
+  await drawer.locator("summary").click();
+  await drawer.getByRole("button", { name: "Save resume, copy path" }).waitFor({ timeout: 10_000 });
+  check(
+    "the kit (resume, your answers) is in the run, folded away until you open it",
+    await drawer.getByText("First name").isVisible(),
+  );
+  // Pause autopilot (not stop): the bar shows it, Resume goes on.
+  const barBox = panel.locator("#autopilot-status");
+  await barBox.getByRole("button", { name: "Pause autopilot" }).click();
+  await barBox.getByRole("button", { name: "Resume autopilot" }).waitFor({ timeout: 5_000 });
+  check("Pause autopilot pauses it (Resume shown)", /paused/.test(await barBox.innerText()));
+  await barBox.getByRole("button", { name: "Resume autopilot" }).click();
+  await barBox.getByRole("button", { name: "Pause autopilot" }).waitFor({ timeout: 5_000 });
+
+  await applied.click();
   await panel.getByText("Autopilot finished", { exact: false }).waitFor({ timeout: 30_000 });
   check("autopilot finishes when the queue is done", true);
   check("no errors in the side panel", errors.length === 0, errors.join("; "));
 } catch (error) {
   failures.push(String(error));
   console.log(`FAIL ${error}`);
+  const shown = (await panel?.locator("body").innerText().catch(() => "")) ?? "";
+  console.log(`Side panel: ${shown.replace(/\s*\n\s*/g, " / ").slice(0, 1500)}`);
+  console.log(`Trail:\n  ${trail.map((e) => `${e.kind}: ${e.message}`).slice(-40).join("\n  ")}`);
   console.log(JSON.stringify(navigateAsks.map(({ url, title, text, outline, history }) => ({ url, title, text, outline, history }))));
 } finally {
   await context.close();

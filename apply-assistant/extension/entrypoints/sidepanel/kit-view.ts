@@ -61,6 +61,11 @@ export interface KitViewOptions {
   readonly onFillHere?: () => Promise<string | null>;
   /** After "I applied" / "Skip job": back to the queue with a note of what was done. */
   readonly onDone?: (note: string) => void;
+  /**
+   * Inside a run (to take over by hand): only the resume and your answers; the run has its
+   * own I applied, Abort and Ask Claude.
+   */
+  readonly embedded?: boolean;
 }
 
 /** How long "Marked Applied" stays visible before the kit closes by itself. */
@@ -69,7 +74,7 @@ const DONE_PAUSE_MS = 900;
 /** Shows the kit in `box`; returns a function that ends the kit session. */
 export async function showKit(
   box: HTMLElement,
-  { client, job, onBack, onFill, onFillHere, onDone }: KitViewOptions,
+  { client, job, onBack, onFill, onFillHere, onDone, embedded }: KitViewOptions,
 ): Promise<() => Promise<void>> {
   const trace = new TraceRecorder(client, job.jobId);
   const close = async () => {
@@ -286,6 +291,20 @@ export async function showKit(
         )
       : null;
 
+  if (embedded) {
+    box.replaceChildren(
+      el("div", { class: "controls" }, saveButton, attachButton),
+      ...(allow ? [allow] : []),
+      el(
+        "p",
+        { class: "muted" },
+        "Select a field on the page, then click an answer to fill it. Otherwise it's copied.",
+      ),
+      status,
+      ...groups,
+    );
+    return close;
+  }
   box.replaceChildren(
     el("div", { class: "row" }, el("strong", {}, "Apply kit"), back),
     el("p", { class: "muted" }, `${kit.job.title} · ${kit.job.employer}`),
@@ -377,4 +396,40 @@ function outcomeButtons(
     ),
     el("div", { class: "controls" }, make("applied"), make("skipped")),
   );
+}
+
+/**
+ * In a run: the kit folded away under "Take over by hand", loaded the first time you open it
+ * (Save resume and copy its path, Attach resume, your answers to click or copy).
+ */
+export function kitDrawer(
+  client: ApplyClient,
+  job: KitViewOptions["job"],
+): { readonly element: HTMLElement; readonly close: () => Promise<void> } {
+  const inner = el("div", { class: "kit-drawer-body" });
+  const drawer = el(
+    "details",
+    { class: "kit-drawer" },
+    el("summary", {}, "Take over by hand: resume & your answers"),
+    inner,
+  ) as HTMLDetailsElement;
+  let closing: Promise<() => Promise<void>> | null = null;
+  drawer.addEventListener("toggle", () => {
+    if (!drawer.open || closing) return;
+    inner.replaceChildren(el("p", { class: "muted" }, "Loading…"));
+    closing = showKit(inner, {
+      client,
+      job,
+      onBack: () => {
+        drawer.open = false;
+      },
+      embedded: true,
+    });
+  });
+  return {
+    element: drawer,
+    close: async () => {
+      if (closing) await (await closing)();
+    },
+  };
 }

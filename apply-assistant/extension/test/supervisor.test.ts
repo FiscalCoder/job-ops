@@ -7,6 +7,7 @@ import {
   type RunEvent,
   type RunState,
   reduce,
+  onlySection,
   startingFrom,
   startRun,
 } from "../src/fill/supervisor";
@@ -301,6 +302,23 @@ describe("startingFrom (Fill from…)", () => {
     expect(
       startingFrom(page, { ref: "#gone", label: "Gone", nth: 0 }, true),
     ).toHaveLength(5);
+  });
+});
+
+describe("onlySection (Fill only this section)", () => {
+  const page = [
+    entry("resume", { type: "file" }),
+    entry("#q", { label: "Notice period" }),
+    entry("#a1", { label: "Employer", group: "Professional Experience (1)" }),
+    entry("#b1", { label: "Employer", group: "Professional Experience (2)" }),
+    entry("#b2", { label: "Title", group: "Professional Experience (2)" }),
+  ];
+  it("that section's fields only, in run order; an unknown section, none", () => {
+    expect(onlySection(page, "Professional Experience (2)", true).map((e) => e.ref)).toEqual([
+      "#b1",
+      "#b2",
+    ]);
+    expect(onlySection(page, "Education", true)).toEqual([]);
   });
 });
 

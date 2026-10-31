@@ -283,8 +283,50 @@ describe("work history blocks on a company's page (iCIMS)", () => {
   });
 });
 
+describe("Greenhouse's numbered employment entries", () => {
+  const block = { id: "Employment-0", heading: "Employment" };
+  const entry = (ref: string, label: string, kind: Field["kind"]) =>
+    field(ref, label, kind, { block, required: kind !== "checkbox" });
+  const page: WorkdayPage = {
+    system: "generic",
+    step: "/gomotive/jobs/1 · Backend Engineer",
+    fields: [
+      entry("#company-name-0", "Company name", "text"),
+      entry("#title-0", "Title", "text"),
+      entry("#start-date-month-0", "Start date month", "search"),
+      entry("#start-date-year-0", "Start date year", "text"),
+      entry("#end-date-month-0", "End date month", "search"),
+      entry("#end-date-year-0", "End date year", "text"),
+      entry('input[name="current-role-0"]', "Current role", "checkbox"),
+    ],
+  };
+  const resume = resumeFacts(fakeDesignResume);
+  const plan = buildPlan({
+    schema: parseGenericPage(page, "Engineer", resume),
+    resume,
+    bank: new Map([...bank, ["work.earliest_start_date", "2026-11-20"]]),
+  });
+  const of = (ref: string) => plan.entries.find((e) => e.ref === ref);
+
+  it("the first entry is your current job: its title and start, Current role ticked, no end", () => {
+    expect(of("#company-name-0")?.value).toBe("Acme");
+    // Never a saved salutation ("Mr.") or your earliest start date.
+    expect(of("#title-0")?.value).toBe("Senior Engineer");
+    expect(of("#start-date-month-0")?.value).toBe("September");
+    expect(of("#start-date-year-0")?.value).toBe("2023");
+    expect(of('input[name="current-role-0"]')?.status).toBe("fill");
+    expect(of("#end-date-month-0")?.status).toBe("skip");
+    expect(of("#end-date-year-0")?.status).toBe("skip");
+  });
+
+  it("one entry for two jobs: one more is added", async () => {
+    const { blocksToAdd } = await import("../src/plan/history-blocks.js");
+    expect(blocksToAdd(page.fields, resume)).toEqual([{ section: "Employment", count: 1 }]);
+  });
+});
+
 describe("searched lists without your answer", () => {
-  it("try a discipline's shorter wording, then Other; a school, Other", async () => {
+  it("try a discipline's shorter wording, then Other; a school, Other or Others", async () => {
     const { educationFallbacks } = await import("../src/plan/planner.js");
     expect(educationFallbacks("discipline", "Information System Management")).toEqual([
       "Information System",
@@ -292,6 +334,7 @@ describe("searched lists without your answer", () => {
     ]);
     expect(educationFallbacks("school", "Ramakrishna Mission Vivekananda College")).toEqual([
       "Other",
+      "Others",
     ]);
     expect(educationFallbacks("degree", "B.Com")).toEqual([]);
   });

@@ -28,7 +28,7 @@ import {
 } from "./autopilot-view";
 import { setUpClaudeSettings } from "./claude-settings";
 import { setUpImport } from "./import-view";
-import { showKit } from "./kit-view";
+import { kitDrawer, showKit } from "./kit-view";
 import { postedText, renderQueue } from "./queue-view";
 import { renderRun as renderRunView } from "./run-view";
 
@@ -108,13 +108,16 @@ async function startFill(
     el("p", { class: "muted" }, "Opening the posting and finding the form…"),
   );
   // A Greenhouse, Ashby or Lever posting is filled from its own form, once it's looked up.
+  // Not on autopilot: Greenhouse's own plan leaves out its Employment section, which the
+  // page reader fills (a job per entry, Add another for the rest).
   const posting =
-    paged === "generic" && tabId !== undefined
+    paged === "generic" && tabId !== undefined && !auto
       ? await matchPosting(tabId, item)
       : null;
   const job = posting ?? item;
   const pagedHow = posting ? null : paged;
   const closeRun = () => {
+    void kit.close();
     activeRun = null;
     box.hidden = true;
     $("main").hidden = false;
@@ -129,7 +132,13 @@ async function startFill(
     {},
     el("p", { class: "muted" }, "Opening the posting and finding the form…"),
   );
-  box.replaceChildren(runPart, askClaude(client, job.jobId));
+  // To take over by hand: the kit, folded away until you open it.
+  const kit = kitDrawer(client, {
+    jobId: job.jobId,
+    title: job.title,
+    employer: job.employer,
+  });
+  box.replaceChildren(runPart, kit.element, askClaude(client, job.jobId));
   // Autopilot goes on to the next job a moment after this run ends (you see how it ended).
   let ended = false;
   const endFor = (end: RunEnd, after: number) => {
@@ -174,6 +183,7 @@ async function startFill(
             }),
           () => activeRun?.refillPage(),
           (seq) => activeRun?.fillFrom(seq),
+          (section) => activeRun?.fillOnly(section),
         );
       },
     };
@@ -236,6 +246,16 @@ async function startAutopilot() {
               pilot.skip();
               void activeRun?.stop();
             },
+            // Pause: the fill on screen pauses too, so you can fix things by hand; Resume goes
+            // on from there, keeping what you changed.
+            pause: () => {
+              pilot.pause();
+              activeRun?.dispatch({ type: "pause" });
+            },
+            resume: () => {
+              pilot.resume();
+              activeRun?.dispatch({ type: "resume" });
+            },
           },
           auto,
         ),
@@ -261,6 +281,10 @@ async function matchPosting(
   const url = (await chrome.tabs.get(tabId).catch(() => null))?.url ?? "";
   if (!isSupportedPosting(url)) return null;
   const here = pageKey(url);
+  // Reached from a job board (startup.jobs): this posting becomes the job's link, so its
+  // lookup starts here instead of guessing the company's board.
+  if (pageKey(item.applicationLink ?? "") !== here)
+    await client?.saveApplicationLink(item.jobId, url).catch(() => null);
   const deadline = Date.now() + POSTING_WAIT_MS;
   for (;;) {
     const current = queueItems.find((i) => i.jobId === item.jobId) ?? item;

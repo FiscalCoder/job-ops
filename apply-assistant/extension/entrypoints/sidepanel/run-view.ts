@@ -248,34 +248,48 @@ function currentCard(
  * "Fill from…": every field of this page (or form), grouped under the page's own headings
  * ("Professional Experience (2)"); picking one fills again from there.
  */
+/**
+ * "Fill from… / only…": one picker for filling again, from a field you choose, or only one
+ * section (a job, a degree): each section's group starts with "Only this section".
+ */
 function fillFromPicker(
   steps: readonly Step[],
   fillFrom: (seq: number) => void,
+  fillOnly?: (section: string) => void,
 ): HTMLElement {
   const picker = el("select", {
-    "aria-label": "Fill from a field",
-    title: "Start filling again from the field you pick; the ones before it stay as they are",
+    "aria-label": "Fill again from a field, or only a section",
+    title:
+      "Fill again from the field you pick (the ones before stay as they are), or only one section",
   }) as HTMLSelectElement;
-  picker.append(el("option", { value: "" }, "Fill from…"));
+  picker.append(el("option", { value: "" }, fillOnly ? "Fill from… / only…" : "Fill from…"));
   let group: HTMLElement = picker;
   let heading: string | undefined;
   for (const step of steps) {
     if (step.entry.group !== heading) {
       heading = step.entry.group;
       group = heading ? el("optgroup", { label: heading }) : picker;
-      if (heading) picker.append(group);
+      if (heading) {
+        picker.append(group);
+        if (fillOnly)
+          group.append(
+            el("option", { value: `only:${heading}` }, `▸ Only this section`),
+          );
+      }
     }
     group.append(
       el(
         "option",
-        { value: String(step.seq) },
+        { value: `from:${step.seq}` },
         `${step.seq}. ${step.entry.label.slice(0, 48)}`,
       ),
     );
   }
   picker.addEventListener("change", () => {
-    const seq = Number(picker.value);
-    if (seq) fillFrom(seq);
+    const [kind, ...rest] = picker.value.split(":");
+    const what = rest.join(":");
+    if (kind === "only" && what) fillOnly?.(what);
+    else if (kind === "from" && Number(what)) fillFrom(Number(what));
   });
   return picker;
 }
@@ -290,6 +304,8 @@ export function renderRun(
   refill?: () => void,
   /** Fill again from the field with this step number. */
   fillFrom?: (seq: number) => void,
+  /** Fill only the section with this heading. */
+  fillOnly?: (section: string) => void,
 ): void {
   const { state, action } = view;
   const finished = state.steps.filter((s) => STATE_LABEL[s.state]);
@@ -309,7 +325,7 @@ export function renderRun(
             ? button("Fill this page", refill, true)
             : null,
           fillFrom && !view.busy && state.steps.length
-            ? fillFromPicker(state.steps, fillFrom)
+            ? fillFromPicker(state.steps, fillFrom, fillOnly)
             : null,
           button("Abort", () => send({ type: "abort" })),
           // You submitted it yourself, at any point: the run ends and the job is marked applied.

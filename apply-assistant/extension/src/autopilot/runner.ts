@@ -32,6 +32,8 @@ export interface AutopilotStatus {
   readonly note?: string;
   /** What Claude has cost on this job so far (dollars), once known. */
   readonly cost?: number;
+  /** You paused autopilot: the current fill is paused and no next job starts. */
+  readonly paused?: boolean;
 }
 
 export interface AutopilotDeps {
@@ -83,15 +85,47 @@ const COST_POLL_MS = 5_000;
 const activeTabId = async (): Promise<number | undefined> =>
   (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.id;
 
+/** How often a paused autopilot looks whether you resumed it. */
+const PAUSED_POLL_MS = 500;
+
 export class Autopilot {
   private stopped = false;
   private skipping = false;
+  private paused = false;
+  private last: AutopilotStatus | null = null;
   private readonly started = new Set<string>();
 
   constructor(private readonly deps: AutopilotDeps) {}
 
   stop(): void {
     this.stopped = true;
+    this.paused = false;
+  }
+
+  /** Hold here: the current fill pauses (the side panel pauses it) and no next job starts. */
+  pause(): void {
+    this.paused = true;
+    this.show(this.last);
+  }
+
+  resume(): void {
+    this.paused = false;
+    this.show(this.last);
+  }
+
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
+  private show(status: AutopilotStatus | null): void {
+    if (!status) return;
+    this.last = status;
+    this.deps.status({ ...status, paused: this.paused });
+  }
+
+  private async whilePaused(): Promise<void> {
+    while (this.paused && !this.stopped)
+      await new Promise((r) => setTimeout(r, PAUSED_POLL_MS));
   }
 
   /** Leave this job (while its form is being found) and go on to the next. */
@@ -105,6 +139,8 @@ export class Autopilot {
 
   async run(): Promise<void> {
     while (!this.stopped) {
+      await this.whilePaused();
+      if (this.stopped) break;
       const left = autopilotOrder(await this.deps.queue()).filter(
         (i) => !this.started.has(i.jobId),
       );
@@ -120,7 +156,7 @@ export class Autopilot {
       let cost: number | undefined;
       const report = (status: AutopilotStatus) => {
         shown = status;
-        this.deps.status(cost === undefined ? status : { ...status, cost });
+        this.show(cost === undefined ? status : { ...status, cost });
       };
       const poll = setInterval(() => {
         void this.deps.client
@@ -147,7 +183,7 @@ export class Autopilot {
         .finally(() => clearInterval(poll));
     }
     this.stopped = true;
-    this.deps.status({
+    this.show({
       item: null,
       done: this.started.size,
       total: this.started.size,
@@ -188,6 +224,9 @@ export class Autopilot {
         if (stopped()) return;
         if (outcome.kind === "form" || (ats && outcome.kind !== "closed")) {
           await trace.close();
+          // Paused while the form was being found: it's filled once you resume.
+          await this.whilePaused();
+          if (stopped()) return;
           status("filling");
           const end = await this.deps.fill(
             item,

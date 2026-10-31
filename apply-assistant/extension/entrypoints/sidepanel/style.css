@@ -416,3 +416,26 @@ p,
 li {
   overflow-wrap: anywhere;
 }
+
+/* In a run: the kit folded away until you take over by hand. */
+.kit-drawer {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin: 8px 0;
+}
+
+.kit-drawer > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.kit-drawer[open] > summary {
+  margin-bottom: 8px;
+}
+
+.kit-drawer-body {
+  display: grid;
+  gap: 8px;
+}

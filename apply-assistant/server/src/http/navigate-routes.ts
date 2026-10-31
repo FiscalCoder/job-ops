@@ -9,6 +9,8 @@ import {
 import { claudeOff } from "../claude/off.js";
 import { traceUsage } from "../claude/usage-trace.js";
 import type { JobOpsApi } from "../jobops/client.js";
+import { classifyApplyUrl } from "../resolver/greenhouse-url.js";
+import type { ApplyTargetsRepo } from "../store/apply-targets-repo.js";
 import { currentUser } from "../store/owner.js";
 import type { TraceRecord } from "../store/trace-store.js";
 import { type AuthedRequest, sendJobOpsFailure } from "./auth.js";
@@ -21,11 +23,21 @@ import { sendError, sendOk } from "./envelope.js";
  */
 
 const expireBody = z.object({ reason: z.string().trim().min(1).max(300) });
+const linkBody = z.object({ url: z.string().url().max(2_000) });
+
+/** A Greenhouse, Ashby or Lever posting's address, without tracking parameters; else null. */
+function postingLink(raw: string): string | null {
+  const kind = classifyApplyUrl(raw).kind;
+  if (kind !== "greenhouse-job" && kind !== "posting") return null;
+  const url = new URL(raw);
+  return `${url.origin}${url.pathname}`;
+}
 
 export function createNavigateRoutes(deps: {
   readonly navigator: Navigator | null;
   readonly answerer: QuestionAnswerer | null;
   readonly jobOps: JobOpsApi;
+  readonly targets?: ApplyTargetsRepo;
   readonly trace?: TraceRecord;
 }) {
   const router = Router();
@@ -100,6 +112,47 @@ export function createNavigateRoutes(deps: {
       sendJobOpsFailure(res, error);
     }
   });
+
+  /**
+   * Autopilot reached the job's form on Greenhouse, Ashby or Lever from a job board's link
+   * (startup.jobs): it becomes the job's application link and its lookup starts from it, so
+   * the run fills it from that system's own form instead of reading the page generically.
+   */
+  router.post(
+    "/jobs/:jobId/application-link",
+    async (req: AuthedRequest, res: Response) => {
+      const body = linkBody.safeParse(req.body);
+      const link = body.success ? postingLink(body.data.url) : null;
+      if (!link) {
+        sendError(res, 400, "INVALID_REQUEST", "Not a Greenhouse, Ashby or Lever posting");
+        return;
+      }
+      const jobId = String(req.params.jobId);
+      const token = req.jobOpsToken ?? "";
+      try {
+        const job = await deps.jobOps.getJob(token, jobId);
+        if (job.applicationLink === link) {
+          sendOk(res, { jobId, status: "unchanged", link });
+          return;
+        }
+        await deps.jobOps.updateJob(token, jobId, { applicationLink: link });
+        await deps.jobOps.addNote(token, jobId, {
+          title: "Apply link found by autopilot",
+          content: `The job's link leads to its application form at ${link}`,
+        });
+        deps.targets?.remove(jobId);
+        trace({
+          jobId,
+          kind: "application-link",
+          message: `Application link saved: ${link}`,
+          data: { link, was: job.applicationLink ?? null },
+        });
+        sendOk(res, { jobId, status: "saved", link });
+      } catch (error) {
+        sendJobOpsFailure(res, error);
+      }
+    },
+  );
 
   return router;
 }

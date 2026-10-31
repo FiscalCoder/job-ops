@@ -221,7 +221,7 @@ export function createApp({
   );
   app.use(
     requireUser,
-    createNavigateRoutes({ navigator, answerer, jobOps, trace: record }),
+    createNavigateRoutes({ navigator, answerer, jobOps, targets, trace: record }),
   );
   const runs = createRunsRepo(db);
   app.use(

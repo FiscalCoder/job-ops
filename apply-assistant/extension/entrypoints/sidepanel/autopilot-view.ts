@@ -66,7 +66,12 @@ function costLine(cost: number): HTMLElement {
 export function renderAutopilotBar(
   box: HTMLElement,
   status: AutopilotStatus,
-  controls: { stop: () => void; skip: () => void },
+  controls: {
+    stop: () => void;
+    skip: () => void;
+    pause: () => void;
+    resume: () => void;
+  },
   autoExpire: boolean,
 ): void {
   const section = box.parentElement ?? box;
@@ -90,7 +95,10 @@ export function renderAutopilotBar(
           ? button("Close", () => {
               section.hidden = true;
             })
-          : button("Skip this job", controls.skip),
+          : status.paused
+            ? button("Resume autopilot", controls.resume, true)
+            : button("Pause autopilot", controls.pause),
+        finished ? null : button("Skip this job", controls.skip),
         finished ? null : button("Stop autopilot", controls.stop),
       ),
     ),
@@ -100,7 +108,7 @@ export function renderAutopilotBar(
           {},
           `${status.item.title} · ${status.item.employer}`,
           status.item.score === null ? null : el("span", { class: "muted" }, ` · score ${status.item.score}`),
-          el("span", { class: "badge" }, ` ${status.phase}`),
+          el("span", { class: "badge" }, ` ${status.paused ? "paused" : status.phase}`),
         )
       : null,
     status.note ? el("p", { class: "muted" }, status.note) : null,

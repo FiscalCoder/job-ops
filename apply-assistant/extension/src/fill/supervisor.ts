@@ -163,6 +163,20 @@ export function startingFrom(
   return index < 0 ? ordered : ordered.slice(index);
 }
 
+/**
+ * "Fill only this section": its entries (a job or degree's heading, e.g. "Employment"), in the
+ * order a run fills them. None found, none.
+ */
+export function onlySection(
+  entries: readonly PlanEntry[],
+  section: string,
+  resumeFirst: boolean,
+): PlanEntry[] {
+  return startRun(entries, { countdownSeconds: 0, resumeFirst })
+    .steps.map((s) => s.entry)
+    .filter((e) => e.group === section);
+}
+
 const current = (state: RunState): Step | undefined =>
   state.steps[state.cursor];
 

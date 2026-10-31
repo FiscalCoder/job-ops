@@ -305,7 +305,8 @@ export function educationFallbacks(
   part: string,
   value: string,
 ): readonly string[] {
-  if (part === "school") return ["Other"];
+  // A college or university the list doesn't have: its "Other" (or "Others") as a last resort.
+  if (part === "school") return ["Other", "Others"];
   if (part !== "discipline" && part !== "fieldOfStudy") return [];
   const words = value.split(/\s+/).filter(Boolean);
   const shorter = [];
