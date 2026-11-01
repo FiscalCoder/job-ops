@@ -24,6 +24,15 @@ const RESULTS_PER_PAGE = 20;
 const REQUEST_TIMEOUT_MS = 45_000;
 const NAVIGATION_TIMEOUT_MS = 60_000;
 const PAGE_DELAY_MS = 1_200;
+/**
+ * Search results carry only a few lines of each posting; shorter than this, the posting is
+ * opened for its full text (a fragment scores as "no language named").
+ */
+const EXCERPT_MAX_CHARS = 800;
+/** New postings opened per run for their full text (about 20 new Naukri jobs a day). */
+const MAX_POSTINGS_OPENED = 40;
+const POSTING_TIMEOUT_MS = 20_000;
+const POSTING_DELAY_MS = 2_000;
 
 type NaukriPlaceholder = {
   type?: unknown;
@@ -370,6 +379,170 @@ export function dedupeNaukriJobs(
   return deduped;
 }
 
+const HTML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  apos: "'",
+  gt: ">",
+  lt: "<",
+  nbsp: " ",
+  quot: '"',
+  rsquo: "'",
+  lsquo: "'",
+  rdquo: '"',
+  ldquo: '"',
+  ndash: "-",
+  mdash: "-",
+  bull: "-",
+};
+
+function decodeHtmlEntities(value: string): string {
+  return value.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity) => {
+    const key = String(entity).toLowerCase();
+    const code = key.startsWith("#x")
+      ? Number.parseInt(key.slice(2), 16)
+      : key.startsWith("#")
+        ? Number.parseInt(key.slice(1), 10)
+        : null;
+    if (code !== null)
+      return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+    return HTML_ENTITIES[key] ?? match;
+  });
+}
+
+/** A posting's HTML as text: one line per paragraph, break or list item ("- "). */
+export function htmlToText(html: string): string {
+  const text = decodeHtmlEntities(
+    html
+      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<li\b[^>]*>/gi, "\n- ")
+      .replace(
+        /<br\s*\/?>|<\/?(p|div|ul|ol|li|h[1-6]|tr|section)\b[^>]*>/gi,
+        "\n",
+      )
+      .replace(/<[^>]+>/g, " "),
+  );
+  return text
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** The full posting from Naukri's job API (`jobDetails.description`, HTML); null if none. */
+export function postingText(json: unknown): string | null {
+  const html = (json as { jobDetails?: { description?: unknown } } | null)
+    ?.jobDetails?.description;
+  if (typeof html !== "string") return null;
+  return htmlToText(html) || null;
+}
+
+const isExcerpt = (job: CreateJobInput) =>
+  (job.jobDescription ?? "").length < EXCERPT_MAX_CHARS;
+
+/** A posting's full text; "blocked" when Naukri shows a challenge or Access Denied. */
+type OpenPosting = (job: CreateJobInput) => Promise<string | null | "blocked">;
+
+/**
+ * Jobs whose description is only the search result's excerpt get the posting's full text,
+ * up to `limit` postings. Not read (timeout, no description), the excerpt stays; blocked,
+ * no more are opened.
+ */
+export async function withFullPostings(
+  jobs: CreateJobInput[],
+  open: OpenPosting,
+  options: { limit: number; delayMs: number; shouldCancel?: () => boolean },
+): Promise<CreateJobInput[]> {
+  const result: CreateJobInput[] = [];
+  let opened = 0;
+  let blocked = false;
+  for (const job of jobs) {
+    if (
+      blocked ||
+      opened >= options.limit ||
+      options.shouldCancel?.() ||
+      !isExcerpt(job)
+    ) {
+      result.push(job);
+      continue;
+    }
+    if (opened > 0 && options.delayMs > 0)
+      await new Promise((resolve) => setTimeout(resolve, options.delayMs));
+    opened += 1;
+    const text = await open(job).catch(() => null);
+    if (text === "blocked") blocked = true;
+    result.push(
+      typeof text === "string" &&
+        text !== "blocked" &&
+        text.length > (job.jobDescription ?? "").length
+        ? { ...job, jobDescription: text }
+        : job,
+    );
+  }
+  return result;
+}
+
+/** Opens the posting's page and reads the job API response it loads. */
+async function openPosting(
+  page: Page,
+  job: CreateJobInput,
+): Promise<string | null | "blocked"> {
+  const id = job.sourceJobId;
+  if (!id) return null;
+  const detail = page
+    .waitForResponse((r) => r.url().includes(`/jobapi/v4/job/${id}`), {
+      timeout: POSTING_TIMEOUT_MS,
+    })
+    .then(
+      (response) => ({ response }),
+      (error: unknown) => ({ error }),
+    );
+  await page.goto(job.jobUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: NAVIGATION_TIMEOUT_MS,
+  });
+  if (await assertNoBlockingChallenge(page, job.jobUrl)) return "blocked";
+  const result = await detail;
+  if ("error" in result || !result.response.ok()) return null;
+  return postingText(await result.response.json().catch(() => null));
+}
+
+/** New jobs with only an excerpt: their postings' full text, in one browser page. */
+async function fillInPostings(params: {
+  browser: Browser;
+  userAgent?: string;
+  cookieStorageDir?: string;
+  jobs: CreateJobInput[];
+  shouldCancel?: () => boolean;
+}): Promise<CreateJobInput[]> {
+  if (!params.jobs.some(isExcerpt)) return params.jobs;
+  const context = await params.browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    ...(params.userAgent ? { userAgent: params.userAgent } : {}),
+  });
+  try {
+    await loadCookies(
+      context,
+      EXTRACTOR_ID,
+      getCloudflareCookieStorageDir(params.cookieStorageDir),
+    );
+    const page = await context.newPage();
+    return await withFullPostings(
+      params.jobs,
+      (job) => openPosting(page, job),
+      {
+        limit: MAX_POSTINGS_OPENED,
+        delayMs: POSTING_DELAY_MS,
+        shouldCancel: params.shouldCancel,
+      },
+    );
+  } catch {
+    // The search results stand as they are.
+    return params.jobs;
+  } finally {
+    await context.close();
+  }
+}
+
 function resolveRunLocations(
   locations: string[] | undefined,
 ): Array<string | null> {
@@ -563,7 +736,13 @@ export async function runNaukri(
 
     return {
       success: true,
-      jobs: dedupeNaukriJobs(allJobs, options.existingJobUrls),
+      jobs: await fillInPostings({
+        browser,
+        userAgent,
+        cookieStorageDir: options.cookieStorageDir,
+        jobs: dedupeNaukriJobs(allJobs, options.existingJobUrls),
+        shouldCancel: options.shouldCancel,
+      }),
     };
   } catch (error) {
     return {

@@ -4,10 +4,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   dedupeNaukriJobs,
+  htmlToText,
   makeSearchPageUrl,
   mapNaukriJob,
+  postingText,
   resolveNaukriMaxJobsPerTerm,
   slugifyKeyword,
+  withFullPostings,
 } from "../src/run";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -140,5 +143,105 @@ describe("naukri extractor mapping", () => {
     expect(source).not.toContain("naukri_captured_requests_debug");
     expect(source).not.toContain("naukri_api_page");
     expect(source).not.toContain("naukri_jobs.json");
+  });
+});
+
+describe("naukri full postings", () => {
+  const job = (id: string, jobDescription?: string) => ({
+    source: "naukri" as const,
+    sourceJobId: id,
+    title: "Software engineer",
+    employer: "Barclays",
+    jobUrl: `https://www.naukri.com/job-${id}`,
+    ...(jobDescription === undefined ? {} : { jobDescription }),
+  });
+  const excerpt =
+    "Platform Engineering<br><br> coaching and developing talent.";
+  const full = `Join us as a Software Engineer. Languages Java (primary). ${"x".repeat(900)}`;
+
+  it("turns the posting's HTML into text with its lines and list items", () => {
+    expect(
+      htmlToText(
+        "<p>Join us &amp; build</p><ul><li>Java (primary)</li><li>Python&nbsp;(advantageous)</li></ul>Pune<br>India",
+      ),
+    ).toBe(
+      [
+        "Join us & build",
+        "- Java (primary)",
+        "- Python (advantageous)",
+        "Pune",
+        "India",
+      ].join("\n"),
+    );
+  });
+
+  it("reads jobDetails.description from the job API; anything else is nothing", () => {
+    expect(
+      postingText({ jobDetails: { description: "<p>Java (primary)</p>" } }),
+    ).toBe("Java (primary)");
+    expect(postingText({ jobDetails: { description: "  " } })).toBeNull();
+    expect(postingText({ jobDetails: {} })).toBeNull();
+    expect(postingText(null)).toBeNull();
+  });
+
+  it("opens only excerpts, keeps the excerpt when the posting can't be read", async () => {
+    const opened: string[] = [];
+    const jobs = await withFullPostings(
+      [job("a", excerpt), job("b", full), job("c"), job("d", excerpt)],
+      async (j) => {
+        opened.push(j.sourceJobId ?? "");
+        return j.sourceJobId === "d" ? null : full;
+      },
+      { limit: 10, delayMs: 0 },
+    );
+    expect(opened).toEqual(["a", "c", "d"]);
+    expect(jobs.map((j) => j.jobDescription)).toEqual([
+      full,
+      full,
+      full,
+      excerpt,
+    ]);
+  });
+
+  it("stops opening postings at the limit, on a block page, or when cancelled", async () => {
+    const opened: string[] = [];
+    const open = async (j: { sourceJobId?: string }) => {
+      opened.push(j.sourceJobId ?? "");
+      return j.sourceJobId === "b" ? ("blocked" as const) : full;
+    };
+    const jobs = await withFullPostings(
+      [job("a", excerpt), job("b", excerpt), job("c", excerpt)],
+      open,
+      { limit: 10, delayMs: 0 },
+    );
+    expect(opened).toEqual(["a", "b"]);
+    expect(jobs.map((j) => j.jobDescription)).toEqual([full, excerpt, excerpt]);
+
+    opened.length = 0;
+    await withFullPostings([job("a", excerpt), job("b2", excerpt)], open, {
+      limit: 1,
+      delayMs: 0,
+    });
+    expect(opened).toEqual(["a"]);
+
+    opened.length = 0;
+    await withFullPostings([job("a", excerpt)], open, {
+      limit: 10,
+      delayMs: 0,
+      shouldCancel: () => true,
+    });
+    expect(opened).toEqual([]);
+  });
+
+  it("a fetch that throws keeps the excerpt and goes on", async () => {
+    const jobs = await withFullPostings(
+      [job("a", excerpt), job("b", excerpt)],
+      async (j) => {
+        if (j.sourceJobId === "a") throw new Error("timeout");
+        return full;
+      },
+      { limit: 10, delayMs: 0 },
+    );
+    expect(jobs.map((j) => j.jobDescription)).toEqual([excerpt, full]);
   });
 });
