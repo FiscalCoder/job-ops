@@ -235,6 +235,35 @@ describe("failures, pause, abort, submit", () => {
     expect(nextAction(state)).toMatchObject({ kind: "countdown" });
   });
 
+  it("paused: you may still skip the field or say you did it; the run stays paused", () => {
+    const paused = apply(run([entry("a"), entry("b"), entry("c")]), { type: "pause" });
+    const skipped = apply(paused, { type: "skip" });
+    expect(skipped.steps[0]?.state).toBe("skipped");
+    expect(skipped.cursor).toBe(1);
+    expect(nextAction(skipped)).toEqual({ kind: "paused" });
+    const yours = apply(skipped, { type: "i-did-it" });
+    expect(yours.steps[1]?.state).toBe("you-did-it");
+    expect(apply(yours, { type: "resume" }).cursor).toBe(2);
+  });
+
+  it("a fill already under way when you pause still lands (it isn't filled again on resume)", () => {
+    const running = apply(run([entry("a"), entry("b")]), { type: "countdown-finished" });
+    const done = apply(running, { type: "pause" }, { type: "filled", result: "ok" });
+    expect(done.steps[0]?.state).toBe("done");
+    expect(done.cursor).toBe(1);
+    expect(done.paused).toBe(true);
+    const failed = apply(running, { type: "pause" }, { type: "fill-failed", reason: "x" });
+    expect(failed.steps[0]?.state).toBe("awaiting-you");
+  });
+
+  it("skipping the field being filled: its late result doesn't touch the next step", () => {
+    const running = apply(run([entry("a"), entry("b")]), { type: "countdown-finished" });
+    const skipped = apply(running, { type: "skip" });
+    expect(skipped.steps[0]?.state).toBe("skipped");
+    expect(apply(skipped, { type: "filled", result: "late" })).toBe(skipped);
+    expect(apply(skipped, { type: "fill-failed", reason: "late" })).toBe(skipped);
+  });
+
   it("ignores fill results that arrive when nothing is running", () => {
     const state = run([entry("a")]);
     expect(reduce(state, { type: "filled", result: "ok" })).toBe(state);

@@ -675,8 +675,15 @@ export class RunController {
       void this.shownOpenFields().then((shown) => {
         if (this.state.paused) this.shownAtPause = shown;
       });
+    // Skip while the field is being filled: it's skipped now; what the fill is doing on the page
+    // ends first (Claude stops at once), then the run goes on (fill() continues it).
+    const skipMidway =
+      event.type === "skip" &&
+      this.busy &&
+      this.state.steps[this.state.cursor]?.state === "running";
     if (
       this.busy &&
+      !skipMidway &&
       event.type !== "pause" &&
       event.type !== "abort" &&
       event.type !== "submitted"
@@ -694,7 +701,17 @@ export class RunController {
         ...(decision.stepSeq ? { stepSeq: decision.stepSeq } : {}),
       });
     this.apply(event);
+    if (skipMidway) {
+      this.notice = "Skipped. The next field starts once the page finishes what it was doing.";
+      this.emit();
+      return;
+    }
     void this.loop();
+  }
+
+  /** You skipped this step while it was being filled: its result no longer counts. */
+  private leftBehind(step: Step): boolean {
+    return this.currentSeq() !== step.seq;
   }
 
   private apply(event: RunEvent) {
@@ -706,8 +723,9 @@ export class RunController {
     const finished = this.state.steps.filter(
       (s) => DONE_STATES.has(s.state) && !this.logged.has(s.seq),
     );
+    // All claimed before the first wait: a second call meanwhile mustn't log them again.
+    for (const step of finished) this.logged.add(step.seq);
     for (const step of finished) {
-      this.logged.add(step.seq);
       await this.client
         .logAction(this.runId, toLogEntry(step))
         .catch((error: unknown) => {
@@ -1229,6 +1247,7 @@ export class RunController {
       autoApproved: this.state.autoApproved,
     };
     this.notice = null;
+    this.shownAtPause = null;
   }
 
   /** While a step waits for you: you may have filled the rest and moved on, or submitted. */
@@ -1268,6 +1287,8 @@ export class RunController {
     this.emit();
     await this.logFinishedSteps();
     const firstSeq = Math.max(0, ...this.state.steps.map((s) => s.seq)) + 1;
+    // Paused while the page was being read and planned: the new plan waits for you too.
+    const pausedBefore = this.state.paused;
     const begin = (entries: readonly PlanEntry[]) => ({
       ...startRun(entries, {
         countdownSeconds: this.state.countdownSeconds,
@@ -1275,6 +1296,7 @@ export class RunController {
         firstSeq,
       }),
       autoApproved: this.state.autoApproved,
+      paused: this.state.paused && !pausedBefore,
     });
     try {
       await sleep(PAGE_SETTLE_MS);
@@ -1287,6 +1309,7 @@ export class RunController {
       const entries = choice ? chosen(planned, choice, true) : planned;
       if (planned.length) this.pageEntries = inFillOrder(planned, true);
       this.state = begin(entries);
+      if (!this.state.paused) this.shownAtPause = null;
       this.claudeTakes(choice);
       this.trace.event(
         "page",
@@ -1356,6 +1379,8 @@ export class RunController {
     if (this.tabClosed) return;
     /** Stuck: the page is read closely and planned again from this field (not the next step). */
     let again: FillFrom | null = null;
+    /** You pressed Skip while it was being filled. */
+    let skipped = false;
     // You moved on before this page was finished: work on the page you're on.
     const moved = await this.movedTo();
     if (moved) return this.nextPage(moved);
@@ -1403,10 +1428,10 @@ export class RunController {
             this.resume ?? undefined,
           );
       // The site's driver couldn't: the generic one, on the same field.
-      if (!outcome.ok && !step.operate)
+      if (!outcome.ok && !step.operate && !this.leftBehind(step))
         outcome = (await this.genericTry(step, outcome.reason)) ?? outcome;
       // Not filled the usual way: this site's saved steps, then Claude's.
-      if (!outcome.ok && !step.operate)
+      if (!outcome.ok && !step.operate && !this.leftBehind(step))
         outcome =
           (await this.driver
             .rescue?.(step.entry, step.value, outcome.reason)
@@ -1426,22 +1451,33 @@ export class RunController {
       else await this.traceFailure(step, outcome.reason);
       if (!outcome.ok && step.operate && BUDGET_SPENT.test(outcome.reason))
         this.claudeSpent = true;
-      this.apply(
-        outcome.ok
-          ? { type: "filled", result: outcome.result }
-          : { type: "fill-failed", reason: outcome.reason },
-      );
+      // You skipped it meanwhile: the result no longer counts; the field is left as it is.
+      skipped = this.leftBehind(step);
+      if (skipped)
+        this.trace.event(
+          "decision",
+          `"${step.entry.label}" was skipped while it was being filled; left as it is on the page`,
+          { stepSeq: step.seq, data: { ok: outcome.ok } },
+        );
+      else
+        this.apply(
+          outcome.ok
+            ? { type: "filled", result: outcome.result }
+            : { type: "fill-failed", reason: outcome.reason },
+        );
       // Not filled: once per page, Claude reads the whole page and it's planned again from here.
-      if (!outcome.ok && !step.operate && this.readCloselyFrom(step))
+      if (!skipped && !outcome.ok && !step.operate && this.readCloselyFrom(step))
         again = this.fromStep(step);
       // Then Claude tries it; after Claude's own try, once more with what that did (as your
       // "Let Claude do it" would: it settles a question it declined, a list it missed).
-      else if (!outcome.ok) this.escalate(step, outcome.reason);
+      else if (!skipped && !outcome.ok) this.escalate(step, outcome.reason);
     } catch (error) {
       await this.traceFailure(step, errorText(error));
-      this.apply({ type: "fill-failed", reason: errorText(error) });
+      skipped = this.leftBehind(step);
+      if (!skipped) this.apply({ type: "fill-failed", reason: errorText(error) });
     } finally {
       if (stall) clearTimeout(stall);
+      if (skipped) this.notice = null;
       this.busy = false;
     }
     if (again)
@@ -1531,7 +1567,11 @@ export class RunController {
           await this.client.stopOperate(jobId, session);
         },
       },
-      () => this.state.paused || this.closed || this.tabClosed,
+      () =>
+        this.state.paused ||
+        this.closed ||
+        this.tabClosed ||
+        this.leftBehind(step),
     );
   }
 

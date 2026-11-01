@@ -52,6 +52,8 @@ notice.addEventListener("input", () => {
 
 const posted = [];
 const operateAsks = [];
+const traced = [];
+let slowClaude = false;
 const ok = (route, data) =>
   route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data }) });
 
@@ -101,8 +103,12 @@ function stubServer(route, url) {
   }
   if (url.pathname === "/plans/stub/operate") {
     operateAsks.push(req.postDataJSON());
-    return ok(route, { session: "11111111-1111-4111-8111-111111111111", calls: [], done: true, why: "stub", cost: 0.01 });
+    const answer = () =>
+      ok(route, { session: "11111111-1111-4111-8111-111111111111", calls: [], done: true, why: "stub", cost: 0.01 });
+    // A slow turn: time to press Skip (or Pause) while Claude works the field.
+    return slowClaude ? new Promise((r) => setTimeout(r, 6_000)).then(answer) : answer();
   }
+  if (url.pathname === "/trace/events") traced.push(req.postData() ?? "");
   if (url.pathname === "/runs" && req.method() === "POST") return ok(route, { id: "stub-run" });
   if (url.pathname.startsWith("/runs/") || url.pathname.startsWith("/trace")) return ok(route, {});
   return ok(route, req.method() === "GET" ? [] : {});
@@ -238,6 +244,56 @@ try {
     `${posted.length - asked} plan(s), screenshot ${last?.screenshot?.length ?? 0} chars`,
   );
   await reviewed();
+
+  // Skip while Claude is working the field: the run goes on without waiting for you.
+  // Distinct steps (a batch may be sent again); every field filled before must not count.
+  const skippedSteps = () =>
+    [
+      ...new Set(
+        traced
+          .flatMap((t) => JSON.parse(t).events ?? [])
+          .filter((e) => e.message.includes("was skipped while it was being filled"))
+          .map((e) => `${e.stepSeq} ${e.message.split('"')[1]}`),
+      ),
+    ];
+  const skippedMidway = () => skippedSteps().length;
+  slowClaude = true;
+  await panel.locator("details.fix-field").evaluate((d) => {
+    d.open = true;
+  });
+  await pick("Notice Period (in days)");
+  await panel.getByRole("button", { name: "Claude fixes it" }).click();
+  await panel.getByText("Claude is working on it", { exact: false }).waitFor({ timeout: 15_000 });
+  const skip = panel.locator(".step-card").getByRole("button", { name: "Skip", exact: true });
+  check("Skip works while the field is being filled", await skip.isEnabled());
+  await skip.click();
+  await reviewed();
+  check(
+    "skipped mid-fill: the run goes on, the field is left as it is",
+    (await until(() => skippedMidway() === 1, 15_000)) && (await value("[name=rec-form_4]")) === "30",
+    skippedSteps().join(" | "),
+  );
+
+  // Paused while a field is being filled: the paused card can skip it, then Resume goes on.
+  await panel.locator("details.fix-field").evaluate((d) => {
+    d.open = true;
+  });
+  await pick("City");
+  await panel.getByRole("button", { name: "Claude fixes it" }).click();
+  await panel.getByText("Claude is working on it", { exact: false }).waitFor({ timeout: 15_000 });
+  await panel.getByRole("button", { name: "Pause", exact: true }).click();
+  const skipPaused = panel.getByRole("button", { name: "Skip this field" });
+  await skipPaused.waitFor({ timeout: 5_000 });
+  check("paused: the field you stopped at can be skipped", await skipPaused.isEnabled());
+  await skipPaused.click();
+  await panel.getByRole("button", { name: "Resume" }).click();
+  await reviewed();
+  check(
+    "skipped while paused, then resumed: on to review",
+    await until(() => skippedMidway() === 2, 15_000),
+    skippedSteps().join(" | "),
+  );
+  slowClaude = false;
   check("no side panel errors", errors.length === 0, errors.join(" | "));
 } catch (error) {
   failures.push(String(error));

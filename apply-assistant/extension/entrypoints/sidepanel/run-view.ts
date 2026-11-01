@@ -207,7 +207,8 @@ function currentCard(
     );
   controls.push(
     button("I'll do it", () => send({ type: "i-did-it" }), false, busy),
-    button("Skip", () => send({ type: "skip" }), false, busy),
+    // While it's being filled too: what's under way ends first, then the run goes on.
+    button("Skip", () => send({ type: "skip" }), false, busy && action.kind !== "fill"),
   );
   return el(
     "div",
@@ -241,6 +242,31 @@ function currentCard(
     step.note && !needsValue ? el("p", { class: "error" }, step.note) : null,
     action.kind === "fill" ? null : editor(step, send, tell),
     el("div", { class: "controls" }, ...controls),
+  );
+}
+
+/** Paused: the field the run stopped at, which you may skip or fill yourself before resuming. */
+function pausedCard(view: RunView, send: Send): HTMLElement {
+  const { state, busy } = view;
+  const step = state.phase === "filling" ? state.steps[state.cursor] : undefined;
+  const note = el(
+    "p",
+    { class: "muted" },
+    "Paused. Nothing happens on the page until you resume.",
+  );
+  if (!step) return note;
+  const running = step.state === "running";
+  return el(
+    "div",
+    { class: "step-card" },
+    el("strong", {}, `${step.seq}/${state.steps.length} · ${step.entry.label}`),
+    note,
+    el(
+      "div",
+      { class: "controls" },
+      button("I'll do it", () => send({ type: "i-did-it" }), false, busy),
+      button("Skip this field", () => send({ type: "skip" }), false, busy && !running),
+    ),
   );
 }
 
@@ -425,12 +451,7 @@ export function renderRun(
   );
 
   let body: HTMLElement | null = currentCard(view, send, tell);
-  if (action.kind === "paused")
-    body = el(
-      "p",
-      { class: "muted" },
-      "Paused. Nothing happens on the page until you resume.",
-    );
+  if (action.kind === "paused") body = pausedCard(view, send);
   // Workday: the next page is still loading, being read and planned.
   if (action.kind === "review" && view.page && view.busy)
     body = el(

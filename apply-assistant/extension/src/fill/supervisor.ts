@@ -281,6 +281,17 @@ export function changedSince(
   );
 }
 
+/**
+ * Paused, nothing new starts on the page; you may still skip the field or say you did it, and
+ * a fill already under way when you paused still lands (else resume would fill it again).
+ */
+const WHILE_PAUSED: ReadonlySet<RunEvent["type"]> = new Set([
+  "skip",
+  "i-did-it",
+  "filled",
+  "fill-failed",
+]);
+
 export function reduce(state: RunState, event: RunEvent): RunState {
   if (state.phase === "finished") return state;
   switch (event.type) {
@@ -299,7 +310,8 @@ export function reduce(state: RunState, event: RunEvent): RunState {
     default:
       break;
   }
-  if (state.phase !== "filling" || state.paused) return state;
+  if (state.phase !== "filling") return state;
+  if (state.paused && !WHILE_PAUSED.has(event.type)) return state;
   const step = current(state);
   if (!step) return state;
 
