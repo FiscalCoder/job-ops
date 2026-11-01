@@ -31,7 +31,7 @@ import {
   type PlanInput,
   summarise,
 } from "./planner.js";
-import { blocksToAdd } from "./history-blocks.js";
+import { blocksToAdd, type UsedEntries, usedEntries } from "./history-blocks.js";
 import { normalizeQuestion } from "./question-norm.js";
 import { type ResumeFacts, resumeFacts } from "./resume-facts.js";
 import { parseFormSchema } from "./schemas.js";
@@ -94,6 +94,9 @@ const FACTUAL_FIELD =
 const NO_MATCH = "NO MATCH";
 /** Broader searches Claude may suggest for one answer. */
 const MAX_SEARCH_TERMS = 4;
+/** Applications whose form pages are remembered (multi-page forms), and pages per form. */
+const MAX_FORMS = 200;
+const MAX_PAGES = 20;
 
 export function createPlans(deps: PlansDeps) {
   const { jobOps, targets, schemas, plans, answers } = deps;
@@ -264,14 +267,68 @@ export function createPlans(deps: PlansDeps) {
     return plan;
   }
 
-  /** The page with Claude's map merged in; as read when Claude is off or can't say. */
-  async function mapped(jobId: string, page: WorkdayPage): Promise<WorkdayPage> {
+  /**
+   * A multi-page form's pages, per application, in the order first reached: each page's steps
+   * and which jobs and degrees its blocks were given (a later page's blocks take the others first).
+   */
+  const formPages = new Map<string, { step: string; used: UsedEntries }[]>();
+  const pagesOf = (jobId: string) => {
+    const key = `${currentUser()} ${jobId}`;
+    const pages = formPages.get(key) ?? [];
+    formPages.delete(key);
+    // Most recent last; the oldest application forgotten past the limit.
+    formPages.set(key, pages);
+    if (formPages.size > MAX_FORMS) formPages.delete(formPages.keys().next().value ?? "");
+    return pages;
+  };
+  /** The pages reached before this one (all of them, for a page not seen yet). */
+  const pagesBefore = (jobId: string, step: string) => {
+    const pages = pagesOf(jobId);
+    const at = pages.findIndex((p) => p.step === step);
+    return at === -1 ? pages : pages.slice(0, at);
+  };
+  const remember = (jobId: string, step: string, used: UsedEntries) => {
+    const pages = pagesOf(jobId);
+    const at = pages.findIndex((p) => p.step === step);
+    if (at === -1) pages.push({ step, used });
+    else pages[at] = { step, used };
+    if (pages.length > MAX_PAGES) pages.shift();
+  };
+  const usedBefore = (before: readonly { used: UsedEntries }[]): UsedEntries => ({
+    experience: new Set(before.flatMap((p) => [...p.used.experience])),
+    education: new Set(before.flatMap((p) => [...p.used.education])),
+  });
+
+  /**
+   * The page with Claude's map merged in; as read when Claude is off or can't say. With the
+   * form's HTML (a field got stuck, or you asked), Claude's closer read.
+   */
+  async function mapped(
+    jobId: string,
+    page: WorkdayPage,
+    earlier: readonly string[],
+    snapshot?: string,
+    screenshot?: string,
+  ): Promise<WorkdayPage> {
     const mapper = deps.pageMapper;
     if (!mapper) return page;
     const map = await mapper
-      .map(currentUser(), "", page, traceUsage(trace, jobId))
+      .map(currentUser(), "", page, traceUsage(trace, jobId), {
+        earlier,
+        ...(snapshot ? { snapshot } : {}),
+        ...(snapshot && screenshot ? { screenshot } : {}),
+      })
       .catch(() => null);
-    if (!map) return page;
+    if (!map) {
+      if (snapshot)
+        trace({
+          jobId,
+          kind: "page-map",
+          message: `Claude couldn't read page "${page.step}" closely; planned as read`,
+          data: { fields: page.fields.length, deep: true },
+        });
+      return page;
+    }
     const merged = mergePageMap(page, map);
     const filled = merged.fields.filter(
       (f, i) =>
@@ -282,8 +339,16 @@ export function createPlans(deps: PlansDeps) {
     trace({
       jobId,
       kind: "page-map",
-      message: `Claude mapped page "${page.step}": ${filled} of ${page.fields.length} field(s) given a job, meaning or input kind the reader didn't see${map.add.length ? `; add buttons: ${map.add.join(", ")}` : ""}`,
-      data: { fields: page.fields.length, filled, add: map.add },
+      message: `Claude ${snapshot ? "read the whole of" : "mapped"} page "${page.step}"${snapshot ? " closely (its HTML)" : ""}: ${filled} of ${page.fields.length} field(s) given a job, meaning or input kind the reader didn't see${map.add.length ? `; add buttons: ${map.add.join(", ")}` : ""}`,
+      data: {
+        fields: page.fields.length,
+        filled,
+        add: map.add,
+        ...(snapshot
+          ? { deep: true, snapshotChars: snapshot.length, screenshot: Boolean(screenshot) }
+          : {}),
+        ...(earlier.length ? { earlier } : {}),
+      },
     });
     return merged;
   }
@@ -519,14 +584,30 @@ export function createPlans(deps: PlansDeps) {
       token: string,
       jobId: string,
       page: WorkdayPage,
+      /** The form's HTML: Claude reads the page closely first (a field got stuck, or you asked). */
+      snapshot?: string,
+      /** With it, when you asked: what the page shows now. */
+      screenshot?: string,
     ): Promise<WorkdayPagePlan> {
       const { job, resume } = await jobAndResume(token, jobId);
       const generic = page.system === "generic";
-      // A company's page: Claude's map first, filling only what the page reader left out.
-      const read = generic ? await mapped(jobId, page) : page;
+      const before = pagesBefore(jobId, page.step);
+      // Every page: Claude's map first, filling only what the page reader left out.
+      const read = await mapped(
+        jobId,
+        page,
+        before.map((p) => p.step),
+        snapshot,
+        screenshot,
+      );
       const schema = generic
-        ? parseGenericPage(read, job.title, resume)
-        : parseWorkdayPage(page, job.title);
+        ? parseGenericPage(read, job.title, resume, usedBefore(before))
+        : parseWorkdayPage(read, job.title);
+      remember(
+        jobId,
+        page.step,
+        usedEntries(schema.fields.map((f) => f.canonical)),
+      );
       const { plan: planned, fromClaude } = await planSchema(
         jobId,
         schema,

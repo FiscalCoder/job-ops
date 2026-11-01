@@ -85,6 +85,12 @@ const BY_REF: Record<string, FieldRule> = {
   website: profile("website"),
   current_company: profile("recent_employer"),
   last_hike: bank("comp.last_hike"),
+  // Claude's page map, where a label says nothing (Zoho's fields named "rec-form_2111…").
+  street_address: bank("location.address_line1"),
+  state: bank("location.state"),
+  postal_code: bank("location.postal_code"),
+  current_salary: bank("comp.current"),
+  expected_salary: bank("comp.expected"),
   // Workday ("Have you worked for <company>...?", "Phone Device Type").
   worked_here: bank("history.worked_at_company"),
   phone_type: { kind: "fixed", value: "Mobile" },
@@ -114,7 +120,7 @@ const LABEL_RULES: readonly [RegExp, FieldRule][] = [
     bank("history.restrictive_covenants"),
   ],
   [
-    /^(street address|address( line)? ?1|address|mailing address)\s*\*?$/,
+    /^(street( address)?|address( line)? ?1|address|mailing address)\s*\*?$/,
     bank("location.address_line1"),
   ],
   [

@@ -256,6 +256,7 @@ function fillFromPicker(
   steps: readonly Step[],
   fillFrom: (seq: number) => void,
   fillOnly?: (section: string) => void,
+  readClosely?: () => void,
 ): HTMLElement {
   const picker = el("select", {
     "aria-label": "Fill again from a field, or only a section",
@@ -263,6 +264,11 @@ function fillFromPicker(
       "Fill again from the field you pick (the ones before stay as they are), or only one section",
   }) as HTMLSelectElement;
   picker.append(el("option", { value: "" }, fillOnly ? "Fill from… / only…" : "Fill from…"));
+  // The page misread (wrong job in a field, a field not seen): Claude reads all of it first.
+  if (readClosely)
+    picker.append(
+      el("option", { value: "closely:" }, "✦ Claude reads the page, then fill it"),
+    );
   let group: HTMLElement = picker;
   let heading: string | undefined;
   for (const step of steps) {
@@ -288,10 +294,80 @@ function fillFromPicker(
   picker.addEventListener("change", () => {
     const [kind, ...rest] = picker.value.split(":");
     const what = rest.join(":");
-    if (kind === "only" && what) fillOnly?.(what);
+    if (kind === "closely") readClosely?.();
+    else if (kind === "only" && what) fillOnly?.(what);
     else if (kind === "from" && Number(what)) fillFrom(Number(what));
   });
   return picker;
+}
+
+/** "Fix a field": the page's field you picked (by place; "focused": the one you clicked), and how. */
+export type FixField = (
+  field: number | "focused",
+  how: { readonly claude: boolean; readonly said?: string },
+) => Promise<string | null>;
+
+/**
+ * "Fix a field", folded: pick a field (or the one you clicked on the page), say what's wrong if
+ * you like, then fill just it again or have Claude fix it on the page. Built once per run, so
+ * what you picked and typed stays while the run moves on.
+ */
+let fixPanel: {
+  readonly key: string;
+  readonly element: HTMLElement;
+  readonly refresh: (fields: readonly string[], busy: boolean) => void;
+} | null = null;
+
+function fixFieldPanel(key: string, fix: FixField) {
+  if (fixPanel?.key === key) return fixPanel;
+  const picker = el("select", { "aria-label": "Field to fix" }) as HTMLSelectElement;
+  const said = el("input", {
+    "aria-label": "What's wrong with it",
+    placeholder: `What's wrong (optional), e.g. "should be India"`,
+  }) as HTMLInputElement;
+  const note = el("p", { class: "muted" });
+  const again = button("Fill it again", () => go(false));
+  const claude = button("Claude fixes it", () => go(true), true);
+  const go = async (byClaude: boolean) => {
+    const value = picker.value;
+    if (value === "") return;
+    const seq = value === "focused" ? "focused" : Number(value);
+    note.className = "muted";
+    note.textContent = byClaude ? "Claude is on it…" : "Filling it again…";
+    const problem = await fix(seq, { claude: byClaude, said: said.value });
+    note.className = problem ? "error" : "muted";
+    note.textContent = problem ?? "";
+    if (!problem) said.value = "";
+  };
+  const element = el(
+    "details",
+    { class: "tell fix-field" },
+    el("summary", {}, "Fix a field"),
+    el("div", { class: "row" }, picker),
+    el("div", { class: "row" }, said),
+    el("div", { class: "controls" }, again, claude),
+    note,
+  );
+  let shown = "";
+  const refresh = (fields: readonly string[], busy: boolean) => {
+    const kept = picker.value;
+    // Only when the page's fields change: an open list isn't rebuilt under you.
+    const now = JSON.stringify(fields);
+    if (now !== shown) {
+      shown = now;
+      picker.replaceChildren(
+        el("option", { value: "focused" }, "The field I clicked on the page"),
+        ...fields.map((label, i) =>
+          el("option", { value: String(i) }, `${i + 1}. ${label.slice(0, 48)}`),
+        ),
+      );
+    }
+    if ([...picker.options].some((o) => o.value === kept)) picker.value = kept;
+    again.disabled = busy;
+    claude.disabled = busy;
+  };
+  fixPanel = { key, element, refresh };
+  return fixPanel;
 }
 
 export function renderRun(
@@ -306,6 +382,10 @@ export function renderRun(
   fillFrom?: (seq: number) => void,
   /** Fill only the section with this heading. */
   fillOnly?: (section: string) => void,
+  /** Page by page: Claude reads the whole page closely, then it's planned and filled again. */
+  readClosely?: () => void,
+  /** "Fix a field": one field again, or by Claude. */
+  fix?: FixField,
 ): void {
   const { state, action } = view;
   const finished = state.steps.filter((s) => STATE_LABEL[s.state]);
@@ -324,8 +404,15 @@ export function renderRun(
           view.page && refill && !view.busy
             ? button("Fill this page", refill, true)
             : null,
-          fillFrom && !view.busy && state.steps.length
-            ? fillFromPicker(state.steps, fillFrom, fillOnly)
+          fillFrom &&
+            !view.busy &&
+            (state.steps.length || (view.page && readClosely))
+            ? fillFromPicker(
+                state.steps,
+                fillFrom,
+                fillOnly,
+                view.page ? readClosely : undefined,
+              )
             : null,
           button("Abort", () => send({ type: "abort" })),
           // You submitted it yourself, at any point: the run ends and the job is marked applied.
@@ -399,8 +486,16 @@ export function renderRun(
       view.notice ?? (state.outcome === "submitted" ? "Applied." : "Stopped."),
     );
 
+  const fixer =
+    fix && action.kind !== "finished" && view.fields.length
+      ? fixFieldPanel(view.job.jobId, fix)
+      : null;
+  // A run that ended leaves no fold behind for the next one.
+  if (action.kind === "finished") fixPanel = null;
+  fixer?.refresh(view.fields, view.busy);
   const parts: (HTMLElement | null)[] = [
     header,
+    fixer?.element ?? null,
     view.notice && action.kind !== "finished"
       ? el("p", { class: "error" }, view.notice)
       : null,

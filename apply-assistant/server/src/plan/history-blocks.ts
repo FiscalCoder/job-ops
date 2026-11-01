@@ -15,6 +15,27 @@ type Section = "experience" | "education";
 /** A block's index when no job or degree is left for it: resolves to nothing. */
 const UNMATCHED = 999;
 
+/** Which jobs and degrees (by their place on your resume) a page's blocks were given. */
+export interface UsedEntries {
+  readonly experience: ReadonlySet<number>;
+  readonly education: ReadonlySet<number>;
+}
+const NONE_USED: UsedEntries = { experience: new Set(), education: new Set() };
+
+/** The entries a page's plan gave its blocks, from its "history.<section>.<n>.…" names. */
+export function usedEntries(canonicals: readonly (string | undefined)[]): UsedEntries {
+  const of = (section: Section) =>
+    new Set(
+      canonicals.flatMap((c) => {
+        const n = c?.startsWith(`history.${section}.`)
+          ? Number(c.split(".")[2])
+          : Number.NaN;
+        return Number.isInteger(n) && n !== UNMATCHED ? [n] : [];
+      }),
+    );
+  return { experience: of("experience"), education: of("education") };
+}
+
 const SECTION_OF: readonly [RegExp, Section][] = [
   [
     /experience|employment|work history|career history|employer|positions? held/i,
@@ -134,12 +155,14 @@ const keptPick = (field: PageField) =>
 
 /**
  * Which resume entry each block is: the closest pairs first (how much of the entry the block
- * already shows), then the rest in page order take the entries left, in resume order.
+ * already shows), then the rest in page order take the entries left, in resume order: first
+ * those no earlier page of the form used (a form with one job per page), then any left.
  */
 function assign(
   blocks: readonly Block[],
   count: number,
   score: (block: number, entry: number) => number,
+  usedElsewhere: ReadonlySet<number> = new Set(),
 ): Map<string, number> {
   const taken = new Set<number>();
   const result = new Map<string, number>();
@@ -157,7 +180,8 @@ function assign(
   }
   for (const block of blocks) {
     if (result.has(block.id)) continue;
-    const next = [...Array(count).keys()].find((i) => !taken.has(i));
+    const free = [...Array(count).keys()].filter((i) => !taken.has(i));
+    const next = free.find((i) => !usedElsewhere.has(i)) ?? free[0];
     if (next === undefined) {
       result.set(block.id, UNMATCHED);
       continue;
@@ -175,6 +199,8 @@ function assign(
 export function historyCanonicals(
   fields: readonly PageField[],
   resume: ResumeFacts,
+  /** Entries the form's other pages filled (a multi-page form), taken last here. */
+  elsewhere: UsedEntries = NONE_USED,
 ): Map<string, string> {
   const blocks = blocksOf(fields);
   const names = new Map<string, string>();
@@ -194,14 +220,14 @@ export function historyCanonicals(
               (title && title === words(job.title) ? 1 : 0) +
               (year && year === String(job.start?.year ?? "") ? 1 : 0)
             );
-          })
+          }, elsewhere.experience)
         : assign(mine, resume.education.length, (b, e) => {
             const degree = resume.education[e];
             return degree &&
               sameName(shown(mine[b] as Block, "school"), degree.school)
               ? 1
               : 0;
-          });
+          }, elsewhere.education);
     for (const block of mine)
       for (const { field, part } of block.fields)
         names.set(

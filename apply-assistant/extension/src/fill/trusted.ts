@@ -4,6 +4,7 @@ import type {
   Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import { captureDom, type DomCapture, MAX_DOM_CHARS } from "../trace/dom";
+import { MAX_SNAPSHOT, trimmedForm } from "./form-snapshot";
 import { type OperateApi, operateField } from "./operate";
 import { keptNumber, sameNumber, sleep } from "./options";
 import { rescueField, type SiteHelp } from "./site-help";
@@ -28,6 +29,8 @@ export interface ResumeFile {
 /** The controller's view of a form, whatever the system. */
 export interface FormDriver {
   highlight(ref: string | null, badge: string): Promise<void>;
+  /** Of these fields, the one you're on in the page (focus inside its box); null if none. */
+  focusedOf?(refs: readonly string[]): Promise<string | null>;
   fill(
     entry: PlanEntry,
     value: string | readonly string[] | null,
@@ -112,6 +115,61 @@ export abstract class TrustedDriver implements FormDriver {
   /** The page and the form's frame (a generic driver works the same form after this one). */
   where(): { readonly page: Page; readonly frame: Frame } {
     return { page: this.page, frame: this.frame };
+  }
+
+  /** The form's trimmed HTML, these fields marked in order (Claude's closer read); null if unread. */
+  formSnapshot(refs: readonly string[]): Promise<string | null> {
+    return within(
+      () => this.frame.evaluate(trimmedForm, refs, MAX_SNAPSHOT),
+      READ_MS,
+    ).catch(() => null);
+  }
+
+  /** What the tab shows now (JPEG, base64), for Claude's closer read you asked for; null if none. */
+  pageShot(): Promise<string | null> {
+    return within(
+      async () =>
+        (await this.page.screenshot({
+          type: "jpeg",
+          quality: 70,
+          encoding: "base64",
+        })) as string,
+      READ_MS,
+    ).catch(() => null);
+  }
+
+  async focusedOf(refs: readonly string[]): Promise<string | null> {
+    const boxes = refs.map((ref) => [ref, this.boxFor(ref)] as const);
+    return within(
+      () =>
+        this.frame.evaluate((pairs) => {
+          const focused = document.activeElement;
+          const clicked = (window as unknown as { acClicked?: Node | null }).acClicked;
+          // What you clicked last first (a click on a list doesn't move focus), then focus.
+          const candidates = [
+            clicked ?? null,
+            focused && focused !== document.body ? focused : null,
+          ].filter((n): n is Node => n !== null);
+          const holds = (selector: string, node: Node) => {
+            try {
+              return [...document.querySelectorAll(selector)].some((el) =>
+                el.contains(node),
+              );
+            } catch {
+              return false;
+            }
+          };
+          for (const node of candidates) {
+            // The field itself first, then the box around it.
+            const found =
+              pairs.find(([ref]) => holds(ref, node))?.[0] ??
+              pairs.find(([, box]) => holds(box, node))?.[0];
+            if (found) return found;
+          }
+          return null;
+        }, boxes),
+      READ_MS,
+    ).catch(() => null);
   }
 
   /** The field's box on the page, as a selector (it contains the field's own input). */
@@ -202,11 +260,25 @@ export abstract class TrustedDriver implements FormDriver {
 
   /** Outlines the field being worked on and shows a small badge on the page. */
   async highlight(ref: string | null, badge: string): Promise<void> {
-    await this.frame
-      .evaluate(
+    // A frame that's gone (the page moved on) throws at once, not in the promise.
+    await within(
+      () =>
+        this.frame.evaluate(
         (selector, closest, text) => {
           for (const el of document.querySelectorAll(".ac-current"))
             el.classList.remove("ac-current");
+          // The last thing you clicked on the page ("Fix a field" → the field I'm on).
+          const w = window as unknown as { acClicked?: EventTarget | null; acWatch?: boolean };
+          if (!w.acWatch) {
+            w.acWatch = true;
+            document.addEventListener(
+              "pointerdown",
+              (event) => {
+                w.acClicked = event.target;
+              },
+              true,
+            );
+          }
           if (!document.getElementById("ac-style")) {
             const style = document.createElement("style");
             style.id = "ac-style";
@@ -232,8 +304,9 @@ export abstract class TrustedDriver implements FormDriver {
         ref ? this.boxFor(ref) : null,
         this.boxClosest,
         badge,
-      )
-      .catch(() => {});
+      ),
+      READ_MS,
+    ).catch(() => {});
   }
 
   /** Clears the field and inserts the text in one event, then reads it back. */
@@ -298,8 +371,10 @@ export abstract class TrustedDriver implements FormDriver {
   }
 
   async problems(): Promise<string[]> {
-    return this.frame
-      .evaluate((errorSelector) => {
+    // A frame that's gone (the page moved on) throws at once: none to report.
+    return within(
+      () =>
+        this.frame.evaluate((errorSelector) => {
         // Hidden messages don't count (iCIMS always carries a hidden "Please Enable Cookies").
         const errors = [...document.querySelectorAll(errorSelector)]
           .filter((el) => el.checkVisibility({ visibilityProperty: true }))
@@ -322,8 +397,9 @@ export abstract class TrustedDriver implements FormDriver {
         return challenge
           ? [...errors, "CAPTCHA on the page: solve it there"]
           : errors;
-      }, this.errorSelector)
-      .catch(() => []);
+      }, this.errorSelector),
+      READ_MS,
+    ).catch(() => []);
   }
 
   dom(): Promise<DomCapture> {

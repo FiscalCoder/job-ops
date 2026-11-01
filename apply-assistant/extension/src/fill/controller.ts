@@ -22,6 +22,7 @@ import {
   type RunState,
   reduce,
   type Step,
+  onlyField,
   onlySection,
   startingFrom,
   startRun,
@@ -77,7 +78,13 @@ export interface RunView {
     readonly last: boolean;
     readonly system: "workday" | "generic";
   } | null;
+  /** Every field of the page's plan, in fill order ("Fix a field" picks one of them). */
+  readonly fields: readonly string[];
 }
+
+/** The entries in the order a run fills them. */
+const inFillOrder = (entries: readonly PlanEntry[], resumeFirst: boolean) =>
+  startRun(entries, { countdownSeconds: 0, resumeFirst }).steps.map((s) => s.entry);
 
 const REVIEW_POLL_MS = 2_000;
 /** A fill still busy after this long is a stall: the trace gets a snapshot. */
@@ -229,16 +236,27 @@ function chooserFor(client: ApplyClient, jobId: string): Chooser {
   };
 }
 
-/** Filling the page again: from a field you chose, or only one section of it. */
+/**
+ * Filling the page again: from a field you chose, only one section of it, or only one field
+ * ("Fix a field": filled again, or by Claude with what you said was wrong).
+ */
 type PageChoice =
   | { readonly kind: "from"; readonly from: FillFrom }
-  | { readonly kind: "only"; readonly section: string };
+  | { readonly kind: "only"; readonly section: string }
+  | {
+      readonly kind: "field";
+      readonly field: FillFrom;
+      /** Claude works it on the page, told this (what was wrong); absent, filled again as usual. */
+      readonly claude?: string;
+    };
 
 function chosen(
   entries: readonly PlanEntry[],
   choice: PageChoice,
   resumeFirst: boolean,
 ): PlanEntry[] {
+  if (choice.kind === "field")
+    return onlyField(entries, choice.field, resumeFirst);
   return choice.kind === "from"
     ? startingFrom(entries, choice.from, resumeFirst)
     : onlySection(entries, choice.section, resumeFirst);
@@ -247,19 +265,35 @@ function chosen(
 const describeChoice = (choice: PageChoice) =>
   choice.kind === "from"
     ? `from "${choice.from.label}"`
-    : `only "${choice.section}"`;
+    : choice.kind === "only"
+      ? `only "${choice.section}"`
+      : `only the field "${choice.field.label}"${choice.claude !== undefined ? ", by Claude" : ""}`;
 
+/** Claude's closer read of a page: its HTML; when you asked, a screenshot too. */
+type Closely = false | "html" | "html+screenshot";
+
+/**
+ * The server's plan for the page on screen. `closely`: the form's HTML goes too (and when you
+ * asked, a screenshot), for Claude's closer read of the page.
+ */
 async function planPagedPage(
   client: ApplyClient,
   jobId: string,
   driver: PagedDriver,
+  closely: Closely = false,
 ): Promise<PlanEntry[]> {
   if (driver.system === "workday" && FINAL_STEP.test(await driver.step()))
     return [];
   type PagePlan = { entries: PlanEntry[]; add?: EntriesToAdd[] };
+  const page = await driver.readPage();
+  const snapshot = closely
+    ? await driver.formSnapshot(page.fields.map((f) => f.ref))
+    : null;
+  const screenshot =
+    snapshot && closely === "html+screenshot" ? await driver.pageShot() : null;
   const plan = (await client.planPage(
     jobId,
-    await driver.readPage(),
+    snapshot ? { ...page, snapshot, ...(screenshot ? { screenshot } : {}) } : page,
   )) as PagePlan;
   if (!plan.add?.length) return plan.entries;
   // My Experience: one entry per job and degree on your resume, then the page is planned again.
@@ -301,6 +335,8 @@ export class RunController {
   private readonly resumeFirst: boolean;
   /** Autopilot: unanswered fields go to Claude, drafts are approved, optional ones skipped. */
   private readonly autopilot: boolean;
+  /** Pages Claude has read closely (by step): once per page, by itself or when you ask. */
+  private readonly readClosely = new Set<string>();
   /** How often each step went to Claude by itself: at most MAX_CLAUDE_TRIES (no loops). */
   private readonly escalated = new Map<number, number>();
   /** Claude's budget for this application is spent: no more hand-overs. */
@@ -332,6 +368,7 @@ export class RunController {
     private readonly page: Page,
   ) {
     this.state = startRun(entries, runOptions);
+    this.pageEntries = this.state.steps.map((s) => s.entry);
     this.resumeFirst = runOptions.resumeFirst;
     this.autopilot = runOptions.autopilot ?? false;
     this.stopWatching = watchPage(page, trace);
@@ -573,8 +610,12 @@ export class RunController {
             system: this.wizard.system,
           }
         : null,
+      fields: this.pageEntries.map((e) => e.label),
     };
   }
+
+  /** The page's whole plan (not just the steps of a "Fill from" or "Fix a field" pass). */
+  private pageEntries: readonly PlanEntry[] = [];
 
   private get wizard(): PagedDriver | null {
     return isPaged(this.driver) ? this.driver : null;
@@ -1007,19 +1048,68 @@ export class RunController {
   fillFrom(seq: number): void {
     const step = this.state.steps.find((s) => s.seq === seq);
     if (!step || this.busy || this.closed || this.tabClosed) return;
-    const from: FillFrom = {
-      ref: step.entry.ref,
-      label: step.entry.label,
-      nth: this.state.steps.filter(
-        (s) => s.seq < seq && s.entry.label === step.entry.label,
-      ).length,
-    };
+    const from = this.fromStep(step);
     this.trace.event(
       "decision",
       `You asked to fill from step ${seq} (${step.entry.label})`,
       { stepSeq: seq, data: { ...from } },
     );
     this.fillAgain({ kind: "from", from });
+  }
+
+  /** A step as a place to fill from (the same field in a fresh plan of the page). */
+  private fromStep(step: Step): FillFrom {
+    return {
+      ref: step.entry.ref,
+      label: step.entry.label,
+      nth: this.state.steps.filter(
+        (s) => s.seq < step.seq && s.entry.label === step.entry.label,
+      ).length,
+    };
+  }
+
+  /**
+   * "Claude: read this page": Claude reads the whole form (its HTML) closely, the page is
+   * planned again with what it saw, and filled again (fields that are right already stay so).
+   */
+  readPageClosely(): void {
+    const wizard = this.wizard;
+    if (!wizard || this.busy || this.closed || this.tabClosed) return;
+    this.clearTimer();
+    this.trace.event("decision", "You asked Claude to read the page closely");
+    void (async () => {
+      if (wizard instanceof GenericDriver) await wizard.findFormFrame();
+      const step = (await wizard.step()) || this.pageStep || "this page";
+      this.readClosely.add(step);
+      await this.nextPage(step, undefined, "html+screenshot");
+    })();
+  }
+
+  /**
+   * A field still not filled after the site's driver, the generic one and saved steps: once per
+   * page, Claude reads the whole form closely and the page is planned again from that field
+   * (the fields before it stay). Before Claude works the field itself (escalate). False when
+   * the page was read closely already, or this run can't.
+   */
+  private readCloselyFrom(step: Step): boolean {
+    const page = this.pageStep;
+    if (
+      !this.wizard ||
+      !page ||
+      this.readClosely.has(page) ||
+      this.claudeSpent ||
+      this.state.paused ||
+      /captcha/i.test(`${step.entry.label} ${step.entry.ref}`) ||
+      step.entry.widget === "captcha"
+    )
+      return false;
+    this.readClosely.add(page);
+    this.trace.event(
+      "decision",
+      `"${step.entry.label}" got stuck: Claude reads the whole page closely, and the page is planned again from there`,
+      { stepSeq: step.seq },
+    );
+    return true;
   }
 
   /** "Only this section": fills that section's fields (a job, a degree) and nothing else. */
@@ -1029,6 +1119,73 @@ export class RunController {
       data: { section },
     });
     this.fillAgain({ kind: "only", section });
+  }
+
+  /**
+   * "Fix a field": that one field again, the rest left as they are. `seq` is the step you picked,
+   * or "focused" for the field you're on in the page. With Claude, it works the field on the
+   * page itself, told what you said was wrong; else it's filled again the usual way.
+   */
+  async fixField(
+    field: number | "focused",
+    how: { readonly claude: boolean; readonly said?: string },
+  ): Promise<string | null> {
+    if (this.busy || this.closed || this.tabClosed) return "Wait for the step in progress.";
+    const entries = this.pageEntries;
+    const entry = field === "focused" ? await this.focusedEntry() : entries[field];
+    if (!entry)
+      return field === "focused"
+        ? "Click the field on the page first (one this page's plan has), then pick it again."
+        : "That field isn't on this page's plan.";
+    const said = how.said?.trim() ?? "";
+    const shown = (await this.driver.readBack(entry).catch(() => "")).slice(0, 300);
+    this.trace.event(
+      "decision",
+      `You asked to fix "${entry.label}"${how.claude ? " with Claude" : ""}${said ? `: ${said.slice(0, 200)}` : ""}`,
+      { data: { ref: entry.ref, claude: how.claude, said, shown } },
+    );
+    this.fillAgain({
+      kind: "field",
+      field: {
+        ref: entry.ref,
+        label: entry.label,
+        nth: entries
+          .slice(0, entries.indexOf(entry))
+          .filter((e) => e.label === entry.label).length,
+      },
+      ...(how.claude
+        ? {
+            claude: [
+              said ? `You said it's wrong: ${said}` : "You said it's wrong; check it and fix it.",
+              shown ? `It shows now: ${shown}` : "",
+            ]
+              .filter(Boolean)
+              .join(" "),
+          }
+        : {}),
+    });
+    return null;
+  }
+
+  /** The page plan's field you clicked (or are in) on the page, if any. */
+  private async focusedEntry(): Promise<PlanEntry | undefined> {
+    const entries = this.pageEntries;
+    const ref = await this.driver.focusedOf?.(entries.map((e) => e.ref));
+    return ref ? entries.find((e) => e.ref === ref) : undefined;
+  }
+
+  /** "Fix a field" by Claude: the field's new step goes to Claude at once, with what you said. */
+  private claudeTakes(choice?: PageChoice): void {
+    if (choice?.kind !== "field" || choice.claude === undefined) return;
+    const step = this.state.steps[this.state.cursor];
+    if (!step) return;
+    this.state = {
+      ...this.state,
+      steps: this.state.steps.map((s) =>
+        s === step ? { ...s, note: choice.claude } : s,
+      ),
+    };
+    this.apply({ type: "let-claude" });
   }
 
   private fillAgain(choice: PageChoice): void {
@@ -1048,11 +1205,15 @@ export class RunController {
       await this.logFinishedSteps();
       this.restartWith(
         chosen(
-          this.state.steps.map((s) => s.entry),
+          // One field: from the whole plan (the steps now may be a "Fill from" pass's).
+          choice.kind === "field"
+            ? this.pageEntries
+            : this.state.steps.map((s) => s.entry),
           choice,
           this.resumeFirst,
         ),
       );
+      this.claudeTakes(choice);
       void this.loop();
     })();
   }
@@ -1088,7 +1249,11 @@ export class RunController {
    * You clicked Save and Continue (or Back): plan the page now on screen and fill it, from the
    * field you chose when you asked to fill from one.
    */
-  private async nextPage(step: string, choice?: PageChoice): Promise<void> {
+  private async nextPage(
+    step: string,
+    choice?: PageChoice,
+    closely: Closely = false,
+  ): Promise<void> {
     if (!this.wizard || this.closed) return;
     this.clearTimer();
     if (await this.toWorkday()) step = (await this.wizard?.step()) || step;
@@ -1113,13 +1278,27 @@ export class RunController {
     });
     try {
       await sleep(PAGE_SETTLE_MS);
-      const planned = await planPagedPage(this.client, this.job.jobId, wizard);
+      const planned = await planPagedPage(
+        this.client,
+        this.job.jobId,
+        wizard,
+        closely,
+      );
       const entries = choice ? chosen(planned, choice, true) : planned;
+      if (planned.length) this.pageEntries = inFillOrder(planned, true);
       this.state = begin(entries);
+      this.claudeTakes(choice);
       this.trace.event(
         "page",
-        `On ${wizard.system === "workday" ? "Workday page" : "page"} "${step}" with ${entries.length} plan entries${choice ? ` (${describeChoice(choice)})` : ""}`,
-        { data: { step, entries: entries.length, ...(choice ? { choice } : {}) } },
+        `On ${wizard.system === "workday" ? "Workday page" : "page"} "${step}" with ${entries.length} plan entries${choice ? ` (${describeChoice(choice)})` : ""}${closely ? ", after Claude read it closely" : ""}`,
+        {
+          data: {
+            step,
+            entries: entries.length,
+            ...(choice ? { choice } : {}),
+            ...(closely ? { closely } : {}),
+          },
+        },
       );
       void this.snapshot(`page: ${step}`);
     } catch (error) {
@@ -1175,6 +1354,8 @@ export class RunController {
 
   private async fill(step: Step) {
     if (this.tabClosed) return;
+    /** Stuck: the page is read closely and planned again from this field (not the next step). */
+    let again: FillFrom | null = null;
     // You moved on before this page was finished: work on the page you're on.
     const moved = await this.movedTo();
     if (moved) return this.nextPage(moved);
@@ -1250,9 +1431,12 @@ export class RunController {
           ? { type: "filled", result: outcome.result }
           : { type: "fill-failed", reason: outcome.reason },
       );
-      // Not filled: Claude tries it; after Claude's own try, once more with what that did (as
-      // your "Let Claude do it" would: it settles a question it declined, a list it missed).
-      if (!outcome.ok) this.escalate(step, outcome.reason);
+      // Not filled: once per page, Claude reads the whole page and it's planned again from here.
+      if (!outcome.ok && !step.operate && this.readCloselyFrom(step))
+        again = this.fromStep(step);
+      // Then Claude tries it; after Claude's own try, once more with what that did (as your
+      // "Let Claude do it" would: it settles a question it declined, a list it missed).
+      else if (!outcome.ok) this.escalate(step, outcome.reason);
     } catch (error) {
       await this.traceFailure(step, errorText(error));
       this.apply({ type: "fill-failed", reason: errorText(error) });
@@ -1260,6 +1444,12 @@ export class RunController {
       if (stall) clearTimeout(stall);
       this.busy = false;
     }
+    if (again)
+      return this.nextPage(
+        this.pageStep || "this page",
+        { kind: "from", from: again },
+        "html",
+      );
     void this.loop();
   }
 

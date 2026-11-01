@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { FieldType, FormField, FormSchema } from "./form-schema.js";
 import { schemaHash } from "./form-schema.js";
+import { mappedMeaning } from "./generic-schema.js";
 import type { ResumeFacts } from "./resume-facts.js";
 
 /**
@@ -157,7 +158,10 @@ export function parseWorkdayPage(page: WorkdayPage, title: string): FormSchema {
   const fields: FormField[] = page.fields.map((f) => {
     const type = typeOf(f, history.has(f.ref));
     const canonical =
-      f.kind === "file" ? "resume" : (history.get(f.ref) ?? CANONICAL[f.key]);
+      f.kind === "file"
+        ? "resume"
+        : // Claude's page map only where Workday's own keys say nothing.
+          (history.get(f.ref) ?? CANONICAL[f.key] ?? mappedMeaning(f));
     return {
       ref: f.ref,
       ...(canonical ? { canonical } : {}),

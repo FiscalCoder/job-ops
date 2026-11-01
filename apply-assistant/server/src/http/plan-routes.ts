@@ -1,11 +1,17 @@
 import { type Response, Router } from "express";
 import { z } from "zod";
+import { MAX_SCREENSHOT, MAX_SNAPSHOT } from "../claude/page-map.js";
 import { TellRejectedError } from "../claude/tell.js";
 import { JobOpsError } from "../jobops/client.js";
 import { NotPlannableError, type PlansService } from "../plan/plans-service.js";
 import { workdayPageSchema } from "../plan/workday-schema.js";
 import { type AuthedRequest, sendJobOpsFailure } from "./auth.js";
 import { sendError, sendOk } from "./envelope.js";
+
+/** The form's trimmed HTML (the extension cuts it to this size). */
+const snapshotBody = z.string().min(1).max(MAX_SNAPSHOT);
+/** What the page shows (JPEG, base64), with a closer read you asked for. */
+const screenshotBody = z.string().min(1).max(MAX_SCREENSHOT);
 
 const tellBody = z.object({
   ref: z.string().min(1).max(200),
@@ -204,6 +210,9 @@ export function createPlanRoutes(plans: PlansService) {
         );
         return;
       }
+      // The form's HTML, for Claude's closer read (a field got stuck, or you asked).
+      const snapshot = snapshotBody.safeParse(req.body?.snapshot);
+      const screenshot = screenshotBody.safeParse(req.body?.screenshot);
       try {
         sendOk(
           res,
@@ -211,6 +220,8 @@ export function createPlanRoutes(plans: PlansService) {
             tokenOf(req),
             String(req.params.jobId),
             page.data,
+            snapshot.success ? snapshot.data : undefined,
+            screenshot.success ? screenshot.data : undefined,
           ),
         );
       } catch (error) {

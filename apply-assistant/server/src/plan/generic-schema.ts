@@ -1,6 +1,6 @@
 import type { FieldType, FormField, FormSchema } from "./form-schema.js";
 import { schemaHash } from "./form-schema.js";
-import { historyCanonicals } from "./history-blocks.js";
+import { historyCanonicals, type UsedEntries } from "./history-blocks.js";
 import type { ResumeFacts } from "./resume-facts.js";
 import type { WorkdayPage } from "./workday-schema.js";
 
@@ -108,25 +108,49 @@ const MAPPED = new Set([
   "attachment",
   "current_company",
   "last_hike",
+  "current_salary",
+  "expected_salary",
+  "street_address",
+  "state",
+  "postal_code",
+  "country",
   "linkedin",
   "github",
   "website",
   "location",
   "skills",
 ]);
-const mapped = (f: PageField): string | undefined =>
+export const mappedMeaning = (f: PageField): string | undefined =>
   f.meaning && MAPPED.has(f.meaning) ? f.meaning : undefined;
+
+/**
+ * A list where the phone goes is its country code ("(+91)" beside Zoho's Mobile): it takes
+ * your country, which finds "India (+91)", as on Workday; the number goes in the box beside it.
+ */
+function dialCode(f: PageField, canonical: string | undefined): string | undefined {
+  const list = f.kind === "dropdown" || f.kind === "search";
+  if (!list) return canonical;
+  if (canonical === "phone") return "country";
+  return !canonical && /^(phone|mobile)( (number|no\.?))?\s*\*?$/i.test(f.label.trim())
+    ? "country"
+    : canonical;
+}
 
 export function parseGenericPage(
   page: WorkdayPage,
   title: string,
   resume: ResumeFacts,
+  /** Jobs and degrees the form's earlier pages filled (a multi-page form). */
+  elsewhere?: UsedEntries,
 ): FormSchema {
   const meanings = uploadMeanings(page.fields);
-  const history = historyCanonicals(page.fields, resume);
+  const history = historyCanonicals(page.fields, resume, elsewhere);
   const fields: FormField[] = page.fields.map((f, i) => {
     // Claude's page map only where the label alone says nothing.
-    const canonical = history.get(f.ref) ?? meanings[i] ?? mapped(f);
+    const canonical = dialCode(
+      f,
+      history.get(f.ref) ?? meanings[i] ?? mappedMeaning(f),
+    );
     const label = f.label.replace(/\*$/, "").trim();
     return {
       ref: f.ref,

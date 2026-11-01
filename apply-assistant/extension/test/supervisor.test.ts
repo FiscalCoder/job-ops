@@ -7,6 +7,7 @@ import {
   type RunEvent,
   type RunState,
   reduce,
+  onlyField,
   onlySection,
   startingFrom,
   startRun,
@@ -319,6 +320,20 @@ describe("onlySection (Fill only this section)", () => {
       "#b2",
     ]);
     expect(onlySection(page, "Education", true)).toEqual([]);
+  });
+});
+
+describe("onlyField (Fix a field)", () => {
+  const page = [
+    entry("#a1", { label: "Employer", group: "Professional Experience (1)" }),
+    entry("#b1", { label: "Employer", group: "Professional Experience (2)" }),
+    entry("#q", { label: "Notice period" }),
+  ];
+  it("that one field: by ref, else the same label's nth; not there, none", () => {
+    expect(onlyField(page, { ref: "#q", label: "Notice period", nth: 0 }, true).map((e) => e.ref)).toEqual(["#q"]);
+    // Marked afresh on a page read again: the second "Employer".
+    expect(onlyField(page, { ref: "#new", label: "Employer", nth: 1 }, true).map((e) => e.ref)).toEqual(["#b1"]);
+    expect(onlyField(page, { ref: "#gone", label: "Gone", nth: 0 }, true)).toEqual([]);
   });
 });
 

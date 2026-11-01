@@ -169,7 +169,11 @@ export function createApp({
       : null;
   const pageMapper =
     claude && access
-      ? createPageMapper({ messages: access.messages, model: claude.mapModel })
+      ? createPageMapper({
+          messages: access.messages,
+          model: claude.mapModel,
+          deepModel: claude.draftModel,
+        })
       : null;
   const learned = createLearnedAnswersRepo(db);
   const limits = createCompanyLimitsRepo(db);

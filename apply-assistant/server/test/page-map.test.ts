@@ -8,9 +8,10 @@ import {
   pageMapPrompt,
 } from "../src/claude/page-map.js";
 import { parseGenericPage } from "../src/plan/generic-schema.js";
+import { usedEntries } from "../src/plan/history-blocks.js";
 import { buildPlan } from "../src/plan/planner.js";
 import { resumeFacts } from "../src/plan/resume-facts.js";
-import type { WorkdayPage } from "../src/plan/workday-schema.js";
+import { parseWorkdayPage, type WorkdayPage } from "../src/plan/workday-schema.js";
 import { fakeDesignResume } from "./fixtures/fake-resume.js";
 
 /**
@@ -121,5 +122,130 @@ describe("asking Claude for the map", () => {
     );
     const mapper = createPageMapper({ messages: { create }, model: "claude-haiku-5-5" });
     expect(await mapper.map("u1", "", page)).toBeNull();
+  });
+});
+
+describe("Claude's closer read (a field got stuck, or you asked)", () => {
+  const answer = (fields: PageMap["fields"]) =>
+    ({
+      model: "claude-sonnet-5-5",
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: JSON.stringify({ fields, add: [] }) }],
+      usage: { input_tokens: 9_000, output_tokens: 400 },
+    }) as unknown as Anthropic.Message;
+  const closer = map.fields.map((f) =>
+    f.ref === "#q7" ? { ...f, meaning: "phone" as const } : f,
+  );
+
+  it("always asks the stronger model with the form's HTML, and its map is the one kept", async () => {
+    const create = vi.fn<MessagesApi["create"]>(async (body) =>
+      body.messages[0]?.content.toString().includes("<form")
+        ? answer(closer)
+        : answer(map.fields),
+    );
+    const mapper = createPageMapper({
+      messages: { create },
+      model: "claude-haiku-5-5",
+      deepModel: "claude-sonnet-5-5",
+    });
+    expect((await mapper.map("u1", "", page))?.fields).toEqual(map.fields);
+    const html = '<form><label>Phone</label><input data-aa-field="1"></form>';
+    const read = await mapper.map("u1", "", page, undefined, { snapshot: html });
+    expect(read?.fields.find((f) => f.ref === "#q7")?.meaning).toBe("phone");
+    const deep = create.mock.calls[1]?.[0];
+    expect(deep?.model).toBe("claude-sonnet-5-5");
+    expect(String(deep?.messages[0]?.content)).toContain(html);
+    // The same layout later: the closer read's map, without asking again.
+    expect(await mapper.map("u1", "", page)).toEqual(read);
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("a multi-page form: Claude is told the pages before this one", () => {
+    const prompt = pageMapPrompt(page, ["/apply · Personal details", "/apply · Experience"]);
+    expect(prompt.split("\n")[0]).toBe(
+      "Earlier pages of this application: /apply · Personal details / /apply · Experience",
+    );
+  });
+});
+
+describe("a form with one job per page", () => {
+  const resume = resumeFacts(fakeDesignResume);
+  // Page 2 of a form: one more job to give ("Previous employer").
+  const second: WorkdayPage = {
+    system: "generic",
+    step: "/apply/2 · Previous employer",
+    fields: [
+      field("#co", "Company", "text", { block: { id: "Work-0", heading: "Previous employer" } }),
+      field("#ti", "Job title", "text", { block: { id: "Work-0", heading: "Previous employer" } }),
+    ],
+  };
+  const titleOn = (elsewhere?: Parameters<typeof parseGenericPage>[3]) =>
+    buildPlan({
+      schema: parseGenericPage(second, "Engineer", resume, elsewhere),
+      resume,
+      bank: new Map(),
+    }).entries.find((e) => e.ref === "#co")?.value;
+
+  it("takes the job earlier pages didn't; alone, the first job as before", () => {
+    expect(titleOn()).toBe(resume.experience[0]?.company);
+    const first = usedEntries(["history.experience.0.companyName", "email", undefined]);
+    expect([...first.experience]).toEqual([0]);
+    expect(titleOn(first)).toBe(resume.experience[1]?.company);
+  });
+});
+
+describe("Workday pages take Claude's map only where Workday's keys say nothing", () => {
+  const workday: WorkdayPage = {
+    step: "Application Questions",
+    fields: [
+      field("legalName--firstName", "First Name", "text", { key: "legalName--firstName", meaning: "last_name" }),
+      field("x--q3", "Your profile link", "text", { key: "q3", meaning: "linkedin" }),
+    ],
+  };
+  const schema = parseWorkdayPage(workday, "Engineer");
+  it("its own key wins; an unknown one gets Claude's meaning", () => {
+    expect(schema.fields.map((f) => f.canonical)).toEqual(["first_name", "linkedin"]);
+  });
+});
+
+describe("Zoho Recruit (ePlane): address, country and the phone's country code", () => {
+  const resume = resumeFacts(fakeDesignResume);
+  const zoho: WorkdayPage = {
+    system: "generic",
+    step: "/jobs/Careers/2111 · Engineer",
+    fields: [
+      field("[name=street]", "Street", "text"),
+      field("[name=country]", "Country", "text"),
+      field("[name=mobile]", "Mobile", "text"),
+      // The (+91) list beside Mobile: no label of its own; Claude's map calls it the phone.
+      field("#code", "", "dropdown", { meaning: "phone" }),
+      field("#code2", "Mobile", "search"),
+      // A label that says nothing; Claude's map: the expected salary.
+      field("[name=rec-form_9]", "rec-form_9", "text", { meaning: "expected_salary" }),
+    ],
+  };
+  const plan = buildPlan({
+    schema: parseGenericPage(zoho, "Engineer", resume),
+    resume,
+    bank: new Map([
+      ["location.address_line1", "12 Home Street"],
+      ["location.current_country", "India"],
+      ["location.current_city", "Chennai"],
+      ["comp.expected", "30 LPA"],
+    ]),
+  });
+  const of = (ref: string) => plan.entries.find((e) => e.ref === ref)?.value;
+
+  it("the street and country are your street and country, not your city", () => {
+    expect(of("[name=street]")).toBe("12 Home Street");
+    expect(of("[name=country]")).toBe("India");
+  });
+  it("the number in the box; a list where the phone goes takes your country (its +91)", () => {
+    expect(of("[name=mobile]")).toBe(resume.phone);
+    expect(of("#code")).toBe("India");
+    expect(of("#code2")).toBe("India");
+  });
+  it("a field the map names (salary) gets that answer", () => {
+    expect(of("[name=rec-form_9]")).toBe("30 LPA");
   });
 });

@@ -2,6 +2,7 @@ import type { AddressInfo } from "node:net";
 import type Anthropic from "@anthropic-ai/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MessagesApi } from "../src/claude/answerer.js";
+import { PAGE_MAP_SYSTEM } from "../src/claude/page-map.js";
 import { createApp } from "../src/http/app.js";
 import {
   type JobOpsApi,
@@ -423,8 +424,14 @@ describe("POST /plans/:jobId/page", () => {
       status: "fill",
       value: "Yes",
     });
+    // Workday pages are mapped too (Claude's map comes first; here it can't be read, so the
+    // page is planned as read).
+    const calls = create.mock.calls.map((c) => c[0]);
+    expect(calls[0]?.system).toBe(PAGE_MAP_SYSTEM);
     // Optional questions aren't sent to Claude.
-    const prompt = String(create.mock.calls[0]?.[0].messages[0]?.content);
+    const prompt = String(
+      calls.find((c) => c.system !== PAGE_MAP_SYSTEM)?.messages[0]?.content,
+    );
     expect(prompt).toContain("working with Kafka");
     expect(prompt).not.toContain("FINRA");
 

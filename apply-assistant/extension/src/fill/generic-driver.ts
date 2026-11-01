@@ -122,6 +122,43 @@ export function readGenericPage(): GenericPage {
     }
     return "";
   };
+  /**
+   * A label tied to the field by its name in the label's id, not by `for` (Zoho Recruit:
+   * `id="crc-label-rec-form_2111…"` for `name="rec-form_2111…"`).
+   */
+  const labelNamed = (el: HTMLElement): string => {
+    const name = el.getAttribute("name") || el.id;
+    if (!name) return "";
+    const found = [
+      ...document.querySelectorAll(`[id$="${CSS.escape(name)}"]`),
+    ].find(
+      (e) =>
+        e !== el &&
+        /label/i.test(e.id) &&
+        !e.querySelector("input, select, textarea"),
+    );
+    return found ? text(found).replace(/\s*\*$/, "") : "";
+  };
+  /**
+   * The label of the row the field is alone in: the nearest ancestor holding only this field
+   * whose label-like element comes before it (Zoho's City, State, Zip lists).
+   */
+  const rowLabel = (el: HTMLElement): string => {
+    let node = el.parentElement;
+    for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+      if (node.querySelectorAll("input:not([type=hidden]), select, textarea").length > 1)
+        return "";
+      const label = [...node.querySelectorAll("label, [class*='label' i]")].find(
+        (e) =>
+          !e.contains(el) &&
+          !e.querySelector("input, select, textarea") &&
+          e.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+      const said = label ? meaningful(text(label).replace(/\s*\*$/, "")) : "";
+      if (said) return said;
+    }
+    return "";
+  };
   const labelOf = (el: HTMLElement): string => {
     const input = el as HTMLInputElement;
     const own = input.labels?.[0] ?? el.closest("label");
@@ -143,6 +180,9 @@ export function readGenericPage(): GenericPage {
       labelledBy(box) ||
       questionAbove(el) ||
       meaningful(el.getAttribute("placeholder")) ||
+      // Before the field's own name ("rec-form_2111…"): a label found by that name, or its row's.
+      labelNamed(el) ||
+      rowLabel(el) ||
       el.getAttribute("name") ||
       ""
     ).slice(0, 300);
@@ -971,7 +1011,11 @@ export class GenericDriver extends TrustedDriver {
             ) !== null && box !== null;
           return (
             input.type !== "email" &&
-            (tags || /^(add|enter|type)\b.*\b(skill|tag|keyword)/i.test(input.placeholder))
+            (tags ||
+              // "Add skills"; Zoho's "Search and add skills".
+              /^(search (and|&) )?(add|enter|type)\b.*\b(skill|tag|keyword)/i.test(
+                input.placeholder,
+              ))
           );
         }),
       READ_MS,
@@ -1007,7 +1051,13 @@ export class GenericDriver extends TrustedDriver {
       await sleep(250);
       added++;
     }
-    const left = (await this.readBackRef(ref)).trim();
+    // The box's own text: its read-back is the tags beside it once it's empty (Zoho's chips).
+    const left = (
+      await within(
+        () => this.frame.$eval(ref, (el) => (el as HTMLInputElement).value ?? ""),
+        READ_MS,
+      ).catch(() => "")
+    ).trim();
     return left
       ? { ok: false, reason: `"${left}" stayed in the box: its tags didn't take Enter` }
       : { ok: true, result: `added ${added} tag(s), one at a time` };

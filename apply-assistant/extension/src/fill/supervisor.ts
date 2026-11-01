@@ -180,6 +180,22 @@ export function onlySection(
     .filter((e) => e.group === section);
 }
 
+/**
+ * "Fix this field": that one entry (found as "Fill from" finds it: by ref, else by its label);
+ * not found, none.
+ */
+export function onlyField(
+  entries: readonly PlanEntry[],
+  field: FillFrom,
+  resumeFirst: boolean,
+): PlanEntry[] {
+  // Not found, "Fill from" starts at the first entry: only a match is this field.
+  const first = startingFrom(entries, field, resumeFirst)[0];
+  return first && (first.ref === field.ref || first.label === field.label)
+    ? [first]
+    : [];
+}
+
 const current = (state: RunState): Step | undefined =>
   state.steps[state.cursor];
 

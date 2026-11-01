@@ -188,6 +188,11 @@ async function startFill(
           () => activeRun?.refillPage(),
           (seq) => activeRun?.fillFrom(seq),
           (section) => activeRun?.fillOnly(section),
+          () => activeRun?.readPageClosely(),
+          async (seq, how) =>
+            activeRun
+              ? activeRun.fixField(seq, how)
+              : "The run has ended.",
         );
       },
     };
