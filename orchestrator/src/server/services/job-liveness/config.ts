@@ -8,6 +8,8 @@
  *   JOB_LIVENESS_CHECK_HOUR         0-23, UTC         (default: 3)
  *   JOB_LIVENESS_SWEEP_ON_SEARCH    "true" | "false"  (default: true)
  *   JOB_MAX_POSTING_AGE_DAYS        0 disables        (default: 30)
+ *   JOB_DISCOVERY_MAX_AGE_HOURS     0 disables        (default: 0) a search keeps only postings
+ *                                   from this many hours back (24: the last day's listings)
  *   JOB_EXPIRE_UNVERIFIED_AFTER_DAYS 0 disables       (default: 45)
  */
 
@@ -20,6 +22,8 @@ export interface JobLivenessConfig {
   sweepOnSearch: boolean;
   /** Postings older than this are dropped at discovery. 0 disables. */
   maxPostingAgeDays: number;
+  /** Also dropped at discovery: postings older than this many hours. 0 disables. */
+  maxPostingAgeHours: number;
   /** Jobs that cannot be verified are expired once this old. 0 disables. */
   expireUnverifiedAfterDays: number;
   /** Number of hosts checked in parallel. */
@@ -73,6 +77,10 @@ export function getJobLivenessConfig(
       DEFAULT_MAX_POSTING_AGE_DAYS,
       { min: 0, max: 3650 },
     ),
+    maxPostingAgeHours: readInteger(env.JOB_DISCOVERY_MAX_AGE_HOURS, 0, {
+      min: 0,
+      max: 24 * 3650,
+    }),
     expireUnverifiedAfterDays: readInteger(
       env.JOB_EXPIRE_UNVERIFIED_AFTER_DAYS,
       DEFAULT_EXPIRE_UNVERIFIED_AFTER_DAYS,

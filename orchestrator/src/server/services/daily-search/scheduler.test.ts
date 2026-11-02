@@ -4,17 +4,41 @@ import { getDailySearchConfig, runConfigFor } from "./scheduler";
 
 describe("daily search", () => {
   it("is off until a saved search is named, and runs at 01:00 UTC unless told otherwise", () => {
-    expect(getDailySearchConfig({})).toEqual({ presetName: null, hour: 1 });
+    expect(getDailySearchConfig({})).toEqual({
+      presetName: null,
+      hour: 1,
+      hours: [1],
+    });
     expect(
       getDailySearchConfig({
         DAILY_SEARCH_PRESET: " Remote+onsite v1 ",
         DAILY_SEARCH_HOUR: "2",
       }),
-    ).toEqual({ presetName: "Remote+onsite v1", hour: 2 });
+    ).toEqual({ presetName: "Remote+onsite v1", hour: 2, hours: [2] });
     expect(
-      getDailySearchConfig({ DAILY_SEARCH_PRESET: "x", DAILY_SEARCH_HOUR: "25" })
-        .hour,
+      getDailySearchConfig({
+        DAILY_SEARCH_PRESET: "x",
+        DAILY_SEARCH_HOUR: "25",
+      }).hour,
     ).toBe(1);
+  });
+
+  it("runs several times a day when given several hours (bad ones ignored)", () => {
+    expect(
+      getDailySearchConfig({
+        DAILY_SEARCH_PRESET: "x",
+        DAILY_SEARCH_HOURS: "12, 0,25,x,12",
+        DAILY_SEARCH_HOUR: "5",
+      }),
+    ).toEqual({ presetName: "x", hour: 0, hours: [0, 12] });
+    // Nothing usable in the list: the single hour.
+    expect(
+      getDailySearchConfig({
+        DAILY_SEARCH_PRESET: "x",
+        DAILY_SEARCH_HOURS: " , 99",
+        DAILY_SEARCH_HOUR: "5",
+      }).hours,
+    ).toEqual([5]);
   });
 
   it("runs the saved search with the settings the Run button sends", () => {

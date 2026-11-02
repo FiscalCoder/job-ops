@@ -3,7 +3,7 @@ import type {
   ExtractorManifest,
   ExtractorProgressEvent,
 } from "@shared/types/extractors";
-import { runNaukri } from "./src/run";
+import { naukriFreshnessFor, runNaukri } from "./src/run";
 
 function toProgress(event: {
   type: string;
@@ -84,6 +84,7 @@ export const manifest: ExtractorManifest = {
       }),
       existingJobUrls,
       maxJobsPerTerm,
+      freshness: naukriFreshnessFor(process.env.JOB_DISCOVERY_MAX_AGE_HOURS),
       shouldCancel: context.shouldCancel,
       onProgress: (event) => {
         if (context.shouldCancel?.()) return;

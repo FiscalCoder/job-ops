@@ -28,6 +28,15 @@ const JOBSPY_SCRIPT = join(EXTRACTOR_DIR, "scrape_jobs.py");
 const OUTPUT_DIR = join(EXTRACTOR_DIR, "storage/imports");
 const JOBOPS_PROGRESS_PREFIX = "JOBOPS_PROGRESS ";
 
+/** A search scoped to the last N hours (JOB_DISCOVERY_MAX_AGE_HOURS); undefined when unset. */
+function discoveryHours(): number | undefined {
+  const hours = Number.parseInt(
+    process.env.JOB_DISCOVERY_MAX_AGE_HOURS ?? "",
+    10,
+  );
+  return Number.isFinite(hours) && hours > 0 ? hours : undefined;
+}
+
 export type JobSpyProgressEvent =
   | {
       type: "term_start";
@@ -332,7 +341,10 @@ export async function runJobSpy(
                   200,
               ),
               JOBSPY_HOURS_OLD: String(
-                options.hoursOld ?? process.env.JOBSPY_HOURS_OLD ?? 72,
+                options.hoursOld ??
+                  process.env.JOBSPY_HOURS_OLD ??
+                  discoveryHours() ??
+                  72,
               ),
               JOBSPY_LINKEDIN_FETCH_DESCRIPTION: String(
                 options.linkedinFetchDescription ??

@@ -8,6 +8,10 @@
  *
  *   DAILY_SEARCH_PRESET   the saved search's name (unset: no daily search)
  *   DAILY_SEARCH_HOUR     0-23, UTC (default: 1, which is 06:30 in India)
+ *   DAILY_SEARCH_HOURS    several runs a day, UTC hours separated by commas ("0,12");
+ *                         when set, it replaces DAILY_SEARCH_HOUR
+ *
+ * How far back each run looks is JOB_DISCOVERY_MAX_AGE_HOURS (job-liveness config).
  */
 
 import { logger } from "@infra/logger";
@@ -30,18 +34,35 @@ const DEFAULT_HOUR = 1;
 export interface DailySearchConfig {
   /** The saved search to run; null turns the daily search off. */
   presetName: string | null;
-  /** UTC hour it runs at. */
+  /** UTC hour it runs at (the first of `hours`). */
   hour: number;
+  /** Every UTC hour it runs at, earliest first. */
+  hours: number[];
 }
+
+const validHour = (hour: number) =>
+  Number.isInteger(hour) && hour >= 0 && hour <= 23;
 
 export function getDailySearchConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): DailySearchConfig {
   const name = env.DAILY_SEARCH_PRESET?.trim();
-  const hour = Number.parseInt(env.DAILY_SEARCH_HOUR ?? "", 10);
+  const one = Number.parseInt(env.DAILY_SEARCH_HOUR ?? "", 10);
+  const several = [
+    ...new Set(
+      (env.DAILY_SEARCH_HOURS ?? "")
+        .split(",")
+        .map((h) => (h.trim() === "" ? Number.NaN : Number(h.trim())))
+        .filter(validHour),
+    ),
+  ].sort((a, b) => a - b);
+  const hours = several.length
+    ? several
+    : [validHour(one) ? one : DEFAULT_HOUR];
   return {
     presetName: name ? name : null,
-    hour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : DEFAULT_HOUR,
+    hour: hours[0] ?? DEFAULT_HOUR,
+    hours,
   };
 }
 
@@ -76,12 +97,16 @@ async function startForOwner(
     async () => {
       if (getPipelineStatus().isRunning) return false;
       const config = preset.config as PipelineSearchPresetConfig;
-      await ensurePipelineSearchTerms({ requestedSearchTerms: config.searchTerms });
+      await ensurePipelineSearchTerms({
+        requestedSearchTerms: config.searchTerms,
+      });
       const usage = await reserveHostedUsage({ action: "pipeline_run" });
       void runPipeline(runConfigFor(config), {
         hostedUsageReservationId: usage.reservation?.id ?? null,
       }).catch((error) => {
-        logger.error("Daily search run failed", { error: sanitizeUnknown(error) });
+        logger.error("Daily search run failed", {
+          error: sanitizeUnknown(error),
+        });
       });
       return true;
     },
@@ -117,7 +142,8 @@ async function runDailySearch(): Promise<void> {
   }
 }
 
-const scheduler = createScheduler("daily-search", runDailySearch);
+/** One scheduler per run of the day (each keeps its own daily timer). */
+const schedulers: ReturnType<typeof createScheduler>[] = [];
 
 export function initializeDailySearch(): void {
   const config = getDailySearchConfig();
@@ -125,9 +151,18 @@ export function initializeDailySearch(): void {
     logger.info("Daily search is off (DAILY_SEARCH_PRESET not set)");
     return;
   }
-  scheduler.start(config.hour);
+  for (const hour of config.hours) {
+    const scheduler = createScheduler(`daily-search@${hour}`, runDailySearch);
+    scheduler.start(hour);
+    schedulers.push(scheduler);
+  }
 }
 
 export function getDailySearchNextRun(): string | null {
-  return scheduler.getNextRun();
+  return (
+    schedulers
+      .map((s) => s.getNextRun())
+      .filter((next): next is string => next !== null)
+      .sort()[0] ?? null
+  );
 }

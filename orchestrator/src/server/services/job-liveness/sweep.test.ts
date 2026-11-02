@@ -21,6 +21,7 @@ const config: JobLivenessConfig = {
   checkHour: 3,
   sweepOnSearch: true,
   maxPostingAgeDays: 30,
+  maxPostingAgeHours: 0,
   expireUnverifiedAfterDays: 45,
   hostConcurrency: 4,
   perHostDelayMs: 0,

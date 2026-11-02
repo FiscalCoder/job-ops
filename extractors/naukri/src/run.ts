@@ -94,6 +94,22 @@ export interface NaukriResult {
   challengeRequired?: string;
 }
 
+const FRESHNESS_DAYS: readonly NaukriFreshness[] = ["1", "3", "7", "15", "30"];
+
+/**
+ * Naukri's "posted within" for a search scoped to the last N hours (JOB_DISCOVERY_MAX_AGE_HOURS):
+ * the shortest of its choices that covers them ("1" day for 24 hours). Unset or 0: undefined
+ * (the default, 7 days).
+ */
+export function naukriFreshnessFor(
+  hours: string | undefined,
+): NaukriFreshness | undefined {
+  const parsed = Number.parseInt(hours ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  const days = Math.ceil(parsed / 24);
+  return FRESHNESS_DAYS.find((d) => Number(d) >= days) ?? "30";
+}
+
 export function slugifyKeyword(keyword: string): string {
   return keyword
     .trim()

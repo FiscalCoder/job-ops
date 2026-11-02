@@ -2,7 +2,10 @@ import { logger } from "@infra/logger";
 import { sanitizeUnknown } from "@infra/sanitize";
 import * as jobsRepo from "@server/repositories/jobs";
 import { getJobLivenessConfig } from "@server/services/job-liveness/config";
-import { partitionByPostingAge } from "@server/services/job-liveness/posting-age";
+import {
+  partitionByPostingAge,
+  partitionByPostingAgeHours,
+} from "@server/services/job-liveness/posting-age";
 import { startSweepForScope } from "@server/services/job-liveness/scheduler";
 import {
   type LivenessSweepSummary,
@@ -32,7 +35,16 @@ export function dropStalePostings(
       maxPostingAgeDays: config.maxPostingAgeDays,
     });
   }
-  return fresh;
+  // A search scoped to the last day (JOB_DISCOVERY_MAX_AGE_HOURS): older listings go too.
+  const recent = partitionByPostingAgeHours(fresh, config.maxPostingAgeHours);
+  if (recent.stale.length > 0) {
+    logger.info("Dropped discovered jobs posted before the search's window", {
+      step: "stale-jobs",
+      droppedCount: recent.stale.length,
+      maxPostingAgeHours: config.maxPostingAgeHours,
+    });
+  }
+  return recent.fresh;
 }
 
 /**

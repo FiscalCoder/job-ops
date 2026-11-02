@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runNaukri } from "../src/run";
 
-vi.mock("../src/run", () => ({
+vi.mock("../src/run", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/run")>()),
   runNaukri: vi.fn(),
 }));
 

@@ -7,6 +7,7 @@ import {
   htmlToText,
   makeSearchPageUrl,
   mapNaukriJob,
+  naukriFreshnessFor,
   postingText,
   resolveNaukriMaxJobsPerTerm,
   slugifyKeyword,
@@ -243,5 +244,16 @@ describe("naukri full postings", () => {
       { limit: 10, delayMs: 0 },
     );
     expect(jobs.map((j) => j.jobDescription)).toEqual([excerpt, full]);
+  });
+});
+
+describe("naukri freshness for a search window", () => {
+  it("the shortest choice covering the hours; unset or 0 keeps the default", () => {
+    expect(naukriFreshnessFor("24")).toBe("1");
+    expect(naukriFreshnessFor("36")).toBe("3");
+    expect(naukriFreshnessFor("200")).toBe("15");
+    expect(naukriFreshnessFor("10000")).toBe("30");
+    expect(naukriFreshnessFor(undefined)).toBeUndefined();
+    expect(naukriFreshnessFor("0")).toBeUndefined();
   });
 });
