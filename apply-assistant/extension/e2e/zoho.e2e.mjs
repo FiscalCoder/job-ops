@@ -31,6 +31,9 @@ ${named(3, "Country")}
 <div class="crc-form-row"><div><span class="crc-label-text">City</span></div>${deep('<input type="text" id="inputId" class="city">')}</div>
 <div class="crc-form-row"><label for="addSkills">Skills</label><div id="chips"></div>
   <input type="text" id="addSkills" name="-add-skills" placeholder="Search and add skills"></div>
+<div class="crc-form-row"><label id="fos-label">Field of Study</label><div class="fos__single-value" id="fos-value"></div>
+  <input id="fos" role="combobox" aria-autocomplete="list" aria-labelledby="fos-label"></div>
+<div class="crc-form-row"><input type="checkbox" id="current" aria-label="I currently work here" value="true"><span class="checkboxText">I currently work here</span></div>
 ${named(4, "Notice Period (in days)")}
 </form>
 <script>
@@ -43,6 +46,24 @@ skills.addEventListener("keydown", (e) => {
     '<span class="chip">' + skills.value.trim() + '<button aria-label="Remove skill">x</button></span>');
   skills.value = "";
 });
+// Field of Study lists only what contains the words you type: your whole answer finds nothing.
+const fos = document.getElementById("fos");
+fos.addEventListener("input", () => {
+  document.querySelectorAll("[role=listbox][data-popup]").forEach((l) => l.remove());
+  if (fos.value.length < 2) return;
+  window.searches = [...(window.searches ?? []), fos.value];
+  const list = document.createElement("ul");
+  list.setAttribute("role", "listbox");
+  list.setAttribute("data-popup", "");
+  for (const study of ["Management Information Systems", "Information Technology", "Business Management"].filter((s) => s.toLowerCase().includes(fos.value.toLowerCase()))) {
+    const li = document.createElement("li");
+    li.setAttribute("role", "option");
+    li.textContent = study;
+    li.addEventListener("click", () => { document.getElementById("fos-value").textContent = study; fos.value = ""; list.remove(); });
+    list.append(li);
+  }
+  document.body.append(list);
+});
 // Notice period takes digits only: anything else is wiped.
 const notice = document.querySelector("[name=rec-form_4]");
 notice.addEventListener("input", () => {
@@ -53,6 +74,7 @@ notice.addEventListener("input", () => {
 const posted = [];
 const operateAsks = [];
 const traced = [];
+const chooseAsks = [];
 let slowClaude = false;
 const ok = (route, data) =>
   route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data }) });
@@ -67,6 +89,8 @@ function plan(page) {
     City: "Chennai",
     Skills: "Node.js, Docker, Redis",
     "Notice Period (in days)": closely ? "30" : "30 days",
+    "Field of Study": "Information System Management",
+    "I currently work here": "I currently work here",
   };
   return {
     add: [],
@@ -76,7 +100,7 @@ function plan(page) {
         ref: f.ref,
         label: f.label,
         section: "main",
-        type: f.kind === "file" ? "file" : "text",
+        type: f.kind === "file" ? "file" : f.kind === "checkbox" ? "select" : "text",
         required: false,
         actionClass: "auto",
         status: value === null ? "skip" : "fill",
@@ -109,6 +133,10 @@ function stubServer(route, url) {
     return slowClaude ? new Promise((r) => setTimeout(r, 6_000)).then(answer) : answer();
   }
   if (url.pathname === "/trace/events") traced.push(req.postData() ?? "");
+  if (url.pathname === "/plans/stub/choose") {
+    chooseAsks.push(req.postDataJSON());
+    return ok(route, { value: null, why: "stub" });
+  }
   if (url.pathname === "/runs" && req.method() === "POST") return ok(route, { id: "stub-run" });
   if (url.pathname.startsWith("/runs/") || url.pathname.startsWith("/trace")) return ok(route, {});
   return ok(route, req.method() === "GET" ? [] : {});
@@ -177,6 +205,17 @@ try {
     "a \"Search and add skills\" box gets one skill at a time, each with Enter",
     JSON.stringify(chips.map((c) => c.replace(/x$/, "").trim())) === '["Node.js","Docker","Redis"]',
     JSON.stringify(chips),
+  );
+  check(
+    "a search list: every search's results kept, the same words in another order picked (no Claude)",
+    (await form.locator("#fos-value").innerText()) === "Management Information Systems" &&
+      chooseAsks.length === 0,
+    `${await form.locator("#fos-value").innerText()} · searches ${JSON.stringify(await form.evaluate(() => window.searches))} · Claude asked ${chooseAsks.length}`,
+  );
+  check(
+    "a checkbox with no <label> (its aria-label and the text beside it): ticked and read back",
+    (await form.locator("#current").isChecked()) &&
+      !traced.some((t) => t.includes("I currently work here") && t.includes("step-failed")),
   );
   const closer = posted.find((p) => typeof p.snapshot === "string");
   check(
@@ -300,6 +339,7 @@ try {
   console.log(`FAIL ${error instanceof Error ? error.message : error}`);
   const shown = (await shownOnFailure?.().catch(() => "")) ?? "";
   console.log(`Side panel: ${shown.replace(/\s*\n\s*/g, " / ").slice(0, 1500)}`);
+  console.log(`Trail: ${[...new Set(traced.flatMap((t) => JSON.parse(t).events ?? []).filter((e) => /step-failed|generic-try|escalate/.test(e.kind)).map((e) => e.message.slice(0, 300)))].join(" ;; ")}`);
   console.log(`Plans: ${posted.map((p) => `${p.snapshot ? "[closely] " : ""}${p.fields.map((f) => f.label).join("|")}`).join(" ;; ")}`);
 } finally {
   await context.close();

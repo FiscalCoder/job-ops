@@ -84,6 +84,49 @@ export function bestOption(
   return ranked[0]?.index ?? null;
 }
 
+/** Words that don't change what a choice means ("Bachelor of Science" = "Bachelors Science"). */
+const SMALL_WORDS = new Set(["and", "the", "of", "in", "for", "with", "a", "an", "&"]);
+
+const wordSet = (text: string) =>
+  new Set(
+    text
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}+#]+/u)
+      .filter((w) => w && !SMALL_WORDS.has(w))
+      .map((w) => (w.length > 3 ? w.replace(/s$/, "") : w)),
+  );
+
+/**
+ * The same words in any order ("Management Information Systems" for "Information System
+ * Management"): plurals and small words aside, none more and none fewer.
+ */
+export function sameWords(label: string, wanted: string): boolean {
+  const a = wordSet(label);
+  const b = wordSet(wanted);
+  return a.size > 0 && a.size === b.size && [...a].every((w) => b.has(w));
+}
+
+/**
+ * Among every choice seen (across searches), the one that is your answer: as the list words
+ * it (bestOption), else the same words in another order. Null when none is: Claude picks then.
+ */
+export function bestFound(found: readonly string[], wanted: string): string | null {
+  const index = bestOption(found, wanted);
+  if (index !== null) return found[index] ?? null;
+  return found.find((label) => sameWords(label, wanted)) ?? null;
+}
+
+/** An answer's words worth searching a list for on their own ("Machine", "Learning"). */
+export function searchWords(wanted: string, max = 4): string[] {
+  return [
+    ...new Set(
+      wanted
+        .split(/[^\p{L}\p{N}+#.]+/u)
+        .filter((w) => w.length > 2 && !SMALL_WORDS.has(w.toLowerCase())),
+    ),
+  ].slice(0, max);
+}
+
 /**
  * Read-back for a dropdown: some widgets show only part of the chosen option (the phone
  * country picker shows "+91" for "India +91"), so either containing the other as whole

@@ -2,6 +2,7 @@ import type {
   Frame,
   Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
+import { bestFound, searchWords } from "./options";
 import { pickOpenChoice, showsValue, visibleChoices } from "./site-help";
 import type { PlanEntry } from "./supervisor";
 import {
@@ -16,7 +17,7 @@ import {
   TrustedDriver,
   within,
 } from "./trusted";
-import type { Chooser, EntriesToAdd } from "./workday-driver";
+import type { Chooser, EntriesToAdd, SearchTerms } from "./workday-driver";
 
 /** How long a block added with the site's Add More may take to appear (or the page to reload). */
 const ADD_WAIT_MS = 10_000;
@@ -59,6 +60,10 @@ export const PLACEHOLDER =
 
 /** A search box is cleared key by key; longer text than this isn't a dropdown's. */
 const MAX_CLEAR_CHARS = 120;
+/** How long one search of a list (searching everything) waits for its choices. */
+const SEARCH_LIST_MS = 1_500;
+/** What a search list shows when it finds nothing: never a choice. */
+const NO_RESULTS = /^no (results?|matches|options|items)( found)?\.?$/i;
 
 export interface GenericPage {
   readonly system: "generic";
@@ -515,8 +520,14 @@ export function shownValue(selector: string): string {
       .join(", ");
   }
   if (input.type === "radio" || input.type === "checkbox") {
+    // No <label> (Phenom's "I currently work here"): its aria-label or the text beside it,
+    // before its value ("true").
     const label = (i: HTMLInputElement) =>
-      text(i.labels?.[0]) || text(i.closest("label")) || i.value;
+      text(i.labels?.[0]) ||
+      text(i.closest("label")) ||
+      i.getAttribute("aria-label")?.trim() ||
+      text(i.nextElementSibling) ||
+      i.value;
     return all
       .map((i) => i as HTMLInputElement)
       .filter((i) => i.checked)
@@ -597,6 +608,8 @@ export class GenericDriver extends TrustedDriver {
     "[role='alert'], .error-message, .field-error, .invalid-feedback, [class*='errorMessage' i]";
   /** Set by the run: a search that finds nothing worded like your answer. */
   chooser: Chooser | null = null;
+  /** Set by the run: broader words to search a list for when your answer's own find nothing. */
+  searchTerms: SearchTerms | null = null;
 
   /** The form another driver (Greenhouse, Ashby…) is on: fields its plan doesn't cover. */
   static on(where: { readonly page: Page; readonly frame: Frame }): GenericDriver {
@@ -1131,9 +1144,17 @@ export class GenericDriver extends TrustedDriver {
     }
     const shown = await this.readBackRef(ref);
     const picked = targets.map((i) => labels[i] ?? "");
-    return picked.every((p) => selectionMatches(shown, p))
-      ? { ok: true, result: `picked ${picked.map((p) => `"${p}"`).join(", ")}` }
-      : { ok: false, reason: `"${picked.join(", ")}" didn't stay selected` };
+    if (picked.every((p) => selectionMatches(shown, p)))
+      return { ok: true, result: `picked ${picked.map((p) => `"${p}"`).join(", ")}` };
+    // A lone checkbox whose words don't read back (no label, or none at all): ticked is set.
+    if (
+      inputs.length === 1 &&
+      (await inputs[0]
+        ?.evaluate((el) => (el as HTMLInputElement).checked)
+        .catch(() => false))
+    )
+      return { ok: true, result: "ticked" };
+    return { ok: false, reason: `"${picked.join(", ")}" didn't stay selected` };
   }
 
   /**
@@ -1165,11 +1186,74 @@ export class GenericDriver extends TrustedDriver {
     }
     const chosen = await this.chooseFromList(entry, all);
     if (chosen) return chosen;
+    const gathered = await this.searchEverything(entry, wanted);
+    if (gathered) return gathered;
     await this.clearSearch(ref);
     await this.page.keyboard.sendCharacter(wanted.slice(0, 80));
     await this.page.keyboard.press("Enter");
     await sleep(200);
     return this.verify(ref, wanted);
+  }
+
+  /**
+   * A search list that shows nothing until you type, and nothing for your whole answer: your
+   * answer's main words are searched, then broader words Claude suggests and "Other"; every
+   * choice seen is kept, and the best of all of them is picked at the end (your answer as the
+   * list words it, or the same words in another order; else Claude's pick). Null when nothing
+   * was found or nothing fits.
+   */
+  private async searchEverything(
+    entry: PlanEntry,
+    wanted: string,
+  ): Promise<FillOutcome | null> {
+    const { ref } = entry;
+    if (!wanted.trim()) return null;
+    const found = new Set<string>();
+    const searched = new Set<string>([wanted.toLowerCase()]);
+    const collect = async (terms: readonly string[]) => {
+      for (const term of terms) {
+        if (searched.has(term.toLowerCase())) continue;
+        searched.add(term.toLowerCase());
+        await this.clearSearch(ref);
+        await this.page.keyboard.sendCharacter(term.slice(0, 80));
+        for (const choice of await visibleChoices(this.frame, SEARCH_LIST_MS))
+          if (!PLACEHOLDER.test(choice) && !NO_RESULTS.test(choice))
+            found.add(choice);
+      }
+    };
+    await collect(searchWords(wanted));
+    let choice = bestFound([...found], wanted);
+    let byClaude = false;
+    if (!choice) {
+      const broader = this.searchTerms
+        ? await this.searchTerms(entry.label, wanted).catch(() => [])
+        : [];
+      await collect([...broader, "Other"]);
+      choice = bestFound([...found], wanted);
+      if (!choice && found.size && this.chooser) {
+        choice = await this.chooser(
+          entry.label,
+          wanted,
+          [...found].slice(0, 300),
+        ).catch(() => null);
+        byClaude = true;
+      }
+    }
+    await this.clearSearch(ref);
+    if (!choice) return null;
+    await this.page.keyboard.sendCharacter(choice.slice(0, 80));
+    const picked =
+      (await pickOpenChoice(this.frame, choice)) ??
+      (await this.pickAfterEnter(choice));
+    if (!picked) return null;
+    await sleep(200);
+    const outcome = await this.verify(ref, picked);
+    return outcome.ok
+      ? {
+          ok: true,
+          result: `${byClaude ? "Claude picked" : "picked"} "${picked}" of ${found.size} choices seen across searches (your answer: "${wanted.slice(0, 60)}")`,
+        }
+      : outcome;
   }
 
   /**

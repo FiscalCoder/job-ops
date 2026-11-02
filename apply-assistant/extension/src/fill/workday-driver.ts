@@ -3,6 +3,7 @@ import type {
   Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import type { PlanEntry } from "./supervisor";
+import { bestFound } from "./options";
 import {
   bestOption,
   type FillOutcome,
@@ -89,6 +90,8 @@ const STOP_WORDS = /^(and|the|for|with|of|in)$/i;
 const MAX_SEARCH_WORDS = 4;
 /** At most this many choices found across searches go to Claude. */
 const MAX_FOUND = 300;
+/** How long a search waits for the last search's list to give way to its own. */
+const STALE_LIST_MS = 1_500;
 
 /** Workday's placeholder choice in every dropdown. */
 const PLACEHOLDER = /^select one$/i;
@@ -337,13 +340,21 @@ export class WorkdayDriver extends TrustedDriver {
     for (;;) {
       const page = await this.frame.evaluate(readWorkdayPage);
       const refs = page.fields.map((f) => f.ref).join("|");
+      // The sections (Work Experience, Education) load after the first fields: they count
+      // too, and My Experience without any isn't there yet (NCR showed 3 fields of 35).
+      const shape = `${refs}#${page.sections.map((s) => `${s.id}:${s.entries}`).join(",")}`;
+      const sectionsDue =
+        /experience/i.test(page.step) && page.sections.length === 0;
       const settled =
-        refs === previous && refs !== this.lastRefs && page.fields.length > 0;
+        shape === previous &&
+        refs !== this.lastRefs &&
+        page.fields.length > 0 &&
+        !sectionsDue;
       if (settled || Date.now() > deadline) {
         this.lastRefs = refs;
         return page;
       }
-      previous = refs;
+      previous = shape;
       await sleep(POLL_MS * 4);
     }
   }
@@ -483,6 +494,9 @@ export class WorkdayDriver extends TrustedDriver {
     if (before && selectionMatches(before, wanted))
       return { ok: true, result: `already "${before}"` };
     await button.click();
+    // The list didn't open, or showed nothing in time (a second Degree low on the page): once
+    // more, scrolled into view, then from the keyboard.
+    if (!(await this.openChoices())) await this.reopen(button);
     let picked = await this.pickOpen(wanted);
     let note = "";
     // The list words it differently ("Fluent" vs "Fluent / Native Speaker"): Claude picks
@@ -509,6 +523,36 @@ export class WorkdayDriver extends TrustedDriver {
       : { ok: false, reason: `"${picked}" wasn't selected` };
   }
 
+  /** A dropdown whose list didn't show: click it again in view; still nothing, ArrowDown. */
+  private async reopen(button: ElementHandle): Promise<void> {
+    await this.page.keyboard.press("Escape");
+    await button
+      .evaluate((el) => el.scrollIntoView({ block: "center" }))
+      .catch(() => undefined);
+    await sleep(300);
+    await button.click().catch(() => undefined);
+    if (await this.openChoices()) return;
+    await button.focus().catch(() => undefined);
+    await this.page.keyboard.press("ArrowDown");
+  }
+
+  /** How many picks a search field keeps (its tags). */
+  private chips(ref: string): Promise<number> {
+    return this.frame
+      .$$eval(
+        `:is(${boxOf(ref)}) [data-automation-id='selectedItem']`,
+        (items) => items.length,
+      )
+      .catch(() => 0);
+  }
+
+  /** After a pick: until Workday shows it as a tag (else the next search lands mid-update). */
+  private async untilKept(ref: string, before: number): Promise<void> {
+    const deadline = Date.now() + OPTION_WAIT_MS;
+    while ((await this.chips(ref)) <= before && Date.now() < deadline)
+      await sleep(POLL_MS * 2);
+  }
+
   /** Type, Enter, pick the best result; a category opens its own list, so pick again there. */
   private async search(
     ref: string,
@@ -517,29 +561,50 @@ export class WorkdayDriver extends TrustedDriver {
   ): Promise<FillOutcome> {
     const picked: string[] = [];
     const notes: string[] = [];
+    const input = () =>
+      this.frame.$(
+        `:is(${boxOf(ref)}) [data-automation-id='multiSelectContainer'] input`,
+      );
     for (const item of wanted) {
       if (selectionMatches(await this.readBackRef(ref), item)) {
         picked.push(item);
         continue;
       }
-      const input = await this.frame.$(
-        `:is(${boxOf(ref)}) [data-automation-id='multiSelectContainer'] input`,
-      );
-      if (!input) return { ok: false, reason: "Search box not found" };
+      const box = await input();
+      if (!box) return { ok: false, reason: "Search box not found" };
+      const tags = await this.chips(ref);
       let chosen = await this.searchAndPick(
         ref,
-        input,
+        box,
         item,
         wanted.length === 1,
       );
-      // One answer (Field of Study, School) that the list words differently: Claude picks.
+      // One answer (Field of Study, School) that the list words differently: every search's
+      // results, then the best of them all.
       if (!chosen && wanted.length === 1 && this.chooser) {
-        chosen = await this.pickWithClaude(ref, input, label, item);
-        if (chosen) notes.push(`Claude picked the closest to "${item}"`);
+        const found = await this.pickWithClaude(ref, box, label, item);
+        chosen = found?.picked ?? null;
+        if (found) notes.push(found.how);
       }
       // Nothing found: don't leave the text for the next search to be typed onto.
-      if (!chosen) await this.focusAndClear(input);
-      if (chosen) picked.push(chosen);
+      if (!chosen) await this.focusAndClear(box);
+      if (chosen) {
+        picked.push(chosen);
+        // Several (skills): the tag must be there before the next search starts.
+        if (wanted.length > 1) await this.untilKept(ref, tags);
+      }
+    }
+    // A pick that didn't become a tag (Workday was still busy with the last one): once more.
+    if (wanted.length > 1) {
+      const shownNow = await this.readBackRef(ref);
+      for (const lost of picked.filter((p) => !selectionMatches(shownNow, p))) {
+        const box = await input();
+        if (!box) break;
+        const tags = await this.chips(ref);
+        if (await this.searchAndPick(ref, box, lost, false))
+          await this.untilKept(ref, tags);
+        else await this.focusAndClear(box);
+      }
     }
     const shown = await this.readBackRef(ref);
     const kept = picked.filter((p) => selectionMatches(shown, p));
@@ -562,10 +627,35 @@ export class WorkdayDriver extends TrustedDriver {
 
   /** Types text into a search box, presses Enter and waits for its results. */
   private async results(input: ElementHandle, text: string) {
+    // The last search's list may still show: wait for this search's own (or a moment).
+    const stale = (await this.shownChoices()).join("|");
     await this.focusAndClear(input);
     await this.page.keyboard.sendCharacter(text.slice(0, 60));
     await this.page.keyboard.press("Enter");
-    return this.openChoices();
+    const deadline = Date.now() + STALE_LIST_MS;
+    while (
+      stale &&
+      Date.now() < deadline &&
+      (await this.shownChoices()).join("|") === stale
+    )
+      await sleep(POLL_MS);
+    const open = await this.openChoices();
+    this.lastResults = open?.labels.filter((l) => !NOT_A_CHOICE.test(l)) ?? [];
+    return open;
+  }
+
+  /** What the last search listed: kept, so a later choice can be made from it too. */
+  private lastResults: readonly string[] = [];
+
+  /** The choices an open list shows right now (no waiting). */
+  private shownChoices(): Promise<string[]> {
+    return this.frame
+      .$$eval(OPEN_OPTIONS, (options) =>
+        options
+          .filter((el) => (el as HTMLElement).offsetParent !== null)
+          .map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim()),
+      )
+      .catch(() => []);
   }
 
   /** Clicks the result that best matches; a category opens its own list, so picks again there. */
@@ -586,21 +676,22 @@ export class WorkdayDriver extends TrustedDriver {
   }
 
   /**
-   * Your answer isn't in the list as such (Field of Study differs by company). Everything each
-   * search finds is kept: first your answer's main words, then (when Claude sees nothing there
-   * that is your answer) broader words Claude suggests and "Other". Claude then picks the best
-   * of all of it, or nothing, and that is picked.
+   * Your answer isn't in the list as such (Field of Study differs by company). Every search's
+   * results are kept: your whole answer's (already searched), its main words', then broader
+   * words Claude suggests and "Other". The best of all of them is picked at the end: your
+   * answer as the list words it or the same words in another order, else Claude's pick of
+   * everything seen (or nothing, when none is your answer).
    */
   private async pickWithClaude(
     ref: string,
     input: ElementHandle,
     label: string,
     wanted: string,
-  ): Promise<string | null> {
+  ): Promise<{ picked: string; how: string } | null> {
     const chooser = this.chooser;
     if (!chooser) return null;
-    const found = new Set<string>();
-    const searched = new Set<string>();
+    const found = new Set<string>(this.lastResults);
+    const searched = new Set<string>([wanted.toLowerCase()]);
     const collect = async (terms: readonly string[]) => {
       for (const term of terms) {
         if (searched.has(term.toLowerCase())) continue;
@@ -611,10 +702,6 @@ export class WorkdayDriver extends TrustedDriver {
           if (!NOT_A_CHOICE.test(l)) found.add(l);
       }
     };
-    const choose = async () =>
-      found.size > 0
-        ? chooser(label, wanted, [...found].slice(0, MAX_FOUND))
-        : null;
     await collect(
       [
         ...new Set(
@@ -624,17 +711,23 @@ export class WorkdayDriver extends TrustedDriver {
         ),
       ].slice(0, MAX_SEARCH_WORDS),
     );
-    let choice = await choose();
+    let choice = bestFound([...found], wanted);
+    let how = `picked "${choice}" for "${wanted}" from ${found.size} results`;
     if (!choice) {
       const broader = this.searchTerms
         ? await this.searchTerms(label, wanted).catch(() => [])
         : [];
       // "Other" last: a school or employer that isn't listed is entered as Other.
       await collect([...broader, "Other"]);
-      choice = await choose();
+      choice = bestFound([...found], wanted);
+      if (!choice && found.size > 0) {
+        choice = await chooser(label, wanted, [...found].slice(0, MAX_FOUND));
+        how = `Claude picked the closest to "${wanted}" of ${found.size} results`;
+      }
     }
     if (!choice) return null;
-    return this.searchAndPick(ref, input, choice, true);
+    const picked = await this.searchAndPick(ref, input, choice, true);
+    return picked ? { picked, how } : null;
   }
 
   /**

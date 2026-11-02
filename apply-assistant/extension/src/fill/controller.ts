@@ -215,6 +215,16 @@ async function failStart(
 
 /** Claude's operate budget for the application is used up (the server's limit messages). */
 const BUDGET_SPENT = /budget|cost limit/i;
+/**
+ * Only you can type these: a captcha, or a code sent to your email or phone. Claude never
+ * tries them, and the page isn't read closely for them.
+ */
+const YOURS_TO_TYPE =
+  /captcha|verification code|one[- ]time (pass(word|code)?|code)|\botp\b|security code|code (we|was) sent/i;
+/** The page drew the field again mid-fill (its frame or context went away): worth one retry. */
+const REDRAWN =
+  /cannot find context|execution context was destroyed|detached frame|node is detached|target closed/i;
+const REDRAW_SETTLE_MS = 800;
 
 /** Workday's last page: nothing to fill, you check everything and submit. */
 const FINAL_STEP = /^review$/i;
@@ -224,6 +234,20 @@ const PAGE_SETTLE_MS = 1_500;
 /** The server's plan for the page on screen (none on Workday's final Review page). */
 /** Claude works a field by itself at most this often: a first try, then one with its result. */
 const MAX_CLAUDE_TRIES = 2;
+
+/**
+ * A driver's help with lists: Claude's pick among a list's choices when none is worded like
+ * your answer, and broader words to search a list for when your answer's own find nothing.
+ */
+function helpPicking(
+  driver: WorkdayDriver | GenericDriver,
+  client: ApplyClient,
+  jobId: string,
+): void {
+  driver.chooser = chooserFor(client, jobId);
+  driver.searchTerms = async (label, wanted) =>
+    (await client.searchTerms(jobId, { label, wanted })).terms ?? [];
+}
 
 /** Claude picks among a list's choices when none is worded like your answer. */
 function chooserFor(client: ApplyClient, jobId: string): Chooser {
@@ -429,7 +453,7 @@ export class RunController {
         const fallback = await GenericDriver.attach(page);
         if (!fallback) return null;
         generic = true;
-        fallback.chooser = chooserFor(client, job.jobId);
+        helpPicking(fallback, client, job.jobId);
         trace.event(
           "fallback",
           `No ${ats} form on ${page.url()}: reading the page's own form instead`,
@@ -463,7 +487,6 @@ export class RunController {
       { data: context },
     );
     await chrome.tabs.update(tabId, { active: true });
-    const chooser = chooserFor(client, job.jobId);
     return RunController.launch({
       ...options,
       trace,
@@ -471,15 +494,11 @@ export class RunController {
       attach: async (page) => {
         if (system === "workday") {
           const driver = await WorkdayDriver.attach(page);
-          if (driver) {
-            driver.chooser = chooser;
-            driver.searchTerms = async (label, wanted) =>
-              (await client.searchTerms(job.jobId, { label, wanted })).terms;
-          }
+          if (driver) helpPicking(driver, client, job.jobId);
           return driver;
         }
         const driver = await GenericDriver.attach(page);
-        if (driver) driver.chooser = chooser;
+        if (driver) helpPicking(driver, client, job.jobId);
         return driver;
       },
       plan: (driver) => planPagedPage(client, job.jobId, driver as PagedDriver),
@@ -876,9 +895,7 @@ export class RunController {
       return false;
     const workday = await WorkdayDriver.attach(this.page).catch(() => null);
     if (!workday) return false;
-    workday.chooser = chooserFor(this.client, this.job.jobId);
-    workday.searchTerms = async (label, wanted) =>
-      (await this.client.searchTerms(this.job.jobId, { label, wanted })).terms;
+    helpPicking(workday, this.client, this.job.jobId);
     workday.help = generic.help;
     this.driver = workday;
     this.startHost = new URL(this.page.url()).host;
@@ -906,7 +923,7 @@ export class RunController {
     )
       return null;
     const generic = GenericDriver.on(site.where());
-    generic.chooser = chooserFor(this.client, this.job.jobId);
+    helpPicking(generic, this.client, this.job.jobId);
     const ref = await generic.refInside(site.boxSelector(step.entry.ref));
     if (!ref) return null;
     const outcome = await generic
@@ -940,7 +957,7 @@ export class RunController {
     await site.markCovered(this.state.steps.map((s) => s.entry.ref));
     const generic = GenericDriver.on(site.where());
     generic.onlyOpen = true;
-    generic.chooser = chooserFor(this.client, this.job.jobId);
+    helpPicking(generic, this.client, this.job.jobId);
     generic.help = site.help;
     let entries: PlanEntry[];
     try {
@@ -1117,7 +1134,7 @@ export class RunController {
       this.readClosely.has(page) ||
       this.claudeSpent ||
       this.state.paused ||
-      /captcha/i.test(`${step.entry.label} ${step.entry.ref}`) ||
+      YOURS_TO_TYPE.test(`${step.entry.label} ${step.entry.ref}`) ||
       step.entry.widget === "captcha"
     )
       return false;
@@ -1427,6 +1444,18 @@ export class RunController {
             step.value,
             this.resume ?? undefined,
           );
+      // The page drew itself again mid-fill: once more on the page as it is now.
+      if (!outcome.ok && !step.operate && REDRAWN.test(outcome.reason)) {
+        await sleep(REDRAW_SETTLE_MS);
+        if (this.driver instanceof GenericDriver)
+          await this.driver.findFormFrame().catch(() => false);
+        if (!this.leftBehind(step))
+          outcome = await this.driver.fill(
+            step.entry,
+            step.value,
+            this.resume ?? undefined,
+          );
+      }
       // The site's driver couldn't: the generic one, on the same field.
       if (!outcome.ok && !step.operate && !this.leftBehind(step))
         outcome = (await this.genericTry(step, outcome.reason)) ?? outcome;
@@ -1532,7 +1561,7 @@ export class RunController {
       (this.escalated.get(step.seq) ?? 0) >= MAX_CLAUDE_TRIES ||
       step.entry.type === "file" ||
       // A captcha is yours to solve: Claude never types one.
-      /captcha/i.test(`${step.entry.label} ${step.entry.ref}`) ||
+      YOURS_TO_TYPE.test(`${step.entry.label} ${step.entry.ref}`) ||
       step.entry.widget === "captcha" ||
       !this.driver.operate ||
       this.state.paused

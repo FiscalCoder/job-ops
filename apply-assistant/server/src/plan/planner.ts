@@ -784,6 +784,46 @@ function fitToField(field: FormField, resolved: Resolved): Typed {
   };
 }
 
+/** A question asked for a yes or a no ("Are you …?", "Have you …?"), in its first sentence. */
+const YES_NO_QUESTION =
+  /^\s*(are|is|do|does|did|have|has|had|will|would|can|could|were|was|should)\b[^?]{0,200}\?/i;
+/** …unless it asks for more than that ("If yes, how many days?", "If not, where?"). */
+const ASKS_MORE =
+  /\b(if (yes|so|not|no)|please (specify|provide|mention|state|list|share|enter)|tell (me|us)|how (many|much|long|soon)|which|what|when|where|why|explain|describe|details?)\b/i;
+const YES_OR_NO = /^\s*(yes|no|y|n|true|false)\b/i;
+
+/**
+ * A yes/no question isn't filled with a saved answer that isn't a yes or a no (your city list
+ * for "Are you comfortable working from Hyderabad?", your expected salary for "Are you a
+ * previous employee?" when the page's labels were read one off): it goes to Claude, or you.
+ */
+function answersYesNo(field: FormField, resolved: Resolved): Resolved {
+  const values =
+    resolved.value === null
+      ? []
+      : Array.isArray(resolved.value)
+        ? (resolved.value as readonly string[])
+        : [resolved.value as string];
+  const yesNoChoices =
+    field.options.length === 0 ||
+    field.options.some((o) => YES_OR_NO.test(o.label));
+  if (
+    values.length === 0 ||
+    resolved.option ||
+    !/\b(bank|learned)\b/.test(resolved.source) ||
+    !yesNoChoices ||
+    !YES_NO_QUESTION.test(field.label) ||
+    ASKS_MORE.test(field.label) ||
+    values.every((v) => YES_OR_NO.test(v))
+  )
+    return resolved;
+  return {
+    value: null,
+    source: resolved.source,
+    reason: `Your saved answer "${values.join(", ").slice(0, 60)}" doesn't answer this yes/no question`,
+  };
+}
+
 /** Answers that are yours: your answer bank, remembered answers, resume, Job Ops' tailored PDF. */
 const YOURS = /^(bank|learned|resume|jobops|rule:fixed)\b/;
 
@@ -803,7 +843,8 @@ function planField(
     required: field.required,
     actionClass,
   };
-  const resolved = resolveRule(rule, field, input, jobCountry);
+  const ruled = resolveRule(rule, field, input, jobCountry);
+  const resolved = ruled === "skip" ? ruled : answersYesNo(field, ruled);
   if (resolved === "skip")
     return {
       ...base,

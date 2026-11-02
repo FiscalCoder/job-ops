@@ -37,6 +37,19 @@ const bank = new Map([
   ["work.relocation", "Yes"],
 ]);
 
+const planInput = (fields: FormField[], withBank = bank) => ({
+  schema: {
+    postingId: "1",
+    title: "Engineer",
+    location: "Remote",
+    education: null,
+    fields,
+    hash: "h",
+  } satisfies FormSchema,
+  resume: resumeFacts(fakeDesignResume),
+  bank: withBank,
+});
+
 const plan = (fields: FormField[], withBank = bank) =>
   buildPlan({
     schema: {
@@ -154,5 +167,67 @@ describe("label rules", () => {
       "Blog",
     ])
       expect(ruleOf(label, text)).toEqual({ kind: "profile", fact: "website" });
+  });
+});
+
+describe("a Yes/No question in a text box", () => {
+  const text = (label: string, patch: Partial<FormField> = {}) =>
+    field(label, { type: "text", options: [], ...patch });
+  const withCities = new Map([
+    ...bank,
+    ["work.preferred_cities", "Chennai, Bengaluru, Hyderabad, Pune"],
+    ["comp.expected", "4000000"],
+  ]);
+
+  it("isn't given a saved answer that isn't a yes or no (Crunchyroll: your city list)", () => {
+    const q = text(
+      "Are you comfortable to work from Hyderabad? This is a Hybrid role with 2 days office and 3 days Work from home.",
+    );
+    const [entry] = buildPlan({
+      ...planInput([q], withCities),
+      claude: new Map([
+        [
+          q.ref,
+          {
+            kind: "bank" as const,
+            key: "work.preferred_cities",
+            confidence: 0.85,
+            why: "cities",
+            model: "claude-haiku-5-5",
+          },
+        ],
+      ]),
+    }).entries;
+    expect(entry?.status).toBe("needs-you");
+    expect(entry?.value).toBeNull();
+    expect(entry?.reason).toMatch(/doesn't answer this yes\/no question/);
+  });
+
+  it("isn't given a value the page map tied to it (PayPal: your expected salary)", () => {
+    const [entry] = plan(
+      [
+        text("Are you a previous Employee of PayPal or any of its subsidiaries?", {
+          canonical: "expected_salary",
+        }),
+      ],
+      withCities,
+    ).entries;
+    expect(entry?.value).toBeNull();
+    expect(entry?.status).toBe("needs-you");
+  });
+
+  it("keeps a yes or no, and questions that ask for more than yes or no", () => {
+    const [yes] = plan([text("Are you willing to relocate?")], withCities)
+      .entries;
+    expect(yes?.value).toBe("Yes");
+    const [where] = plan(
+      [
+        text("Do you live in or near Pune? If not, where?", {
+          canonical: "location",
+        }),
+      ],
+      withCities,
+    ).entries;
+    expect(where?.value).toBe("Chennai");
   });
 });

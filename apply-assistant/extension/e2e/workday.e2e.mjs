@@ -103,8 +103,14 @@ const RESULTS = {
   source: ["LinkedIn", "LinkedIn Learning", "Indeed", "Referral"],
   school: ["Some Institute of Technology", "Some School"],
   fieldOfStudy: ["Accounting and Finance", "Computer Science", "Information Systems", "Machine Tool Technology", "Other"],
-  skills: ["React", "React Native", "TypeScript"],
+  skills: ["React", "React Native", "TypeScript", "Node.js", "Docker"],
 };
+// As on Workday, a skill becomes a tag a moment after it's picked, and a search started before
+// then loses it.
+const TAG_MS = 700;
+let pendingTag = null;
+// The Degree list doesn't open on its first click when filling (the 1st click was the page read).
+let degreeClicks = 0;
 document.addEventListener("input", (e) => {
   const display = e.target.previousElementSibling;
   if (e.target.getAttribute("role") === "spinbutton" && display) display.textContent = e.target.value;
@@ -120,7 +126,7 @@ document.addEventListener("click", (e) => {
     openList(button, ["Select One", "Email", "Phone"], (label) => { button.textContent = label; });
   }
   const degree = e.target.closest("[id$='--degree']");
-  if (degree) openList(degree, ["Select One", "Diploma", "Bachelor's Degree"], (label) => { degree.textContent = label; });
+  if (degree && ++degreeClicks !== 2) openList(degree, ["Select One", "Diploma", "Bachelor's Degree"], (label) => { degree.textContent = label; });
 });
 document.addEventListener("keydown", (e) => {
   const input = e.target;
@@ -128,16 +134,23 @@ document.addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.key === "a" && input.closest?.("[data-automation-id=multiSelectContainer]")) e.preventDefault();
   if (e.key !== "Enter" || !input.closest?.("[data-automation-id=multiSelectContainer]")) return;
   const typed = input.value.toLowerCase();
-  const found = RESULTS[input.id.split("--").pop()].filter((r) => r.toLowerCase().includes(typed));
+  const key = input.id.split("--").pop();
+  if (key === "skills" && pendingTag) { clearTimeout(pendingTag); pendingTag = null; }
+  const found = RESULTS[key].filter((r) => r.toLowerCase().includes(typed));
   openList(input, found.length ? found : ["No Items."], (label) => {
     if (label === "No Items.") return;
-    const pill = document.createElement("li");
-    // As on Workday, a picked tag is an option of a listbox ("selectedItemList").
-    pill.setAttribute("role", "option");
-    pill.setAttribute("data-automation-id", "selectedItem");
-    pill.textContent = label;
-    input.closest("[data-automation-id=multiSelectContainer]").querySelector("[data-automation-id=selectedItemList]").append(pill);
+    const add = () => {
+      pendingTag = null;
+      const pill = document.createElement("li");
+      // As on Workday, a picked tag is an option of a listbox ("selectedItemList").
+      pill.setAttribute("role", "option");
+      pill.setAttribute("data-automation-id", "selectedItem");
+      pill.textContent = label;
+      input.closest("[data-automation-id=multiSelectContainer]").querySelector("[data-automation-id=selectedItemList]").append(pill);
+    };
     input.value = "";
+    if (key === "skills") pendingTag = setTimeout(add, TAG_MS);
+    else add();
   });
 });
 const review = '<h2>Review</h2><p>Check your application.</p><button id="submit">Submit</button>';
@@ -226,7 +239,7 @@ function valueFor(field, order) {
   }
   // Kafka isn't in Workday's list: the skills the list has are enough, and its text mustn't be
   // left for the next one to be typed onto.
-  if (field.key === "skills") return ["React", "Kafka", "TypeScript"];
+  if (field.key === "skills") return ["React", "Kafka", "TypeScript", "Node.js", "Docker"];
   return VALUES[field.key] ?? null;
 }
 
@@ -603,20 +616,19 @@ try {
     `${experience.school} / ${experience.study} / ${experience.degree}`,
   );
   check(
-    "Field of Study not in the list: nothing related from its words, so a broader search; Claude picked from all that was found",
-    chooseAsks.length === 2 &&
+    "Field of Study not in the list: its words, then a broader search; Claude picked once, from all that was found",
+    chooseAsks.length === 1 &&
       chooseAsks[0].wanted === "Artificial Intelligence and Machine Learning" &&
-      JSON.stringify(chooseAsks[0].options) === '["Machine Tool Technology"]' &&
       searchTermAsks.length === 1 &&
       ["Machine Tool Technology", "Computer Science", "Other"].every((o) =>
-        chooseAsks[1].options.includes(o),
+        chooseAsks[0].options.includes(o),
       ) &&
-      !chooseAsks[1].options.includes("No Items."),
+      !chooseAsks[0].options.includes("No Items."),
     JSON.stringify({ chooseAsks, searchTermAsks }),
   );
   check(
-    "skills added one by one (those Workday has)",
-    experience.skills === "React,TypeScript",
+    "skills added one by one, each kept as a tag before the next (those Workday has)",
+    experience.skills === "React,TypeScript,Node.js,Docker",
     experience.skills,
   );
   check(

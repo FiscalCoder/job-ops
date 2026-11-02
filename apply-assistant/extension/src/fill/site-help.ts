@@ -268,12 +268,21 @@ export async function rescueField(
     ...s,
     value: s.value.split(wanted).join("{value}"),
   }));
-  const ok = await runSteps(target, general, wanted);
+  const ran = await runSteps(target, general, wanted);
+  // Your answer isn't among the choices and Claude picked the closest one by name ("Website/
+  // Social Media" for "LinkedIn"): the field showing that choice is set.
+  const instead = ran ? null : await pickedInstead(target, general);
+  const ok = ran || instead !== null;
   await help.record(entry.label, general, ok).catch(() => {});
   // Shared with every site using this kind of widget, when nothing in them is this site's own.
-  if (ok && kind && portableSteps(general))
+  if (ran && kind && portableSteps(general))
     await help.recordWidget?.(kind, general, true).catch(() => {});
-  if (ok) return { ok: true, result: `filled with Claude's steps (${steps.length})` };
+  if (ran) return { ok: true, result: `filled with Claude's steps (${steps.length})` };
+  if (instead)
+    return {
+      ok: true,
+      result: `Claude's steps picked "${instead}", the closest choice to "${wanted.slice(0, 60)}"`,
+    };
   const shown = await target.frame
     .evaluate(shownText, target.selector)
     .catch(() => "");
@@ -282,6 +291,21 @@ export async function rescueField(
     ok: false,
     reason: `${tried}; Claude's steps (${describeSteps(general)}) didn't set it either; the field shows "${shown.slice(0, 60)}"`,
   };
+}
+
+/**
+ * The choice the steps picked by name (a "pick" without "{value}"), when the field now shows
+ * it; else null.
+ */
+async function pickedInstead(
+  target: RescueTarget,
+  steps: readonly ActStep[],
+): Promise<string | null> {
+  const named = steps
+    .filter((s) => s.action === "pick" && !s.value.includes("{value}"))
+    .at(-1)?.value;
+  if (!named) return null;
+  return selectionMatches(await target.readBack(), named) ? named : null;
 }
 
 /** Steps as one line for the next attempt to read: click ".x" → type "{value}" → press Enter. */
