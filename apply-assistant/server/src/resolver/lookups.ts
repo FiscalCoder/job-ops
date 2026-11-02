@@ -430,6 +430,10 @@ export function createLookups(deps: LookupsDeps) {
               : { status: "pending" as const },
           plan: summaries.get(job.id) ?? null,
           postedAt: job.datePosted ?? null,
+          // For sorting and at-a-glance triage: when Job Ops found it, where, and its pay.
+          foundAt: job.discoveredAt ?? null,
+          location: job.location ?? null,
+          salary: job.salary ?? null,
           // A company that takes only so many applications from you: pick your best role.
           companyLimit: (() => {
             const limit = limitFor(job.employer, limits);

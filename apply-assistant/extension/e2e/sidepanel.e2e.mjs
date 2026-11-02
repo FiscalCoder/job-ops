@@ -31,6 +31,8 @@ await page.getByLabel("Password").fill(process.env.password ?? "");
 await page.getByRole("button", { name: "Sign in" }).click();
 await page.locator("#queue li").first().waitFor({ timeout: 30_000 });
 // Job-board lookups are folded until you open them.
+// Lookups live in Settings.
+await page.locator("#settings-open").click();
 await page.locator("#lookups-card > summary").click();
 await page.getByRole("button", { name: "Run now" }).click();
 await page

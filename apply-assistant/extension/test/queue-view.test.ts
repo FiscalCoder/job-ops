@@ -1,12 +1,20 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import {
+  applyBadge,
+  companyKey,
   groupByCompany,
+  isNew,
+  NO_FILTERS,
+  passesFilters,
+  type QueueFilters,
   limitText,
   matchesSearch,
   periodText,
   postedText,
+  type QueueViewActions,
   renderQueue,
+  sortedFlat,
 } from "../entrypoints/sidepanel/queue-view";
 import type { CompanyWindow, QueueItem } from "../src/lib/api";
 
@@ -50,6 +58,30 @@ const items = [
   }),
 ];
 
+const calls: string[] = [];
+const actions: QueueViewActions = {
+  row: (i, showEmployer, menu) => {
+    const li = document.createElement("li");
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = `${i.title}${showEmployer ? ` (${i.employer})` : ""}`;
+    li.append(label);
+    if (menu) li.append(menu);
+    return li;
+  },
+  limit: (company) => calls.push(`limit ${company}`),
+  unlimit: () => {},
+  block: (company) => calls.push(`block ${company}`),
+  hide: (key, company) => calls.push(`hide ${key} ${company}`),
+  unhide: (key) => calls.push(`unhide ${key}`),
+};
+const lines = (list: HTMLElement) =>
+  [...list.children].map((li) =>
+    (li.querySelector(".label") ?? li).textContent?.replace(/\s+/g, " ").trim(),
+  );
+const button = (list: HTMLElement, text: string) =>
+  [...list.querySelectorAll("button")].find((b) => b.textContent === text);
+
 describe("queue grouped by company", () => {
   it("one group per company (legal names and divisions together), best company first", () => {
     const groups = groupByCompany(items);
@@ -88,37 +120,94 @@ describe("queue grouped by company", () => {
     expect(postedText(null, now)).toBe("");
   });
 
-  it("renders a header per company, then its roles", () => {
+  it("renders a header per company, then its roles; Hide, Limit and Block in its menu", () => {
     const list = document.createElement("ul");
-    const blocked: string[] = [];
-    renderQueue(list, items, {
-      row: (i, showEmployer) => {
-        const li = document.createElement("li");
-        li.textContent = `${i.title}${showEmployer ? ` (${i.employer})` : ""}`;
-        return li;
-      },
-      limit: () => {},
-      unlimit: () => {},
-      block: (company) => blocked.push(company),
-    });
-    expect(
-      [...list.children].map((li) =>
-        li.textContent?.replace(/\s+/g, " ").trim(),
-      ),
-    ).toEqual([
-      "Acme · 2 rolesLimit… Block…",
+    calls.length = 0;
+    renderQueue(list, items, actions);
+    expect(lines(list)).toEqual([
+      "Acme · 2 roles",
       "Backend",
       "Engineer (Acme Pvt Ltd)",
-      "Amazon · 2 rolesRemove limit Block…1 per 6 months: pick your one best role",
+      "Amazon · 2 roles",
       "SDE II",
       "SDE III (Amazon Web Services)",
     ]);
-    // Block… asks about the company as the header names it.
-    const block = [...list.querySelectorAll("button")].find(
-      (b) => b.textContent === "Block…",
+    expect(list.textContent).toContain("1 per 6 months: pick your one best role");
+    // Each asks about the company as the header names it.
+    button(list, "Block…")?.click();
+    button(list, "Hide company")?.click();
+    expect(calls).toEqual(["block Acme", "hide acme Acme"]);
+  });
+
+  it("a hidden company (shown when you ask for hidden ones) offers Unhide", () => {
+    const list = document.createElement("ul");
+    calls.length = 0;
+    renderQueue(list, items, actions, { hidden: new Set(["acme"]) });
+    button(list, "Unhide")?.click();
+    expect(calls).toEqual(["unhide acme"]);
+    expect(list.querySelector("li.company.hidden-company")).not.toBeNull();
+  });
+});
+
+describe("sorting the queue", () => {
+  const dated = [
+    item({ jobId: "old", employer: "Beta", score: 95, postedAt: "2026-10-10", foundAt: "2026-10-21T00:00:00Z" }),
+    item({ jobId: "new", employer: "Acme", score: 70, postedAt: "2026-10-21", foundAt: "2026-10-12T00:00:00Z" }),
+    item({ jobId: "undated", employer: "Gamma", score: 99, postedAt: null, foundAt: null }),
+    item({ jobId: "closed", employer: "Delta", score: 100, postedAt: "2026-10-22", target: { status: "closed" } }),
+  ];
+
+  it("newest posted first, then recently found; undated and closed last", () => {
+    expect(sortedFlat(dated, "posted").map((i) => i.jobId)).toEqual([
+      "new",
+      "old",
+      "undated",
+      "closed",
+    ]);
+    expect(sortedFlat(dated, "found").map((i) => i.jobId)).toEqual([
+      "old",
+      "new",
+      "undated",
+      "closed",
+    ]);
+  });
+
+  it("best match: a company whose roles are all closed goes last", () => {
+    expect(groupByCompany(dated).map((g) => g.company)).toEqual([
+      "Gamma",
+      "Beta",
+      "Acme",
+      "Delta",
+    ]);
+  });
+
+  it("company A-Z groups alphabetically", () => {
+    expect(groupByCompany(dated, "company").map((g) => g.company)).toEqual([
+      "Acme",
+      "Beta",
+      "Delta",
+      "Gamma",
+    ]);
+  });
+
+  it("flat sorts list each role with its company, and its own Hide company", () => {
+    const list = document.createElement("ul");
+    calls.length = 0;
+    renderQueue(list, dated, actions, { sort: "posted" });
+    expect(lines(list)).toEqual([
+      "Engineer (Acme)",
+      "Engineer (Beta)",
+      "Engineer (Gamma)",
+      "Engineer (Delta)",
+    ]);
+    button(list, "Hide company")?.click();
+    expect(calls).toEqual(["hide acme Acme"]);
+  });
+
+  it("one key per company, legal names aside", () => {
+    expect(companyKey(item({ employer: "Acme Pvt Ltd" }))).toBe(
+      companyKey(item({ employer: "acme" })),
     );
-    block?.click();
-    expect(blocked).toEqual(["Acme"]);
   });
 });
 
@@ -138,5 +227,58 @@ describe("searching the queue", () => {
     expect(matchesSearch(job, "careers.acme")).toBe(true);
     expect(matchesSearch(job, "acme frontend")).toBe(false);
     expect(matchesSearch(job, "okta")).toBe(false);
+  });
+});
+
+describe("filters, New, and where you apply", () => {
+  const now = new Date("2026-10-22T12:00:00Z");
+  const jobs = [
+    item({ jobId: "today", postedAt: "2026-10-22", location: "Remote", foundAt: "2026-10-22T00:05:00Z" }),
+    item({ jobId: "week", postedAt: "2026-10-17", location: "Chennai, Tamil Nadu, India", foundAt: "2026-10-18T00:05:00Z" }),
+    item({
+      jobId: "ready",
+      postedAt: null,
+      title: "Remote Backend Engineer",
+      target: { status: "matched", ats: "ashby" },
+      plan: { summary: { needsYou: 0 }, builtAt: "2026-10-20" },
+    }),
+  ];
+  const ids = (filters: QueueFilters) =>
+    jobs.filter((j) => passesFilters(j, filters, now)).map((j) => j.jobId);
+
+  it("posted within a day or a few, Remote, Ready to fill; none set: everything", () => {
+    expect(ids(NO_FILTERS)).toEqual(["today", "week", "ready"]);
+    expect(ids({ ...NO_FILTERS, posted: "1" })).toEqual(["today"]);
+    expect(ids({ ...NO_FILTERS, posted: "7" })).toEqual(["today", "week"]);
+    expect(ids({ ...NO_FILTERS, remote: true })).toEqual(["today", "ready"]);
+    expect(ids({ ...NO_FILTERS, ready: true })).toEqual(["ready"]);
+  });
+
+  it("New: found since you last looked (nothing is new the first time)", () => {
+    const since = new Date("2026-10-20T00:00:00Z").getTime();
+    expect(jobs.map((j) => isNew(j, since))).toEqual([true, false, false]);
+    expect(isNew(jobs[0] as QueueItem, null)).toBe(false);
+  });
+
+  it("says where you apply, not what it isn't", () => {
+    const at = (more: Partial<QueueItem>) => applyBadge(item(more))?.label;
+    expect(at({ applicationLink: "https://acme.wd5.myworkdayjobs.com/x/apply" })).toBe("Apply on Workday");
+    expect(at({ applicationLink: "https://careers.acme.com/jobs/1" })).toBe("Apply on company site");
+    expect(at({ jobUrl: "https://www.linkedin.com/jobs/view/1" })).toBe("Apply on LinkedIn");
+    expect(at({ target: { status: "matched", ats: "greenhouse" } })).toBe("On Greenhouse");
+    expect(at({ target: { status: "closed" } })).toBe("Closed");
+    expect(at({})).toBeUndefined();
+  });
+});
+
+describe("posted within, by the time when there is one", () => {
+  it("Last 24h: a posting from 30 hours ago is out; a plain date of yesterday is in", () => {
+    const now = new Date("2026-10-22T12:00:00Z");
+    const within = (postedAt: string) =>
+      passesFilters(item({ postedAt }), { ...NO_FILTERS, posted: "1" }, now);
+    expect(within("2026-10-21T06:00:00Z")).toBe(false);
+    expect(within("2026-10-21T18:00:00Z")).toBe(true);
+    expect(within("2026-10-21")).toBe(true);
+    expect(within("2026-10-20")).toBe(false);
   });
 });

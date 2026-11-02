@@ -82,6 +82,22 @@ export function createKitRoutes(deps: KitRoutesDeps) {
     sendJobOpsFailure(res, error);
   };
 
+  /** Why the job scored what it did: Job Ops' reason, shown when you open the score. */
+  router.get(
+    "/jobs/:jobId/score",
+    async (req: AuthedRequest, res: Response) => {
+      try {
+        const job = await jobOps.getJob(tokenOf(req), String(req.params.jobId));
+        sendOk(res, {
+          score: job.suitabilityScore,
+          reason: job.suitabilityReason ?? null,
+        });
+      } catch (error) {
+        failJobOps(res, error);
+      }
+    },
+  );
+
   router.get("/kit/:jobId", async (req: AuthedRequest, res: Response) => {
     const jobId = String(req.params.jobId);
     try {

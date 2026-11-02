@@ -106,6 +106,7 @@ describe("JobOpsClient", () => {
           applicationLink: null,
           location: "Bengaluru",
           jobDescription: "Build things",
+          suitabilityReason: "Skills 42/50 — Node fits.",
         },
       }),
     );
@@ -117,6 +118,7 @@ describe("JobOpsClient", () => {
       location: "Bengaluru",
       jobDescription: "Build things",
       suitabilityScore: null,
+      suitabilityReason: "Skills 42/50 — Node fits.",
     });
   });
 

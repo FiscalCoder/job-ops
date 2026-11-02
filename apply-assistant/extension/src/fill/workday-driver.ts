@@ -670,8 +670,16 @@ export class WorkdayDriver extends TrustedDriver {
     await open.handles[index]?.click();
     await sleep(300);
     const chosen = open.labels[index] ?? null;
-    if (chosen && !selectionMatches(await this.readBackRef(ref), chosen))
-      return (await this.pickOpen(wanted)) ?? chosen;
+    if (!chosen) return null;
+    // Kept as a tag (Workday may take a moment), or a category that opened its own list:
+    // whichever shows first (not a fixed wait for a list that may never open).
+    const deadline = Date.now() + OPTION_WAIT_MS;
+    while (Date.now() < deadline) {
+      if (selectionMatches(await this.readBackRef(ref), chosen)) return chosen;
+      if ((await this.shownChoices()).length)
+        return (await this.pickOpen(wanted)) ?? chosen;
+      await sleep(POLL_MS);
+    }
     return chosen;
   }
 

@@ -184,6 +184,8 @@ const jobOps: JobOpsApi = {
       location: "Bengaluru",
       jobDescription: "Build APIs",
       tailoredSummary: "Backend engineer.",
+      suitabilityReason:
+        "Skills 42/50 · Experience 30/30 · Location 16/20 — Node and React match.",
     };
   },
   updateJob: async () => {},
@@ -249,6 +251,18 @@ async function start(create?: MessagesApi["create"]) {
 }
 
 describe("kit routes", () => {
+  it("says why a job scored what it did (Job Ops' reason), for your own jobs only", async () => {
+    const call = await start();
+    const { status, body } = await call("/jobs/job-1/score");
+    expect(status).toBe(200);
+    expect(body.data).toEqual({
+      score: 82,
+      reason:
+        "Skills 42/50 · Experience 30/30 · Location 16/20 — Node and React match.",
+    });
+    expect((await call("/jobs/nope/score")).status).toBe(404);
+  });
+
   it("serves the kit with Job Ops' application link when no posting is matched", async () => {
     const call = await start();
     const { body } = await call("/kit/job-1");

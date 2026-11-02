@@ -50,10 +50,11 @@ const valueText = (value: Step["value"]) =>
       ? value.join(", ")
       : (value as string);
 
+/** How a step goes in, in plain words (as the plan in the queue says it). */
 const GATE: Record<string, string> = {
-  auto: "auto",
-  confirm: "your click",
-  protected: "protected",
+  auto: "fills itself",
+  confirm: "waits for your OK",
+  protected: "asks you first",
 };
 
 const STATE_LABEL: Record<string, [string, string]> = {
@@ -185,8 +186,10 @@ function currentCard(
         busy,
       ),
     );
+  // Less used: under "More" (the card keeps the main action, Claude and Skip in view).
+  const more: HTMLElement[] = [];
   if (step.entry.actionClass === "auto" && action.kind !== "fill")
-    controls.push(
+    more.push(
       button(
         "Approve remaining auto",
         () => send({ type: "approve-remaining-auto" }),
@@ -205,18 +208,27 @@ function currentCard(
         busy,
       ),
     );
+  more.push(button("I'll do it", () => send({ type: "i-did-it" }), false, busy));
   controls.push(
-    button("I'll do it", () => send({ type: "i-did-it" }), false, busy),
     // While it's being filled too: what's under way ends first, then the run goes on.
     button("Skip", () => send({ type: "skip" }), false, busy && action.kind !== "fill"),
+    el("details", { class: "more" }, el("summary", {}, "More"), el("div", { class: "controls" }, ...more)),
   );
+  // Where you are on this page (the run's step numbers go on across pages).
+  const position = view.state.steps.indexOf(step) + 1;
+  const done = view.state.steps.filter((s) => STATE_LABEL[s.state]).length;
   return el(
     "div",
     { class: "step-card" },
+    el("progress", {
+      value: String(done),
+      max: String(total),
+      "aria-label": `${done} of ${total} fields done on this page`,
+    }),
     el(
       "div",
       { class: "row" },
-      el("strong", {}, `${step.seq}/${total} · ${step.entry.label}`),
+      el("strong", {}, `Field ${position} of ${total} · ${step.entry.label}`),
       action.kind === "countdown"
         ? countdown(action.seconds)
         : el(
@@ -259,7 +271,11 @@ function pausedCard(view: RunView, send: Send): HTMLElement {
   return el(
     "div",
     { class: "step-card" },
-    el("strong", {}, `${step.seq}/${state.steps.length} · ${step.entry.label}`),
+    el(
+      "strong",
+      {},
+      `Field ${state.steps.indexOf(step) + 1} of ${state.steps.length} · ${step.entry.label}`,
+    ),
     note,
     el(
       "div",
@@ -368,7 +384,7 @@ function fixFieldPanel(key: string, fix: FixField) {
   const element = el(
     "details",
     { class: "tell fix-field" },
-    el("summary", {}, "Fix a field"),
+    el("summary", {}, "Something wrong with a field? Fix it"),
     el("div", { class: "row" }, picker),
     el("div", { class: "row" }, said),
     el("div", { class: "controls" }, again, claude),

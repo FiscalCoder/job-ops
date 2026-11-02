@@ -366,6 +366,8 @@ try {
   // As narrow as a side panel gets: nothing may be wider than it.
   await panel.setViewportSize({ width: 360, height: 900 });
   await panel.locator("#autopilot-start").click();
+  // It says what it will do first: Start Autopilot.
+  await panel.locator("#autopilot-go").click();
 
   // 1. Highest score first: a dead link, put to you as closed. You skip it (nothing expired).
   const ask = panel.locator("#autopilot-ask");
@@ -541,7 +543,7 @@ try {
   });
   await panel.locator("#autopilot-status").getByRole("button", { name: "Close" }).click();
   await panel.locator("#refresh").click();
-  await panel.locator("#queue li", { hasText: "plan ready" }).first().click();
+  await panel.locator("#queue li", { hasText: "ready to fill" }).first().click();
   await panel.getByRole("button", { name: "Start supervised fill" }).click();
   await reviewing();
   const okta = (await formStates()).find((f) => f.url.includes("okta"));

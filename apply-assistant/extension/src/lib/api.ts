@@ -33,6 +33,12 @@ export interface QueueItem {
   readonly plan: { summary: Record<string, number>; builtAt: string } | null;
   /** When the posting went up, if the job board said (absent on old servers). */
   readonly postedAt?: string | null;
+  /** When Job Ops found it (absent on old servers). */
+  readonly foundAt?: string | null;
+  /** Where the job is, as the job board said ("Chennai, Tamil Nadu, India", "Remote"). */
+  readonly location?: string | null;
+  /** Pay as the listing states it, if it does. */
+  readonly salary?: string | null;
   /** Set when the company takes only so many applications from you (Amazon: 1 per 6 months). */
   readonly companyLimit?: CompanyWindow | null;
 }
@@ -294,6 +300,13 @@ export class ApplyClient implements TraceApi {
   /** Adds a job to Job Ops (its manual import); Job Ops then tailors and scores it. */
   importJob(job: ImportJob): Promise<{ jobId: string; status: string }> {
     return this.request("/jobs/import", { job });
+  }
+
+  /** Why the job scored what it did (Job Ops' reason). */
+  scoreReason(
+    jobId: string,
+  ): Promise<{ score: number | null; reason: string | null }> {
+    return this.request(`/jobs/${encodeURIComponent(jobId)}/score`);
   }
 
   plan(jobId: string): Promise<unknown> {

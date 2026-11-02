@@ -29,7 +29,20 @@ import {
 import { setUpClaudeSettings } from "./claude-settings";
 import { setUpImport } from "./import-view";
 import { kitDrawer, showKit } from "./kit-view";
-import { matchesSearch, postedText, renderQueue } from "./queue-view";
+import {
+  applyBadge,
+  companyKey,
+  isNew,
+  isReadyToFill,
+  matchesSearch,
+  NO_FILTERS,
+  passesFilters,
+  postedText,
+  QUEUE_SORTS,
+  type QueueFilters,
+  type QueueSort,
+  renderQueue,
+} from "./queue-view";
 import { renderRun as renderRunView } from "./run-view";
 
 // Side panel: sign in, run lookups, see the queue and each job's plan.
@@ -66,27 +79,36 @@ async function countdownSetting(): Promise<number> {
   return typeof countdownSeconds === "number" ? countdownSeconds : 3;
 }
 
-function countdownPicker(current: number): HTMLElement {
-  const select = el(
-    "select",
-    { "aria-label": "Countdown before automatic steps" },
+/** Settings → Filling: the countdown before each automatic step (or approve each yourself). */
+async function setUpCountdown(): Promise<void> {
+  const select = $<HTMLSelectElement>("settings-countdown");
+  const current = await countdownSetting();
+  select.replaceChildren(
     ...COUNTDOWN_CHOICES.map((v) => {
       const option = el(
         "option",
         { value: v },
-        v === "0" ? "approve every step" : `${v}s countdown`,
+        v === "0"
+          ? "Wait for my approval"
+          : `${v} second${v === "1" ? "" : "s"} countdown`,
       ) as HTMLOptionElement;
       option.selected = Number(v) === current;
       return option;
     }),
-  ) as HTMLSelectElement;
-  select.addEventListener(
-    "change",
-    () =>
-      void chrome.storage.local.set({ countdownSeconds: Number(select.value) }),
   );
-  return select;
+  select.onchange = () =>
+    void chrome.storage.local.set({ countdownSeconds: Number(select.value) });
 }
+
+/** Where you were in the queue before a run or the kit took the panel: back there after. */
+let queueScroll = 0;
+const leaveQueue = () => {
+  queueScroll = window.scrollY;
+};
+const backToQueue = () =>
+  void loadQueue().then(() =>
+    requestAnimationFrame(() => window.scrollTo(0, queueScroll)),
+  );
 
 /**
  * `tabId`: fill that open tab (you're on the application already) instead of a new one;
@@ -104,6 +126,7 @@ async function startFill(
     return;
   }
   const box = $("run-box");
+  if (!$("main").hidden) leaveQueue();
   box.hidden = false;
   $("main").hidden = true;
   box.replaceChildren(
@@ -127,7 +150,7 @@ async function startFill(
     // The plan shown before the run is stale (the job may now be applied): reopen it from the queue.
     $("plan").hidden = true;
     $("plan").replaceChildren();
-    void loadQueue();
+    backToQueue();
   };
   closeActiveRun = closeRun;
   // The run re-renders its part; Ask Claude below it keeps what you typed.
@@ -237,7 +260,7 @@ async function startAutopilot() {
     client,
     queue: async () => {
       await loadQueue();
-      return queueItems;
+      return queueItems.filter((item) => !hiddenCompanies.has(companyKey(item)));
     },
     fill: async (item, tabId, paged) => {
       // A run still on screen (one you started, or finished and not closed) would refuse this
@@ -342,6 +365,7 @@ let closeKit: (() => Promise<void>) | null = null;
 async function openKit(item: QueueItem) {
   if (!client || activeRun || closeKit) return;
   const box = $("kit-box");
+  leaveQueue();
   box.hidden = false;
   $("main").hidden = true;
   const back = () => {
@@ -351,7 +375,7 @@ async function openKit(item: QueueItem) {
     // The job may now be applied or skipped: its plan is stale and the queue changed.
     $("plan").hidden = true;
     $("plan").replaceChildren();
-    void loadQueue();
+    backToQueue();
   };
   const fillable = item.plan !== null && item.target.status === "matched";
   closeKit = await showKit(box, {
@@ -387,10 +411,21 @@ async function openKit(item: QueueItem) {
 
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** A short note at the top of the main view (what the kit just did). */
-function showNotice(text: string) {
+/** A short note at the top of the main view (what the kit just did), with an action (Undo). */
+function showNotice(
+  text: string,
+  action?: { readonly label: string; readonly run: () => void },
+) {
   const notice = $("notice");
   notice.textContent = text;
+  if (action) {
+    const b = el("button", { type: "button", class: "link" }, action.label);
+    b.addEventListener("click", () => {
+      notice.hidden = true;
+      action.run();
+    });
+    notice.append(" ", b);
+  }
   notice.hidden = false;
   if (noticeTimer) clearTimeout(noticeTimer);
   noticeTimer = setTimeout(() => {
@@ -429,7 +464,8 @@ async function start() {
 function showLogin(note?: string) {
   $("login").hidden = false;
   $("main").hidden = true;
-  $("signout").hidden = true;
+  $("settings").hidden = true;
+  $("header-actions").hidden = true;
   const error = $("login-error");
   error.hidden = !note;
   error.textContent = note ?? "";
@@ -438,7 +474,12 @@ function showLogin(note?: string) {
 async function showMain() {
   $("login").hidden = true;
   $("main").hidden = false;
-  $("signout").hidden = false;
+  $("header-actions").hidden = false;
+  const settings = await loadSettings();
+  $("signed-in").textContent = settings.username
+    ? `Signed in as ${settings.username} · ${hostName(settings.serverUrl)}`
+    : `Signed in · ${hostName(settings.serverUrl)}`;
+  void setUpCountdown();
   renderRun(await loadLastRun());
   renderCaptures(await loadCaptures());
   $("sites").hidden = await chrome.permissions.contains({
@@ -446,6 +487,7 @@ async function showMain() {
   });
   void claudeSettings.refresh();
   void loadBlocked();
+  await loadQueuePrefs();
   await loadQueue();
 }
 
@@ -478,6 +520,53 @@ loginForm().addEventListener("submit", async (event) => {
         : message(error),
     );
   }
+});
+
+const hostName = (url: string) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+};
+
+// ---- the header: + Add job, Settings ----------------------------------------------------
+
+/** What Settings covered (the queue, a run, the kit): shown again on Done. */
+let underSettings: HTMLElement[] = [];
+
+function openSettings() {
+  if (!$("settings").hidden) return;
+  underSettings = ["main", "run-box", "kit-box"]
+    .map((id) => $(id))
+    .filter((box) => !box.hidden);
+  for (const box of underSettings) box.hidden = true;
+  $("settings").hidden = false;
+  window.scrollTo(0, 0);
+}
+
+function closeSettings() {
+  $("settings").hidden = true;
+  for (const box of underSettings) box.hidden = false;
+  underSettings = [];
+}
+
+$("settings-open").addEventListener("click", () =>
+  $("settings").hidden ? openSettings() : closeSettings(),
+);
+$("settings-close").addEventListener("click", closeSettings);
+$("add-open").addEventListener("click", () => {
+  closeSettings();
+  if (activeRun || closeKit) {
+    showNotice("Finish or close the application on screen first.");
+    return;
+  }
+  $("import-card").hidden = false;
+  window.scrollTo(0, 0);
+  $<HTMLInputElement>("import-url").focus();
+});
+$("add-close").addEventListener("click", () => {
+  $("import-card").hidden = true;
 });
 
 $("signout").addEventListener("click", async () => {
@@ -578,27 +667,6 @@ $("allow-sites").addEventListener("click", async () => {
   $("sites").hidden = granted;
 });
 
-const ATS_NAMES: Record<string, string> = {
-  greenhouse: "Greenhouse",
-  ashby: "Ashby",
-  lever: "Lever",
-};
-
-/** Badge for a job's posting: "On Ashby", "Not on Greenhouse/Ashby/Lever", … */
-function targetBadge(target: QueueItem["target"]): [string, string] {
-  const system = ATS_NAMES[target.ats ?? ""] ?? "a supported system";
-  const badges: Record<string, [string, string]> = {
-    matched: ["ok", `On ${system}`],
-    possible: ["warn", `Possible match on ${system}`],
-    // Not a failure: the company takes applications elsewhere (Workday, its own site), filled
-    // page by page once you open it.
-    none: ["", "Not on Greenhouse/Ashby/Lever"],
-    closed: ["bad", "Closed"],
-    pending: ["", "Lookup pending"],
-  };
-  return badges[target.status] ?? ["", target.status];
-}
-
 async function loadQueue() {
   if (!client) return;
   let items: QueueItem[];
@@ -613,30 +681,196 @@ async function loadQueue() {
   showQueue();
 }
 
-/** The queue as your search narrows it (Autopilot still works through all of it). */
+// ---- sorting and hiding (this browser's, kept between sessions) --------------------------
+
+/** Companies you hid (companyKey → the name shown), out of the queue and Autopilot. */
+let hiddenCompanies = new Map<string, string>();
+/** "N hidden · Show": the hidden companies listed too, each with Unhide. */
+let showingHidden = false;
+let queueSort: QueueSort = "best";
+let queueFilters: QueueFilters = NO_FILTERS;
+/** When you last opened the panel before this time: jobs found since then are New. */
+let newSince: number | null = null;
+
+async function loadQueuePrefs() {
+  const saved = await chrome.storage.local
+    .get(["hiddenCompanies", "queueSort", "queueFilters", "lastQueueVisit"])
+    .catch(() => ({}) as Record<string, unknown>);
+  if (newSince === null && typeof saved.lastQueueVisit === "number")
+    newSince = saved.lastQueueVisit;
+  void chrome.storage.local
+    .set({ lastQueueVisit: Date.now() })
+    .catch(() => undefined);
+  const filters = saved.queueFilters as Partial<QueueFilters> | undefined;
+  if (filters && typeof filters === "object")
+    queueFilters = {
+      posted: ["1", "3", "7"].includes(String(filters.posted))
+        ? (filters.posted as QueueFilters["posted"])
+        : "any",
+      remote: filters.remote === true,
+      ready: filters.ready === true,
+    };
+  renderChips();
+  const hidden = saved.hiddenCompanies;
+  if (hidden && typeof hidden === "object")
+    hiddenCompanies = new Map(
+      Object.entries(hidden as Record<string, unknown>).filter(
+        (e): e is [string, string] => typeof e[1] === "string",
+      ),
+    );
+  const sort = QUEUE_SORTS.find((s) => s.value === saved.queueSort);
+  if (sort) queueSort = sort.value;
+  $<HTMLSelectElement>("queue-sort").value = queueSort;
+}
+
+const saveHidden = () =>
+  void chrome.storage.local
+    .set({ hiddenCompanies: Object.fromEntries(hiddenCompanies) })
+    .catch(() => undefined);
+
+function hideCompany(key: string, company: string) {
+  hiddenCompanies.set(key, company);
+  saveHidden();
+  showQueue();
+  showNotice(`Hid ${company} from your queue and Autopilot.`, {
+    label: "Undo",
+    run: () => unhideCompany(key),
+  });
+}
+
+function unhideCompany(key: string) {
+  hiddenCompanies.delete(key);
+  saveHidden();
+  if (hiddenCompanies.size === 0) showingHidden = false;
+  showQueue();
+}
+
+{
+  const sort = $<HTMLSelectElement>("queue-sort");
+  sort.replaceChildren(
+    ...QUEUE_SORTS.map((s) => el("option", { value: s.value }, s.label)),
+  );
+  sort.addEventListener("change", () => {
+    queueSort = sort.value as QueueSort;
+    void chrome.storage.local.set({ queueSort }).catch(() => undefined);
+    showQueue();
+  });
+  $("queue-hidden").addEventListener("click", () => {
+    showingHidden = !showingHidden;
+    showQueue();
+  });
+}
+
+/** The filter chips: posted within (one of), Remote, Ready to fill. */
+const CHIPS: readonly {
+  readonly label: string;
+  readonly on: (f: QueueFilters) => boolean;
+  readonly toggle: (f: QueueFilters) => QueueFilters;
+}[] = [
+  ...(["1", "3", "7"] as const).map((days) => ({
+    label: days === "1" ? "Last 24h" : days === "3" ? "Last 3 days" : "Last week",
+    on: (f: QueueFilters) => f.posted === days,
+    toggle: (f: QueueFilters) => ({
+      ...f,
+      posted: f.posted === days ? ("any" as const) : days,
+    }),
+  })),
+  {
+    label: "Remote",
+    on: (f) => f.remote,
+    toggle: (f) => ({ ...f, remote: !f.remote }),
+  },
+  {
+    label: "Ready to fill",
+    on: (f) => f.ready,
+    toggle: (f) => ({ ...f, ready: !f.ready }),
+  },
+];
+
+function renderChips() {
+  $("queue-filters").replaceChildren(
+    ...CHIPS.map((chip) => {
+      const on = chip.on(queueFilters);
+      const b = el(
+        "button",
+        { type: "button", class: "chip", "aria-pressed": String(on) },
+        chip.label,
+      );
+      b.addEventListener("click", () => {
+        queueFilters = chip.toggle(queueFilters);
+        void chrome.storage.local
+          .set({ queueFilters })
+          .catch(() => undefined);
+        renderChips();
+        showQueue();
+      });
+      return b;
+    }),
+  );
+}
+
+const filtering = () =>
+  queueFilters.posted !== "any" || queueFilters.remote || queueFilters.ready;
+
+/** The queue as your search, sort and hidden companies shape it. */
 function showQueue() {
   const query = $<HTMLInputElement>("queue-search").value.trim();
-  const shown = queueItems.filter((item) => matchesSearch(item, query));
-  $("queue-count").textContent = query
-    ? `${shown.length} of ${queueItems.length}`
-    : "";
-  if (query && !shown.length) {
+  const isHidden = (item: QueueItem) => hiddenCompanies.has(companyKey(item));
+  const hiddenJobs = queueItems.filter(isHidden).length;
+  const shown = queueItems.filter(
+    (item) =>
+      matchesSearch(item, query) &&
+      passesFilters(item, queueFilters) &&
+      (showingHidden || !isHidden(item)),
+  );
+  const visible = queueItems.length - (showingHidden ? 0 : hiddenJobs);
+  const fresh = shown.filter((item) => isNew(item, newSince)).length;
+  $("queue-count").textContent = [
+    query || filtering()
+      ? `${shown.length} of ${visible} jobs`
+      : `${visible} job${visible === 1 ? "" : "s"}`,
+    fresh ? `${fresh} new since you last looked` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const toggle = $("queue-hidden");
+  toggle.hidden = hiddenCompanies.size === 0;
+  toggle.textContent = showingHidden
+    ? "Hide hidden companies"
+    : `${hiddenCompanies.size} hidden compan${hiddenCompanies.size === 1 ? "y" : "ies"} · Show`;
+  $("queue-meta").hidden = queueItems.length === 0;
+  if ((query || filtering()) && !shown.length) {
+    const clear = el("button", { type: "button", class: "link" }, "Clear filters");
+    clear.addEventListener("click", () => {
+      queueFilters = NO_FILTERS;
+      $<HTMLInputElement>("queue-search").value = "";
+      void chrome.storage.local.set({ queueFilters }).catch(() => undefined);
+      renderChips();
+      showQueue();
+    });
     $("queue").replaceChildren(
-      el("li", { class: "muted" }, `No jobs match "${query}".`),
+      el(
+        "li",
+        { class: "muted" },
+        query ? `No jobs match "${query}" with these filters. ` : "No jobs with these filters. ",
+        clear,
+      ),
     );
     return;
   }
-  renderQueue($("queue"), shown, {
-    row: queueRow,
-    limit: (company) => void limitCompany(company),
-    unlimit: (limit) => {
-      if (!window.confirm(`Remove the limit on ${limit.name}?`)) return;
-      void (client as ApplyClient)
-        .unlimitCompany(limit.id)
-        .then(loadQueue, handle);
+  renderQueue(
+    $("queue"),
+    shown,
+    {
+      row: queueRow,
+      limit: (company) => limitCompany(company),
+      unlimit: (limit) => unlimitCompany(limit),
+      block: (company) => blockCompany(company),
+      hide: hideCompany,
+      unhide: unhideCompany,
     },
-    block: (company) => void blockCompany(company),
-  });
+    { sort: queueSort, hidden: new Set(hiddenCompanies.keys()) },
+  );
 }
 
 /** The blocked companies (Job Ops' own list), each with Unblock. */
@@ -702,16 +936,82 @@ const shortDay = (iso: string) =>
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
- * "Block…" on a company: fills in the Blocked companies form, where you can shorten the name
- * ("Amazon" for every Amazon entity: any company whose name contains it is blocked) and set
- * how many days.
+ * A small form right under the company it's about (Block, Limit, Remove limit), instead of a
+ * pop-up or a form at the bottom of the panel. One at a time; Cancel or Escape closes it.
+ */
+function inlineForm(
+  company: string,
+  ...content: (HTMLElement | string)[]
+): { readonly form: HTMLFormElement; readonly close: () => void } {
+  for (const open of $("queue").querySelectorAll(".inline-form")) open.remove();
+  const anchor = [...$("queue").querySelectorAll<HTMLElement>("[data-company]")].find(
+    (li) => li.dataset.company === company,
+  );
+  const form = el("form", { class: "inline-form-body" }) as HTMLFormElement;
+  const li = el("li", { class: "inline-form" }, form);
+  const close = () => li.remove();
+  const cancel = el("button", { type: "button" }, "Cancel");
+  cancel.addEventListener("click", close);
+  form.append(...content);
+  // The form's own button (Block, Save) beside Cancel.
+  form.append(
+    el(
+      "div",
+      { class: "controls" },
+      ...form.querySelectorAll<HTMLElement>("button[data-main]"),
+      cancel,
+    ),
+  );
+  form.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") close();
+  });
+  if (anchor) anchor.after(li);
+  else $("queue").prepend(li);
+  li.scrollIntoView({ block: "nearest" });
+  form.querySelector<HTMLInputElement>("input")?.focus();
+  return { form, close };
+}
+
+const mainButton = (label: string) =>
+  el("button", { type: "submit", class: "primary", "data-main": "" }, label);
+
+/**
+ * "Block…" on a company: its name (shorten it to block every entity: "Amazon") and for how
+ * many days; empty days block until you unblock.
  */
 function blockCompany(company: string) {
-  const card = $<HTMLDetailsElement>("blocked-card");
-  card.open = true;
-  $<HTMLInputElement>("block-name").value = company;
-  card.scrollIntoView({ behavior: "smooth", block: "start" });
-  $<HTMLInputElement>("block-days").focus();
+  const name = el("input", {
+    type: "text",
+    value: company,
+    "aria-label": "Company to block (any company whose name contains it)",
+  }) as HTMLInputElement;
+  const days = el("input", {
+    type: "number",
+    min: "1",
+    max: "3650",
+    placeholder: "Days",
+    class: "days",
+    "aria-label": "Days to block, from your last application there",
+  }) as HTMLInputElement;
+  const { form, close } = inlineForm(
+    company,
+    el("strong", {}, `Block ${company}`),
+    el(
+      "p",
+      { class: "muted" },
+      "Job Ops won't find its jobs, and skips the ones you have. Shorten the name to block every entity (Amazon). Empty days: until you unblock it in Settings.",
+    ),
+    el("div", { class: "row" }, name, days),
+    mainButton("Block"),
+  );
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = name.value.trim();
+    if (value.length < 2) return;
+    const n = Math.round(Number(days.value));
+    close();
+    void submitBlock(value, n > 0 ? n : undefined);
+  });
 }
 
 async function submitBlock(name: string, days: number | undefined) {
@@ -751,84 +1051,270 @@ $("block-form").addEventListener("submit", (event) => {
   void submitBlock(name, days > 0 ? days : undefined);
 });
 
-/** Marks a company as one application per N months (asks how many; 6 by default). */
-async function limitCompany(company: string) {
-  const answer = window.prompt(
-    `${company} takes one application from you every how many months?`,
-    "6",
+/** Marks a company as one application per N months (6 by default), in place. */
+function limitCompany(company: string) {
+  const months = el("input", {
+    type: "number",
+    min: "1",
+    max: "60",
+    value: "6",
+    class: "days",
+    "aria-label": "Months between applications",
+  }) as HTMLInputElement;
+  const { form, close } = inlineForm(
+    company,
+    el("strong", {}, `Limit ${company}`),
+    el(
+      "label",
+      { class: "inline" },
+      "One application every",
+      months,
+      "months",
+    ),
+    mainButton("Save"),
   );
-  const months = Number(answer);
-  if (!answer || !Number.isFinite(months) || months <= 0) return;
-  try {
-    await (client as ApplyClient).limitCompany({
-      name: company,
-      maxApplications: 1,
-      windowDays: Math.round(months * 30.4),
-      note: "Yours",
-    });
-    await loadQueue();
-  } catch (error) {
-    handle(error);
-  }
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const n = Number(months.value);
+    if (!Number.isFinite(n) || n <= 0) return;
+    close();
+    try {
+      await (client as ApplyClient).limitCompany({
+        name: company,
+        maxApplications: 1,
+        windowDays: Math.round(n * 30.4),
+        note: "Yours",
+      });
+      await loadQueue();
+    } catch (error) {
+      handle(error);
+    }
+  });
 }
 
-/** Job Ops' AI suitability score (0-100) for the role. */
-function scoreBadge(score: number | null): HTMLElement | null {
+/** Remove limit: asked in place, under the company. */
+function unlimitCompany(limit: { readonly id: number; readonly name: string }) {
+  const { form, close } = inlineForm(
+    limit.name,
+    el("strong", {}, `Remove the limit on ${limit.name}?`),
+    mainButton("Remove limit"),
+  );
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    close();
+    void (client as ApplyClient).unlimitCompany(limit.id).then(loadQueue, handle);
+  });
+}
+
+/** Job Ops' reasons, once asked for (by job). */
+const reasons = new Map<string, string>();
+
+/**
+ * Job Ops' AI suitability score (0-100) for the role: click it for why (Skills x/50 ·
+ * Experience x/30 · Location x/20, and the reason), shown under the row.
+ */
+function scoreBadge(item: QueueItem, row: HTMLElement): HTMLElement | null {
+  const { score } = item;
   if (score === null) return null;
   const tone = score >= 80 ? "ok" : score >= 60 ? "warn" : "";
-  return el(
-    "span",
-    { class: `badge ${tone}`, title: "Job Ops' AI suitability score" },
-    `AI ${Math.round(score)}`,
+  const b = el(
+    "button",
+    {
+      type: "button",
+      class: `badge score ${tone}`,
+      title: "Why this score",
+      "aria-expanded": "false",
+    },
+    `AI ${Math.round(score)} ▾`,
   );
+  b.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    const open = row.querySelector(".why");
+    if (open) {
+      open.remove();
+      b.setAttribute("aria-expanded", "false");
+      return;
+    }
+    const why = el("div", { class: "why muted" }, "Loading why…");
+    row.append(why);
+    b.setAttribute("aria-expanded", "true");
+    const known = reasons.get(item.jobId);
+    if (known) {
+      why.textContent = known;
+      return;
+    }
+    try {
+      const answer = await (client as ApplyClient).scoreReason(item.jobId);
+      const text = answer.reason?.trim() || "Job Ops gave no reason for this score.";
+      reasons.set(item.jobId, text);
+      why.textContent = text;
+    } catch (error) {
+      why.textContent = `Couldn't load why: ${message(error)}`;
+    }
+  });
+  return b;
 }
 
-/** One role in the queue: title, when posted, its badges and the kit. */
-function queueRow(item: QueueItem, showEmployer: boolean): HTMLElement {
-  const [tone, label] = targetBadge(item.target);
+/** Where to apply: the posting found, else the company's link, else the listing. */
+const applyUrl = (item: QueueItem) =>
+  item.target.postingUrl ?? item.applicationLink ?? item.jobUrl ?? null;
+
+/**
+ * The row's main action. Ready to fill (its form is planned): the supervised fill. A closed
+ * posting: Mark expired. Else its application opens in a tab, where "Fill this page" (top of
+ * the panel) fills it.
+ */
+function applyButton(item: QueueItem): HTMLElement {
+  if (item.target.status === "closed") {
+    const b = el(
+      "button",
+      { type: "button", title: "The posting is closed: expire it in Job Ops" },
+      "Mark expired",
+    );
+    b.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      try {
+        await (client as ApplyClient).expireJob(item.jobId, "You marked it expired from the queue (closed posting)");
+        showNotice(`${item.title} · ${item.employer}: marked expired in Job Ops.`);
+        await loadQueue();
+      } catch (error) {
+        handle(error);
+      }
+    });
+    return b;
+  }
+  const ready = isReadyToFill(item);
+  const b = el(
+    "button",
+    {
+      type: "button",
+      class: "primary",
+      title: ready
+        ? "Open the posting and fill it, step by step with you"
+        : "Open the application in a tab; then click Fill this page at the top",
+    },
+    "Apply",
+  );
+  b.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    if (ready) {
+      void startFill(item);
+      return;
+    }
+    const url = applyUrl(item);
+    if (!url) {
+      showNotice("No link for this job yet: use its Apply kit.");
+      return;
+    }
+    await chrome.tabs.create({ url, active: true });
+    showNotice(
+      `Opened ${item.employer}'s application. When its form shows, click Fill this page at the top (on Workday, sign in first).`,
+    );
+  });
+  return b;
+}
+
+/** "Chennai, Tamil Nadu, India" → "Chennai"; "Remote" stays. */
+const placeText = (location: string | null | undefined) =>
+  (location ?? "").split(",")[0]?.trim() ?? "";
+
+/** One role in the queue: title, company, place, when posted, pay, its badges and the kit. */
+function queueRow(
+  item: QueueItem,
+  showEmployer: boolean,
+  menu?: HTMLElement,
+): HTMLElement {
+  const where = applyBadge(item);
   const needs = item.plan?.summary.needsYou ?? 0;
-  const posted = postedText(item.postedAt);
+  const url = applyUrl(item);
+  const facts = [
+    showEmployer ? item.employer : "",
+    placeText(item.location),
+    postedText(item.postedAt),
+    item.salary?.trim() ?? "",
+  ].filter(Boolean);
+  const title = url
+    ? el(
+        "a",
+        { href: url, target: "_blank", class: "label title", title: "Open the posting" },
+        item.title,
+      )
+    : el("span", { class: "label title" }, item.title);
+  title.addEventListener("click", (event) => event.stopPropagation());
   const li = el(
     "li",
-    { class: item.plan ? "clickable" : undefined },
-    el("div", {}, item.title),
-    showEmployer || posted
-      ? el(
-          "div",
-          { class: "muted" },
-          [showEmployer ? item.employer : "", posted]
-            .filter(Boolean)
-            .join(" · "),
-        )
-      : null,
+    {
+      class: item.plan ? "clickable" : undefined,
+      title: item.plan ? "Click to see what will be filled" : undefined,
+    },
+    el("div", { class: "row role" }, title, menu ?? null),
+    facts.length ? el("div", { class: "muted" }, facts.join(" · ")) : null,
+  );
+  li.append(
     el(
       "div",
       { class: "row" },
       el(
         "div",
-        {},
-        scoreBadge(item.score),
-        item.score === null ? null : " ",
-        el("span", { class: `badge ${tone}` }, label),
-        " ",
+        { class: "badges" },
+        isNew(item, newSince) ? el("span", { class: "badge new" }, "New") : null,
+        scoreBadge(item, li),
+        where ? el("span", { class: `badge ${where.tone}` }, where.label) : null,
         item.plan
           ? el(
               "span",
               { class: `badge ${needs ? "warn" : "ok"}` },
-              needs ? `${needs} need you` : "plan ready",
+              needs ? `${needs} need you` : "ready to fill",
             )
           : null,
       ),
-      kitButton(item),
+      el("div", { class: "controls" }, kitButton(item), applyButton(item)),
     ),
   );
   if (item.plan) li.addEventListener("click", () => void showPlan(item));
   return li;
 }
 
+// An open "⋯" menu closes on a click elsewhere, or Escape.
+const closeMenus = (except?: EventTarget | null) => {
+  for (const menu of document.querySelectorAll<HTMLDetailsElement>("details.menu[open]"))
+    if (!(except instanceof Node && menu.contains(except))) menu.open = false;
+};
+document.addEventListener("click", (event) => closeMenus(event.target));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeMenus();
+});
+
 $("refresh").addEventListener("click", () => void loadQueue());
 $("queue-search").addEventListener("input", () => showQueue());
-$("autopilot-start").addEventListener("click", () => void startAutopilot());
+$("autopilot-start").addEventListener("click", () => {
+  const box = $("autopilot-confirm");
+  if (!box.hidden) {
+    box.hidden = true;
+    return;
+  }
+  const jobs = queueItems.filter(
+    (item) => !hiddenCompanies.has(companyKey(item)) && item.target.status !== "closed",
+  ).length;
+  const go = el("button", { type: "button", class: "primary", id: "autopilot-go" }, "Start Autopilot");
+  const cancel = el("button", { type: "button" }, "Cancel");
+  go.addEventListener("click", () => {
+    box.hidden = true;
+    void startAutopilot();
+  });
+  cancel.addEventListener("click", () => {
+    box.hidden = true;
+  });
+  box.replaceChildren(
+    el(
+      "p",
+      {},
+      `Autopilot goes through the ${jobs} job${jobs === 1 ? "" : "s"} in your queue${hiddenCompanies.size ? " (hidden companies left out)" : ""}, best score first: it opens each application, fills it, and Claude steps in where a field gets stuck. You check and submit each one yourself; Pause or Stop any time.`,
+    ),
+    el("div", { class: "controls" }, go, cancel),
+  );
+  box.hidden = false;
+});
 
 interface Entry {
   readonly label: string;
@@ -851,6 +1337,26 @@ function startButton(item: QueueItem): HTMLElement {
   return b;
 }
 
+/** A plan entry's class in plain words. */
+const HOW_FILLED: Record<string, string> = {
+  auto: "fills itself",
+  confirm: "you approve",
+  protected: "asks you first",
+};
+
+function closePlanButton(): HTMLElement {
+  const b = el(
+    "button",
+    { type: "button", class: "icon", "aria-label": "Close the plan", title: "Close" },
+    "✕",
+  );
+  b.addEventListener("click", () => {
+    $("plan").hidden = true;
+    $("plan").replaceChildren();
+  });
+  return b;
+}
+
 async function showPlan(item: QueueItem) {
   if (!client) return;
   const box = $("plan");
@@ -866,25 +1372,23 @@ async function showPlan(item: QueueItem) {
         "div",
         { class: "row" },
         el("strong", {}, item.title),
-        item.target.postingUrl
-          ? el(
+        closePlanButton(),
+      ),
+      ...(item.target.postingUrl
+        ? [
+            el(
               "a",
               { href: item.target.postingUrl, target: "_blank" },
               "Open posting ↗",
-            )
-          : null,
-      ),
-      ...(item.target.status === "matched"
-        ? [
-            el(
-              "div",
-              { class: "controls" },
-              countdownPicker(await countdownSetting()),
-              startButton(item),
-              kitButton(item),
             ),
           ]
-        : [el("div", { class: "controls" }, kitButton(item))]),
+        : []),
+      el(
+        "div",
+        { class: "controls" },
+        ...(item.target.status === "matched" ? [startButton(item)] : []),
+        kitButton(item),
+      ),
       ...entries.map((e) =>
         el(
           "div",
@@ -896,7 +1400,9 @@ async function showPlan(item: QueueItem) {
             el(
               "span",
               { class: `badge ${e.status === "fill" ? "ok" : "warn"}` },
-              e.status === "fill" ? e.actionClass : "needs you",
+              e.status === "fill"
+                ? (HOW_FILLED[e.actionClass] ?? e.actionClass)
+                : "needs your answer",
             ),
           ),
           el(
@@ -996,6 +1502,7 @@ setUpImport({
   currentTab: () => shownTab,
   onAdded: (note) => {
     showNotice(note);
+    $("import-card").hidden = true;
     void loadQueue();
   },
 });

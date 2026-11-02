@@ -35,6 +35,12 @@ export interface JobOpsJob {
   readonly datePosted?: string | null;
   /** When you applied (Job Ops sets it on "applied"). */
   readonly appliedAt?: string | null;
+  /** When Job Ops found it. */
+  readonly discoveredAt?: string | null;
+  /** Where the job is ("Chennai, Tamil Nadu, India", "Remote"), as the job board said. */
+  readonly location?: string | null;
+  /** Pay as the listing states it ("INR 30-45 LPA"), if it does. */
+  readonly salary?: string | null;
 }
 
 export interface JobOpsJobDetail extends JobOpsJob {
@@ -48,6 +54,8 @@ export interface JobOpsJobDetail extends JobOpsJob {
   readonly tailoredSkills?: string | null;
   /** Projects picked for this job's resume: comma-separated design-resume ids. */
   readonly selectedProjectIds?: string | null;
+  /** Why it scored what it did ("Skills 42/50 · Experience 30/30 · … — reason"). */
+  readonly suitabilityReason?: string | null;
 }
 
 export interface JobUpdate {
@@ -162,6 +170,9 @@ const jobShape = z
     suitabilityScore: z.number().nullable().optional(),
     datePosted: z.string().nullable().optional(),
     appliedAt: z.string().nullable().optional(),
+    discoveredAt: z.string().nullable().optional(),
+    location: z.string().nullable().optional(),
+    salary: z.string().nullable().optional(),
   })
   .passthrough();
 const jobsData = z.object({
@@ -176,6 +187,7 @@ const jobDetailData = jobShape.extend({
   tailoredHeadline: z.string().nullable().optional(),
   tailoredSkills: z.string().nullable().optional(),
   selectedProjectIds: z.string().nullable().optional(),
+  suitabilityReason: z.string().nullable().optional(),
 });
 
 /**
@@ -197,6 +209,9 @@ const toJob = (job: z.infer<typeof jobShape>): JobOpsJob => ({
   suitabilityScore: job.suitabilityScore ?? null,
   datePosted: job.datePosted ?? null,
   appliedAt: job.appliedAt ?? null,
+  discoveredAt: job.discoveredAt ?? null,
+  location: job.location ?? null,
+  salary: job.salary ?? null,
 });
 
 export class JobOpsClient implements JobOpsApi {
@@ -248,6 +263,7 @@ export class JobOpsClient implements JobOpsApi {
       tailoredHeadline: job.tailoredHeadline ?? null,
       tailoredSkills: job.tailoredSkills ?? null,
       selectedProjectIds: job.selectedProjectIds ?? null,
+      suitabilityReason: job.suitabilityReason ?? null,
     };
   }
 

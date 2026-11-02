@@ -87,7 +87,14 @@ const job = (more: Partial<JobOpsJob>): JobOpsJob => ({
 const jobs = [
   job({ id: "aws-1", title: "SDE II", employer: "Amazon", datePosted: "2026-10-18" }),
   job({ id: "aws-2", title: "SDE III", employer: "Amazon Web Services" }),
-  job({ id: "acme", employer: "Acme", datePosted: "2026-10-20" }),
+  job({
+    id: "acme",
+    employer: "Acme",
+    datePosted: "2026-10-20",
+    discoveredAt: "2026-10-21T00:06:00Z",
+    location: "Chennai, Tamil Nadu, India",
+    salary: "INR 30-45 LPA",
+  }),
   job({
     id: "applied-aws",
     status: "applied",
@@ -161,7 +168,15 @@ describe("company limits over HTTP", () => {
         used: [{ jobId: "applied-aws", title: "SDE I" }],
       });
     expect(byId("aws-1").postedAt).toBe("2026-10-18");
-    expect(byId("acme")).toMatchObject({ companyLimit: null, postedAt: "2026-10-20" });
+    // For sorting and triage in the side panel: when it was found, where, its pay.
+    expect(byId("acme")).toMatchObject({
+      companyLimit: null,
+      postedAt: "2026-10-20",
+      foundAt: "2026-10-21T00:06:00Z",
+      location: "Chennai, Tamil Nadu, India",
+      salary: "INR 30-45 LPA",
+    });
+    expect(byId("aws-1")).toMatchObject({ foundAt: null, location: null, salary: null });
 
     // You mark Acme as one per 90 days; then remove it again.
     const added = await call("PUT", "/company-limits", {

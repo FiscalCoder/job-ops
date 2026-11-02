@@ -9,7 +9,10 @@
   <body>
     <header>
       <h1>Apply Copilot</h1>
-      <button type="button" id="signout" class="link" hidden>Sign out</button>
+      <div id="header-actions" class="controls" hidden>
+        <button type="button" id="add-open" title="Add a job by its link, or the tab you're on">+ Add job</button>
+        <button type="button" id="settings-open" class="icon" aria-label="Settings" title="Settings">⚙</button>
+      </div>
     </header>
 
     <section id="login" hidden>
@@ -35,6 +38,21 @@
       <!-- The tab you're on: its job, Fill this page, the kit. -->
       <div id="here" class="card here" hidden></div>
 
+      <!-- "+ Add job": opened from the header, closed again once a job is added. -->
+      <div id="import-card" class="card" hidden>
+        <div class="row">
+          <strong>Add a job</strong>
+          <button type="button" id="add-close" class="icon" aria-label="Close Add a job" title="Close">✕</button>
+        </div>
+        <p class="muted">A job's page or its application form on any site: Job Ops adds it, tailors your resume and scores it.</p>
+        <form id="import-form" class="row">
+          <input id="import-url" type="url" placeholder="https://…" aria-label="Link to the job or its application form" />
+          <button type="submit">Add</button>
+        </form>
+        <button type="button" id="import-tab" class="link">Use this tab</button>
+        <div id="import-box"></div>
+      </div>
+
       <!-- What you work through: the queue, Autopilot over it, the job you picked. -->
       <div class="card">
         <div class="row">
@@ -44,25 +62,34 @@
             <button type="button" id="autopilot-start" class="primary" title="Apply to the queue for you, highest score first; you check and submit each">Autopilot</button>
           </div>
         </div>
+        <div id="autopilot-confirm" class="confirm-box" hidden></div>
         <div class="search">
           <input id="queue-search" type="search" placeholder="Search company, role, site…" aria-label="Search the queue by company, role or site" autocomplete="off" />
-          <span id="queue-count" class="muted"></span>
+          <select id="queue-sort" aria-label="Sort the queue"></select>
+        </div>
+        <div id="queue-filters" class="chips" role="group" aria-label="Filter the queue"></div>
+        <div id="queue-meta" class="queue-meta muted" hidden>
+          <span id="queue-count"></span>
+          <button type="button" id="queue-hidden" class="link" hidden></button>
         </div>
         <div id="plan" class="card plan" hidden></div>
         <ul id="queue" class="list"></ul>
       </div>
+    </section>
 
-      <!-- Now and then: folded until you need them. -->
-      <details id="import-card" class="card">
-        <summary><strong>Add a job</strong></summary>
-        <p class="muted">A job's page or its application form on any site: Job Ops adds it, tailors your resume and scores it.</p>
-        <form id="import-form" class="row">
-          <input id="import-url" type="url" placeholder="https://…" aria-label="Link to the job or its application form" />
-          <button type="submit">Add</button>
-        </form>
-        <button type="button" id="import-tab" class="link">Use this tab</button>
-        <div id="import-box"></div>
-      </details>
+    <!-- Settings: what you set up once or look at now and then. -->
+    <section id="settings" hidden>
+      <div class="row settings-head">
+        <strong>Settings</strong>
+        <button type="button" id="settings-close">Done</button>
+      </div>
+
+      <div class="card">
+        <strong>Filling</strong>
+        <label class="inline">Before each automatic step
+          <select id="settings-countdown" aria-label="Countdown before automatic steps"></select>
+        </label>
+      </div>
 
       <details id="lookups-card" class="card">
         <summary><strong>Job-board lookups</strong> <span id="lookups-state" class="muted"></span></summary>
@@ -106,6 +133,13 @@
         </form>
         <button type="button" id="claude-remove" class="link" hidden>Remove my key</button>
       </details>
+
+      <div class="card">
+        <div class="row">
+          <span id="signed-in" class="muted"></span>
+          <button type="button" id="signout">Sign out</button>
+        </div>
+      </div>
     </section>
 
     <script type="module" src="./main.ts"></script>
