@@ -412,6 +412,67 @@ function fixFieldPanel(key: string, fix: FixField) {
   return fixPanel;
 }
 
+/** "Tell Claude": your words for this page; an error to show, or null. */
+export type TellClaude = (note: string) => string | null;
+
+/**
+ * "Tell Claude what to do on this page", folded: your words (the resume goes in the Resume
+ * box, skip the cover letter), then Claude reads the whole page (its HTML and a screenshot) with
+ * them and the page is filled again. Or Claude just reads the page. Built once per run.
+ */
+let tellPanel: {
+  readonly key: string;
+  readonly element: HTMLElement;
+  readonly refresh: (busy: boolean) => void;
+} | null = null;
+
+function tellClaudePanel(
+  key: string,
+  tellClaude: TellClaude,
+  readClosely?: () => void,
+) {
+  if (tellPanel?.key === key) return tellPanel;
+  const words = el("textarea", {
+    rows: "2",
+    "aria-label": "Tell Claude what to do on this page",
+    placeholder:
+      'e.g. "the resume goes in the Resume box, not the profile photo", "skip the cover letter"',
+  }) as HTMLTextAreaElement;
+  const note = el("p", { class: "muted" });
+  const send = button(
+    "Tell Claude and refill",
+    () => {
+      const problem = tellClaude(words.value);
+      note.className = problem ? "error" : "muted";
+      note.textContent =
+        problem ?? "Claude is reading the page with what you said, then it's filled again…";
+      if (!problem) words.value = "";
+    },
+    true,
+  );
+  const read = readClosely
+    ? button("✦ Just read this page", () => {
+        note.className = "muted";
+        note.textContent = "Claude is reading the whole page (its HTML and a screenshot)…";
+        readClosely();
+      })
+    : null;
+  const element = el(
+    "details",
+    { class: "tell tell-claude" },
+    el("summary", {}, "✦ Tell Claude what to do on this page"),
+    words,
+    el("div", { class: "controls" }, send, read),
+    note,
+  );
+  const refresh = (busy: boolean) => {
+    send.disabled = busy;
+    if (read) (read as HTMLButtonElement).disabled = busy;
+  };
+  tellPanel = { key, element, refresh };
+  return tellPanel;
+}
+
 export function renderRun(
   box: HTMLElement,
   view: RunView,
@@ -428,6 +489,8 @@ export function renderRun(
   readClosely?: () => void,
   /** "Fix a field": one field again, or by Claude. */
   fix?: FixField,
+  /** Page by page: your words for Claude about this page. */
+  tellClaude?: TellClaude,
 ): void {
   const { state, action } = view;
   const finished = state.steps.filter((s) => STATE_LABEL[s.state]);
@@ -530,8 +593,15 @@ export function renderRun(
   // A run that ended leaves no fold behind for the next one.
   if (action.kind === "finished") fixPanel = null;
   fixer?.refresh(view.fields, view.busy);
+  const teller =
+    tellClaude && view.page && action.kind !== "finished"
+      ? tellClaudePanel(view.job.jobId, tellClaude, readClosely)
+      : null;
+  if (action.kind === "finished") tellPanel = null;
+  teller?.refresh(view.busy);
   const parts: (HTMLElement | null)[] = [
     header,
+    teller?.element ?? null,
     fixer?.element ?? null,
     view.notice && action.kind !== "finished"
       ? el("p", { class: "error" }, view.notice)

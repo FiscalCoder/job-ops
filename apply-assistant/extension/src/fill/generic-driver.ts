@@ -101,9 +101,14 @@ export function readGenericPage(): GenericPage {
   };
   /** The elements it names as its label; screen-reader-only ones ("0 files selected") only if nothing else. */
   const labelledBy = (el: Element | null | undefined) => {
+    // Inside a web component, the label is in its own shadow root.
+    const root = el?.getRootNode();
+    const byId = (id: string) =>
+      (root instanceof ShadowRoot ? root.getElementById(id) : null) ??
+      document.getElementById(id);
     const named = (el?.getAttribute("aria-labelledby") ?? "")
       .split(/\s+/)
-      .map((id) => (id ? document.getElementById(id) : null))
+      .map((id) => (id ? byId(id) : null))
       .filter((e): e is HTMLElement => e !== null);
     const visible = named.filter(shown);
     return (visible.length ? visible : named).map(text).join(" ").trim();
@@ -164,6 +169,25 @@ export function readGenericPage(): GenericPage {
     }
     return "";
   };
+  /**
+   * A field inside a web component with no label of its own there (SmartRecruiters'
+   * `<spl-input id="first-name-input">`): the component's label, its question, or its id.
+   */
+  const hostLabel = (el: HTMLElement): string => {
+    const root = el.getRootNode();
+    if (!(root instanceof ShadowRoot)) return "";
+    const host = root.host as HTMLElement;
+    return (
+      meaningful(host.getAttribute("label")) ||
+      meaningful(host.getAttribute("aria-label")) ||
+      labelledBy(host) ||
+      questionAbove(host) ||
+      host.id
+        .replace(/[-_](input|field|element)?[-_]?\d*$/i, "")
+        .replace(/[-_]+/g, " ")
+        .replace(/^\w/, (c) => c.toUpperCase())
+    );
+  };
   const labelOf = (el: HTMLElement): string => {
     const input = el as HTMLInputElement;
     const own = input.labels?.[0] ?? el.closest("label");
@@ -188,6 +212,7 @@ export function readGenericPage(): GenericPage {
       // Before the field's own name ("rec-form_2111…"): a label found by that name, or its row's.
       labelNamed(el) ||
       rowLabel(el) ||
+      hostLabel(el) ||
       el.getAttribute("name") ||
       ""
     ).slice(0, 300);
@@ -323,43 +348,97 @@ export function readGenericPage(): GenericPage {
       .join("; ")
       .slice(0, 300);
 
+  /** Every open shadow root on the page (web components), nested ones too. */
+  const shadowRoots = (): ShadowRoot[] => {
+    const roots: ShadowRoot[] = [];
+    const visit = (root: Document | ShadowRoot) => {
+      for (const host of root.querySelectorAll("*"))
+        if (host.shadowRoot) {
+          roots.push(host.shadowRoot);
+          visit(host.shadowRoot);
+        }
+    };
+    visit(document);
+    return roots;
+  };
+  // For the rest of the run on this page: finds a field inside a web component by its ref,
+  // when the page's own lookup finds nothing (every lookup falls back to these).
+  const w = window as unknown as {
+    __acDeep?: (s: string) => Element | null;
+    __acDeepAll?: (s: string) => Element[];
+  };
+  w.__acDeep = (selector) => {
+    for (const root of shadowRoots()) {
+      const hit = root.querySelector(selector);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  w.__acDeepAll = (selector) =>
+    shadowRoots().flatMap((root) => [...root.querySelectorAll(selector)]);
+  // Fields inside web components are marked "acs…" (found through their shadow roots).
+  let shadowCounter =
+    Math.max(
+      -1,
+      ...shadowRoots().flatMap((root) =>
+        [...root.querySelectorAll("[data-ac-ref^='acs']")].map(
+          (e) => Number(e.getAttribute("data-ac-ref")?.slice(3)) || 0,
+        ),
+      ),
+    ) + 1;
+  const shadowRef = (el: HTMLElement, group: string | null): string => {
+    const marks = group
+      ? [
+          ...(el.getRootNode() as ShadowRoot).querySelectorAll<HTMLElement>(
+            `input[name="${group.replace(/["\\]/g, "\\$&")}"]`,
+          ),
+        ]
+      : [el];
+    const mark = el.getAttribute("data-ac-ref") ?? `acs${shadowCounter++}`;
+    for (const m of marks) m.setAttribute("data-ac-ref", mark);
+    return `[data-ac-ref="${mark}"]`;
+  };
+
   const fields: GenericField[] = [];
   const seen = new Set<string>();
-  for (const el of document.querySelectorAll<HTMLElement>(
-    "input, select, textarea, [role='combobox']:not(input)",
-  )) {
-    if (fields.length >= 200) break;
+  const FIELD = "input, select, textarea, [role='combobox']:not(input)";
+  const consider = (el: HTMLElement, shadow: boolean): void => {
     const input = el as HTMLInputElement;
     const tag = el.tagName.toLowerCase();
-    if (tag === "input" && SKIP.test(input.type)) continue;
-    if (el.closest("header, nav, footer, #ac-badge")) continue;
+    if (tag === "input" && SKIP.test(input.type)) return;
+    if (el.closest("header, nav, footer, #ac-badge")) return;
     // A help chat's own inputs (Oracle's chatbot takes files): not the application.
-    if (el.closest("[class*='chat' i], [id*='chat' i]")) continue;
-    if (/one-time-code/i.test(el.getAttribute("autocomplete") ?? "")) continue;
-    if (input.disabled) continue;
+    if (el.closest("[class*='chat' i], [id*='chat' i]")) return;
+    if (/one-time-code/i.test(el.getAttribute("autocomplete") ?? "")) return;
+    if (input.disabled) return;
     // Read-only, except a date picker's box (Keka's "Date of Joining"): set through its picker.
     const datePicker =
       input.readOnly &&
       /date|calendar/i.test(
         `${input.className} ${input.parentElement?.className ?? ""}`,
       );
-    if (input.readOnly && !datePicker) continue;
+    if (input.readOnly && !datePicker) return;
     // A dropdown's stand-in for the browser's "required" check (react-select), and captcha tokens.
     if (el.getAttribute("aria-hidden") === "true" && input.type !== "file")
-      continue;
-    if (CAPTCHA.test(`${el.id} ${el.getAttribute("name") ?? ""}`)) continue;
+      return;
+    if (CAPTCHA.test(`${el.id} ${el.getAttribute("name") ?? ""}`)) return;
     // Hidden fields aren't for you, except uploads (their input hides behind a button).
     const visible = el.offsetParent !== null || el.getClientRects().length > 0;
-    if (!visible && input.type !== "file") continue;
+    if (!visible && input.type !== "file") return;
     const group =
       (input.type === "radio" || input.type === "checkbox") && input.name
         ? input.name
         : null;
-    const ref = refOf(el, group);
-    if (seen.has(ref)) continue;
+    const ref = shadow ? shadowRef(el, group) : refOf(el, group);
+    if (seen.has(ref)) return;
     seen.add(ref);
     const members = group
-      ? [...document.querySelectorAll<HTMLInputElement>(ref)]
+      ? [
+          ...(shadow
+            ? (el.getRootNode() as ShadowRoot)
+            : document
+          ).querySelectorAll<HTMLInputElement>(ref),
+        ]
       : [input];
     let kind: GenericKind;
     let options: string[] = [];
@@ -405,7 +484,18 @@ export function readGenericPage(): GenericPage {
       ...(value ? { value } : {}),
       ...(contextOf(el) ? { context: contextOf(el) } : {}),
     });
+  };
+  for (const el of document.querySelectorAll<HTMLElement>(FIELD)) {
+    if (fields.length >= 200) break;
+    consider(el, false);
   }
+  // Fields inside web components (SmartRecruiters' <spl-input>): read the same way, after the
+  // page's own.
+  for (const root of shadowRoots())
+    for (const el of root.querySelectorAll<HTMLElement>(FIELD)) {
+      if (fields.length >= 200) break;
+      consider(el, true);
+    }
   const heading = [...document.querySelectorAll("h1, h2")]
     .find((h) => (h as HTMLElement).offsetParent !== null)
     ?.textContent?.replace(/\s+/g, " ")
@@ -440,7 +530,7 @@ export function readGenericPage(): GenericPage {
  * one it points to (aria-owns / aria-controls), or one just beside it. Runs inside the page.
  */
 export function focusSearchBox(ref: string): boolean {
-  const field = document.querySelector<HTMLElement>(ref);
+  const field = (document.querySelector<HTMLElement>(ref) ?? ((window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(ref) as HTMLElement | null | undefined) ?? null);
   if (!field) return false;
   // Only a box that says it's a search ("— Type to Search —"), never a neighbouring field.
   const isSearch = (el: Element | null): el is HTMLInputElement =>
@@ -508,7 +598,7 @@ function domKind(el: Element): DomKind {
 export function shownValue(selector: string): string {
   const text = (el: Element | null | undefined) =>
     (el?.textContent ?? "").replace(/\s+/g, " ").trim();
-  const all = [...document.querySelectorAll<HTMLElement>(selector)];
+  const all = (() => { const light = [...document.querySelectorAll<HTMLElement>(selector)]; return light.length ? light : (((window as unknown as { __acDeepAll?: (s: string) => Element[] }).__acDeepAll?.(selector) ?? []) as HTMLElement[]); })();
   const el = all[0];
   if (!el) return "";
   const input = el as HTMLInputElement;
@@ -602,6 +692,10 @@ async function formFrame(
   return best;
 }
 
+/** A field inside a web component (marked "acs…"): found through the page's shadow roots. */
+export const deep = (ref: string): string =>
+  ref.includes('data-ac-ref="acs') ? `pierce/${ref}` : ref;
+
 export class GenericDriver extends TrustedDriver {
   readonly system = "generic" as const;
   protected readonly errorSelector =
@@ -672,7 +766,7 @@ export class GenericDriver extends TrustedDriver {
         this.frame.evaluate(
           (refs) =>
             refs.filter((ref) => {
-              const els = [...document.querySelectorAll<HTMLInputElement>(ref)];
+              const els = (() => { const light = [...document.querySelectorAll<HTMLInputElement>(ref)]; return light.length ? light : (((window as unknown as { __acDeepAll?: (s: string) => Element[] }).__acDeepAll?.(ref) ?? []) as HTMLInputElement[]); })();
               const el = els[0];
               if (!el || el.closest("[data-ac-site]")) return true;
               if (el.type === "radio" || el.type === "checkbox")
@@ -707,7 +801,7 @@ export class GenericDriver extends TrustedDriver {
             if (!outer) return null;
             return (
               refs.find((ref) => {
-                const el = document.querySelector(ref);
+                const el = (document.querySelector(ref) ?? (window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(ref) ?? null);
                 return el !== null && (el === outer || outer.contains(el));
               }) ?? null
             );
@@ -729,7 +823,7 @@ export class GenericDriver extends TrustedDriver {
       () => this.frame.evaluate(
         (refs) =>
           refs.filter((ref) => {
-            const el = document.querySelector(ref);
+            const el = (document.querySelector(ref) ?? (window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(ref) ?? null);
             // Styled inputs are often hidden themselves: their wrapper shows.
             return (
               !el ||
@@ -823,7 +917,7 @@ export class GenericDriver extends TrustedDriver {
               .filter((el) => labelOf(el).includes(name.toLowerCase()))
               .at(-1);
             // Not named: the nearest one after the section's last field, close around it.
-            const field = lastRef ? document.querySelector(lastRef) : null;
+            const field = lastRef ? (document.querySelector(lastRef) ?? (window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(lastRef) ?? null) : null;
             let node = field?.parentElement ?? null;
             for (let depth = 0; !button && field && node && depth < 6; depth++) {
               button = adds(node).find(
@@ -854,7 +948,7 @@ export class GenericDriver extends TrustedDriver {
     const wanted = Array.isArray(value) ? value : [value as string];
     try {
       const kindOf = () =>
-        this.frame.$eval(entry.ref, domKind).catch(() => null);
+        this.frame.$eval(deep(entry.ref), domKind).catch(() => null);
       let kind = await kindOf();
       if (!kind && (await this.refind(entry))) kind = await kindOf();
       if (!kind)
@@ -904,7 +998,7 @@ export class GenericDriver extends TrustedDriver {
       case "custom":
         return this.custom(entry, wanted);
       default: {
-        const input = await this.frame.$(entry.ref);
+        const input = await this.frame.$(deep(entry.ref));
         if (!input) return { ok: false, reason: "Field not found on the page" };
         // Several answers into a box that collects tags (Keka's "Add new skill", or one
         // Claude's page map calls tags): one by one.
@@ -937,7 +1031,7 @@ export class GenericDriver extends TrustedDriver {
   private visibleStandIn(ref: string): Promise<string | null> {
     return within(
       () =>
-        this.frame.$eval(ref, (el) => {
+        this.frame.$eval(deep(ref), (el) => {
           const shown = (e: Element) =>
             (e as HTMLElement).checkVisibility({ visibilityProperty: true });
           if (shown(el)) return null;
@@ -974,7 +1068,9 @@ export class GenericDriver extends TrustedDriver {
       () =>
         this.frame.evaluate(
           (ref, y, m, d) => {
-            const el = document.querySelector<HTMLInputElement>(ref);
+            const el =
+              document.querySelector<HTMLInputElement>(ref) ??
+              (((window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(ref) as HTMLInputElement | null | undefined) ?? null);
             if (!el) return "";
             if (el.type === "date") {
               const set = Object.getOwnPropertyDescriptor(
@@ -1012,7 +1108,7 @@ export class GenericDriver extends TrustedDriver {
   private isTagInput(ref: string): Promise<boolean> {
     return within(
       () =>
-        this.frame.$eval(ref, (el) => {
+        this.frame.$eval(deep(ref), (el) => {
           const input = el as HTMLInputElement;
           const box =
             el.closest(".form-group, [class*='field' i], [class*='tag' i]") ??
@@ -1038,14 +1134,14 @@ export class GenericDriver extends TrustedDriver {
   /** Each item typed and confirmed with Enter; ones already there are left alone. */
   private async addTags(ref: string, value: string): Promise<FillOutcome> {
     const items = value.split(/\s*,\s*/).filter(Boolean);
-    const box = await this.frame.$(ref);
+    const box = await this.frame.$(deep(ref));
     if (!box) return { ok: false, reason: "Field not found on the page" };
     let added = 0;
     for (const item of items) {
       const there = await within(
         () =>
           this.frame.$eval(
-            ref,
+            deep(ref),
             (el, item) => {
               const around =
                 el.closest(".form-group, [class*='field' i], [class*='tag' i]") ??
@@ -1067,7 +1163,7 @@ export class GenericDriver extends TrustedDriver {
     // The box's own text: its read-back is the tags beside it once it's empty (Zoho's chips).
     const left = (
       await within(
-        () => this.frame.$eval(ref, (el) => (el as HTMLInputElement).value ?? ""),
+        () => this.frame.$eval(deep(ref), (el) => (el as HTMLInputElement).value ?? ""),
         READ_MS,
       ).catch(() => "")
     ).trim();
@@ -1082,7 +1178,7 @@ export class GenericDriver extends TrustedDriver {
     wanted: string,
     alternatives: readonly string[] = [],
   ): Promise<FillOutcome> {
-    const handle = await this.frame.$(ref);
+    const handle = await this.frame.$(deep(ref));
     if (!handle) return { ok: false, reason: "Dropdown not found" };
     const options = await handle.evaluate((el) =>
       [...(el as HTMLSelectElement).options].map((o) => ({
@@ -1105,7 +1201,7 @@ export class GenericDriver extends TrustedDriver {
     ref: string,
     wanted: readonly string[],
   ): Promise<FillOutcome> {
-    const inputs = await this.frame.$$(ref);
+    const inputs = await this.frame.$$(deep(ref));
     const labels = await Promise.all(
       inputs.map((i) =>
         i.evaluate((el) => {
@@ -1167,7 +1263,7 @@ export class GenericDriver extends TrustedDriver {
   ): Promise<FillOutcome> {
     const { ref } = entry;
     const wanted = all[0] ?? "";
-    const input = await this.frame.$(ref);
+    const input = await this.frame.$(deep(ref));
     if (!input) return { ok: false, reason: "Field not found on the page" };
     if (selectionMatches(await this.readBackRef(ref), wanted))
       return { ok: true, result: "already set" };
@@ -1267,7 +1363,7 @@ export class GenericDriver extends TrustedDriver {
   ): Promise<FillOutcome> {
     const { ref } = entry;
     const wanted = all[0] ?? "";
-    const handle = await this.frame.$(ref);
+    const handle = await this.frame.$(deep(ref));
     if (!handle) return { ok: false, reason: "Field not found on the page" };
     if (selectionMatches(await this.readBackRef(ref), wanted))
       return { ok: true, result: "already set" };
@@ -1389,7 +1485,7 @@ export class GenericDriver extends TrustedDriver {
     wanted: readonly string[],
   ): Promise<FillOutcome | null> {
     const { ref } = entry;
-    const handle = await this.frame.$(ref);
+    const handle = await this.frame.$(deep(ref));
     if (!handle) return null;
     await this.clearSearch(ref);
     let choices = await visibleChoices(this.frame, 600);

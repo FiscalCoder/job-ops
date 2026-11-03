@@ -305,6 +305,8 @@ async function planPagedPage(
   jobId: string,
   driver: PagedDriver,
   closely: Closely = false,
+  /** What you told Claude about this page (with the closer read). */
+  note?: string,
 ): Promise<PlanEntry[]> {
   if (driver.system === "workday" && FINAL_STEP.test(await driver.step()))
     return [];
@@ -317,7 +319,14 @@ async function planPagedPage(
     snapshot && closely === "html+screenshot" ? await driver.pageShot() : null;
   const plan = (await client.planPage(
     jobId,
-    snapshot ? { ...page, snapshot, ...(screenshot ? { screenshot } : {}) } : page,
+    snapshot
+      ? {
+          ...page,
+          snapshot,
+          ...(screenshot ? { screenshot } : {}),
+          ...(note ? { note } : {}),
+        }
+      : page,
   )) as PagePlan;
   if (!plan.add?.length) return plan.entries;
   // My Experience: one entry per job and degree on your resume, then the page is planned again.
@@ -1107,17 +1116,40 @@ export class RunController {
    * "Claude: read this page": Claude reads the whole form (its HTML) closely, the page is
    * planned again with what it saw, and filled again (fields that are right already stay so).
    */
-  readPageClosely(): void {
+  readPageClosely(note?: string): void {
     const wizard = this.wizard;
     if (!wizard || this.busy || this.closed || this.tabClosed) return;
     this.clearTimer();
-    this.trace.event("decision", "You asked Claude to read the page closely");
+    this.trace.event(
+      "decision",
+      note
+        ? `You told Claude: ${note.slice(0, 300)}`
+        : "You asked Claude to read the page closely",
+      note ? { data: { note } } : {},
+    );
     void (async () => {
       if (wizard instanceof GenericDriver) await wizard.findFormFrame();
       const step = (await wizard.step()) || this.pageStep || "this page";
       this.readClosely.add(step);
-      await this.nextPage(step, undefined, "html+screenshot");
+      await this.nextPage(step, undefined, "html+screenshot", note);
     })();
+  }
+
+  /**
+   * "Tell Claude": what to do on this page ("the resume goes in the Resume box, not the profile
+   * photo"). Claude reads the whole page (its HTML and a screenshot) with your words, which come
+   * before what the labels suggest, and the page is planned and filled again. An error to show,
+   * or null.
+   */
+  tellClaude(note: string): string | null {
+    const text = note.trim();
+    if (text.length < 2) return "Say what Claude should do on this page.";
+    if (!this.wizard)
+      return "This form is filled from its posting's plan: use Fix a field, or Tell agent on a step.";
+    if (this.closed || this.tabClosed) return "The run has ended.";
+    if (this.busy) return "Wait for the step in progress (or Pause), then tell Claude.";
+    this.readPageClosely(text);
+    return null;
   }
 
   /**
@@ -1173,6 +1205,9 @@ export class RunController {
         ? "Click the field on the page first (one this page's plan has), then pick it again."
         : "That field isn't on this page's plan.";
     const said = how.said?.trim() ?? "";
+    // An upload Claude is told is wrong (the resume in a profile photo): Claude can't pick
+    // files, so it's emptied and left out of this page's fills; the right one is yours.
+    if (entry.type === "file" && how.claude) return this.leaveUpload(entry, said);
     const shown = (await this.driver.readBack(entry).catch(() => "")).slice(0, 300);
     this.trace.event(
       "decision",
@@ -1199,6 +1234,25 @@ export class RunController {
           }
         : {}),
     });
+    return null;
+  }
+
+  /** Uploads you said are wrong on this page: emptied, and never filled again here. */
+  private leftAlone = new Set<string>();
+
+  private async leaveUpload(entry: PlanEntry, said: string): Promise<null> {
+    const cleared = (await this.driver.clearFile?.(entry.ref)) ?? false;
+    this.leftAlone.add(entry.ref);
+    this.pageEntries = this.pageEntries.filter((e) => e.ref !== entry.ref);
+    this.trace.event(
+      "decision",
+      `You said the upload "${entry.label}" is wrong${said ? `: ${said.slice(0, 200)}` : ""}; ${cleared ? "emptied it" : "couldn't empty it"} and left it out of this page`,
+      { data: { ref: entry.ref, cleared, said } },
+    );
+    this.notice = cleared
+      ? `Emptied "${entry.label}" and won't fill it again on this page. If the page still shows the file, remove it there. Put the resume where it belongs with the kit, or Fill this page after.`
+      : `Couldn't empty "${entry.label}": remove the file on the page. It won't be filled again on this page.`;
+    this.emit();
     return null;
   }
 
@@ -1289,6 +1343,8 @@ export class RunController {
     step: string,
     choice?: PageChoice,
     closely: Closely = false,
+    /** What you told Claude about this page. */
+    note?: string,
   ): Promise<void> {
     if (!this.wizard || this.closed) return;
     this.clearTimer();
@@ -1298,6 +1354,7 @@ export class RunController {
     this.busy = true;
     this.notice = null;
     this.problems = [];
+    if (step !== this.pageStep) this.leftAlone.clear();
     this.pageStep = step;
     this.reviewTraced = false;
     this.rechecked = false;
@@ -1322,15 +1379,18 @@ export class RunController {
         this.job.jobId,
         wizard,
         closely,
+        note,
       );
-      const entries = choice ? chosen(planned, choice, true) : planned;
-      if (planned.length) this.pageEntries = inFillOrder(planned, true);
+      // Uploads you said are wrong stay out (until you leave this page).
+      const kept = planned.filter((e) => !this.leftAlone.has(e.ref));
+      const entries = choice ? chosen(kept, choice, true) : kept;
+      if (kept.length) this.pageEntries = inFillOrder(kept, true);
       this.state = begin(entries);
       if (!this.state.paused) this.shownAtPause = null;
       this.claudeTakes(choice);
       this.trace.event(
         "page",
-        `On ${wizard.system === "workday" ? "Workday page" : "page"} "${step}" with ${entries.length} plan entries${choice ? ` (${describeChoice(choice)})` : ""}${closely ? ", after Claude read it closely" : ""}`,
+        `On ${wizard.system === "workday" ? "Workday page" : "page"} "${step}" with ${entries.length} plan entries${choice ? ` (${describeChoice(choice)})` : ""}${closely ? ", after Claude read it closely" : ""}${note ? " with what you told it" : ""}`,
         {
           data: {
             step,

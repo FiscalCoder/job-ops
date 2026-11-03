@@ -27,7 +27,7 @@ export function outlineField(
     el.removeAttribute("data-ac-box");
     el.removeAttribute("data-ac-target");
   }
-  const target = document.querySelector(selector);
+  const target = document.querySelector(selector) ?? (window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(selector) ?? null;
   if (!target) return "";
   target.setAttribute("data-ac-target", "1");
   // The field's own area: up from the field until a parent holds another field too.

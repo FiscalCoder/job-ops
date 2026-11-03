@@ -49,6 +49,8 @@ export const workdayPageSchema = z.object({
         context: z.string().max(300).optional(),
         /** Set by Claude's page map: what it takes, when the label alone says nothing. */
         meaning: z.string().max(40).optional(),
+        /** Set when Claude mapped the page with your instruction: its meaning comes first. */
+        meaningByYou: z.boolean().optional(),
         /** Set by Claude's page map: what kind of input it really is. */
         widget: z.enum(["tags", "date", "search", "captcha"]).optional(),
       }),

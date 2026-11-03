@@ -31,6 +31,8 @@ export interface FormDriver {
   highlight(ref: string | null, badge: string): Promise<void>;
   /** Of these fields, the one you're on in the page (focus inside its box); null if none. */
   focusedOf?(refs: readonly string[]): Promise<string | null>;
+  /** Empties an upload (a file put in the wrong one); false when it couldn't. */
+  clearFile?(ref: string): Promise<boolean>;
   fill(
     entry: PlanEntry,
     value: string | readonly string[] | null,
@@ -152,7 +154,7 @@ export abstract class TrustedDriver implements FormDriver {
           ].filter((n): n is Node => n !== null);
           const holds = (selector: string, node: Node) => {
             try {
-              return [...document.querySelectorAll(selector)].some((el) =>
+              return (() => { const light = [...document.querySelectorAll<Element>(selector)]; return light.length ? light : (((window as unknown as { __acDeepAll?: (s: string) => Element[] }).__acDeepAll?.(selector) ?? []) as Element[]); })().some((el) =>
                 el.contains(node),
               );
             } catch {
@@ -296,7 +298,7 @@ export abstract class TrustedDriver implements FormDriver {
           }
           badgeEl.textContent = text;
           if (!selector) return;
-          const field = document.querySelector(selector);
+          const field = (document.querySelector(selector) ?? (window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(selector) ?? null);
           const box = (closest ? field?.closest(closest) : null) ?? field;
           box?.classList.add("ac-current");
           box?.scrollIntoView({ block: "center" });
@@ -346,7 +348,7 @@ export abstract class TrustedDriver implements FormDriver {
   ): Promise<FillOutcome> {
     const attached = await this.frame.evaluate(
       (sel, base64, name) => {
-        const input = document.querySelector<HTMLInputElement>(sel);
+        const input = (document.querySelector<HTMLInputElement>(sel) ?? ((window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(sel) as HTMLInputElement | null | undefined) ?? null);
         if (!input) return null;
         const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
         const transfer = new DataTransfer();
@@ -368,6 +370,28 @@ export abstract class TrustedDriver implements FormDriver {
         reason: "Resume field not found; attach it yourself",
       };
     return { ok: true, result: `attached ${resume.name}` };
+  }
+
+  async clearFile(ref: string): Promise<boolean> {
+    return within(
+      () =>
+        this.frame.evaluate((sel) => {
+          const input = (document.querySelector<HTMLInputElement>(sel) ??
+            (
+              window as unknown as {
+                __acDeep?: (s: string) => Element | null;
+              }
+            ).__acDeep?.(sel) ??
+            null) as HTMLInputElement | null;
+          if (!input || input.type !== "file") return false;
+          input.value = "";
+          input.files = new DataTransfer().files;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        }, this.boxFor(ref)),
+      READ_MS,
+    ).catch(() => false);
   }
 
   async problems(): Promise<string[]> {
@@ -410,7 +434,7 @@ export abstract class TrustedDriver implements FormDriver {
     return within(
       () =>
         this.frame.evaluate((ref) => {
-          const el = document.querySelector(ref);
+          const el = (document.querySelector(ref) ?? (window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(ref) ?? null);
           if (el?.getAttribute("aria-invalid") !== "true") return null;
           // Its message: the elements it points to as its error or description.
           const said = ["aria-errormessage", "aria-describedby"]

@@ -133,6 +133,27 @@ describe("a company's own page, planned from its labels", () => {
     expect(in2("#a")?.source).toBe("jobops:tailored-pdf");
     expect(in2("#b")?.status).toBe("skip");
     expect(in2("#c")?.status).toBe("needs-you");
+
+    // SmartRecruiters: a profile photo upload first, the resume's own dropzone unlabelled after
+    // it. The photo never gets the resume; the dropzone does.
+    const photo = buildPlan({
+      schema: parseGenericPage(
+        {
+          ...oracle,
+          fields: [
+            field("#avatar", "Upload profile image", "file"),
+            field("#drop", "Choose a file", "file", { required: true }),
+          ],
+        },
+        "Senior Engineer",
+        resumeFacts(fakeDesignResume),
+      ),
+      resume: resumeFacts(fakeDesignResume),
+      bank,
+    });
+    const in3 = (ref: string) => photo.entries.find((e) => e.ref === ref);
+    expect(in3("#avatar")?.status).toBe("skip");
+    expect(in3("#drop")?.source).toBe("jobops:tailored-pdf");
   });
 });
 

@@ -1,6 +1,6 @@
 import { type Response, Router } from "express";
 import { z } from "zod";
-import { MAX_SCREENSHOT, MAX_SNAPSHOT } from "../claude/page-map.js";
+import { MAX_NOTE, MAX_SCREENSHOT, MAX_SNAPSHOT } from "../claude/page-map.js";
 import { TellRejectedError } from "../claude/tell.js";
 import { JobOpsError } from "../jobops/client.js";
 import { NotPlannableError, type PlansService } from "../plan/plans-service.js";
@@ -12,6 +12,8 @@ import { sendError, sendOk } from "./envelope.js";
 const snapshotBody = z.string().min(1).max(MAX_SNAPSHOT);
 /** What the page shows (JPEG, base64), with a closer read you asked for. */
 const screenshotBody = z.string().min(1).max(MAX_SCREENSHOT);
+/** What you told Claude about the page mid-fill. */
+const noteBody = z.string().trim().min(2).max(MAX_NOTE);
 
 const tellBody = z.object({
   ref: z.string().min(1).max(200),
@@ -213,6 +215,7 @@ export function createPlanRoutes(plans: PlansService) {
       // The form's HTML, for Claude's closer read (a field got stuck, or you asked).
       const snapshot = snapshotBody.safeParse(req.body?.snapshot);
       const screenshot = screenshotBody.safeParse(req.body?.screenshot);
+      const note = noteBody.safeParse(req.body?.note);
       try {
         sendOk(
           res,
@@ -222,6 +225,7 @@ export function createPlanRoutes(plans: PlansService) {
             page.data,
             snapshot.success ? snapshot.data : undefined,
             screenshot.success ? screenshot.data : undefined,
+            note.success ? note.data : undefined,
           ),
         );
       } catch (error) {

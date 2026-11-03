@@ -309,6 +309,8 @@ export function createPlans(deps: PlansDeps) {
     earlier: readonly string[],
     snapshot?: string,
     screenshot?: string,
+    /** What you told Claude about this page mid-fill. */
+    note?: string,
   ): Promise<WorkdayPage> {
     const mapper = deps.pageMapper;
     if (!mapper) return page;
@@ -317,6 +319,7 @@ export function createPlans(deps: PlansDeps) {
         earlier,
         ...(snapshot ? { snapshot } : {}),
         ...(snapshot && screenshot ? { screenshot } : {}),
+        ...(note ? { note } : {}),
       })
       .catch(() => null);
     if (!map) {
@@ -329,7 +332,8 @@ export function createPlans(deps: PlansDeps) {
         });
       return page;
     }
-    const merged = mergePageMap(page, map);
+    // Mapped with your instruction: Claude's meanings come before the labels'.
+    const merged = mergePageMap(page, map, { followed: Boolean(note) });
     const filled = merged.fields.filter(
       (f, i) =>
         f.block !== page.fields[i]?.block ||
@@ -339,7 +343,7 @@ export function createPlans(deps: PlansDeps) {
     trace({
       jobId,
       kind: "page-map",
-      message: `Claude ${snapshot ? "read the whole of" : "mapped"} page "${page.step}"${snapshot ? " closely (its HTML)" : ""}: ${filled} of ${page.fields.length} field(s) given a job, meaning or input kind the reader didn't see${map.add.length ? `; add buttons: ${map.add.join(", ")}` : ""}`,
+      message: `Claude ${snapshot ? "read the whole of" : "mapped"} page "${page.step}"${snapshot ? " closely (its HTML)" : ""}${note ? `, as you told it ("${note.slice(0, 120)}")` : ""}: ${filled} of ${page.fields.length} field(s) given a job, meaning or input kind the reader didn't see${map.add.length ? `; add buttons: ${map.add.join(", ")}` : ""}`,
       data: {
         fields: page.fields.length,
         filled,
@@ -588,6 +592,8 @@ export function createPlans(deps: PlansDeps) {
       snapshot?: string,
       /** With it, when you asked: what the page shows now. */
       screenshot?: string,
+      /** What you told Claude about this page ("the resume goes in the Resume box"). */
+      note?: string,
     ): Promise<WorkdayPagePlan> {
       const { job, resume } = await jobAndResume(token, jobId);
       const generic = page.system === "generic";
@@ -599,6 +605,7 @@ export function createPlans(deps: PlansDeps) {
         before.map((p) => p.step),
         snapshot,
         screenshot,
+        note,
       );
       const schema = generic
         ? parseGenericPage(read, job.title, resume, usedBefore(before))

@@ -59,7 +59,7 @@ export interface SiteHelp {
  * iCIMS's dropdowns). "" when nothing tells it apart from a plain field. Runs inside the page.
  */
 export function widgetKind(selector: string): string {
-  const el = document.querySelector(selector);
+  const el = document.querySelector(selector) ?? (window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(selector) ?? null;
   if (!el) return "";
   const PLAIN =
     /^(form-control|form-group|input|field|control|required|valid|invalid|active|focus|focused|open|hidden|visible|ng-.*|is-.*|has-.*|col-.*|row|w-.*|mb-.*|mt-.*|p-.*|m-.*)$/i;
@@ -142,7 +142,7 @@ function fieldHtml(selector: string, limit: number): string {
     el.removeAttribute("data-ac-target");
     el.removeAttribute("data-ac-box");
   }
-  const el = document.querySelector(selector);
+  const el = document.querySelector(selector) ?? (window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(selector) ?? null;
   if (!el) return "";
   el.setAttribute("data-ac-target", "1");
   let box: Element = el;
@@ -318,7 +318,9 @@ export function describeSteps(steps: readonly ActStep[]): string {
 
 /** What a field shows (its value or text); runs inside the page. */
 function shownText(selector: string): string {
-  const el = document.querySelector<HTMLInputElement>(selector);
+  const el =
+    document.querySelector<HTMLInputElement>(selector) ??
+    (((window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(selector) as HTMLInputElement | null | undefined) ?? null);
   if (!el) return "";
   return (el.value ?? el.textContent ?? "").replace(/\s+/g, " ").trim();
 }

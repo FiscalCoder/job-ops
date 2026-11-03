@@ -249,3 +249,59 @@ describe("Zoho Recruit (ePlane): address, country and the phone's country code",
     expect(of("[name=rec-form_9]")).toBe("30 LPA");
   });
 });
+
+describe("you tell Claude what to do on the page (mid-fill)", () => {
+  const photo: WorkdayPage = {
+    system: "generic",
+    step: "/oneclick-ui · Software Engineer",
+    fields: [
+      field("#avatar", "Upload image", "file"),
+      field("#drop", "Choose a file", "file"),
+    ],
+  };
+  const yours: PageMap = {
+    fields: [
+      { ref: "#avatar", meaning: "attachment", section: "none", entry: 0, input: "plain" },
+      { ref: "#drop", meaning: "resume", section: "none", entry: 0, input: "plain" },
+    ],
+    add: [],
+  };
+
+  it("your words go to Claude, first, with the page's HTML", async () => {
+    const create = vi.fn<MessagesApi["create"]>(async () => ({
+      model: "claude-sonnet-5-5",
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: JSON.stringify(yours) }],
+      usage: { input_tokens: 9_000, output_tokens: 200 },
+    }) as unknown as Anthropic.Message);
+    const mapper = createPageMapper({
+      messages: { create },
+      model: "claude-haiku-5-5",
+      deepModel: "claude-sonnet-5-5",
+    });
+    await mapper.map("u1", "", photo, undefined, {
+      snapshot: "<form></form>",
+      note: "the resume goes in the Resume dropzone, not the profile image",
+    });
+    const text = String(create.mock.calls[0]?.[0].messages[0]?.content);
+    expect(text.split("\n")[0]).toContain(
+      'the resume goes in the Resume dropzone, not the profile image',
+    );
+  });
+
+  it("then Claude's meanings come before the labels' (which upload is the resume, too)", () => {
+    const resume = resumeFacts(fakeDesignResume);
+    const plan = (followed: boolean) =>
+      buildPlan({
+        schema: parseGenericPage(mergePageMap(photo, yours, { followed }), "Engineer", resume),
+        resume,
+        bank: new Map(),
+      });
+    const of = (p: ReturnType<typeof plan>, ref: string) => p.entries.find((e) => e.ref === ref);
+    const told = plan(true);
+    expect(of(told, "#avatar")?.status).toBe("skip");
+    expect(of(told, "#drop")?.source).toBe("jobops:tailored-pdf");
+    // Without your word, the first upload is still taken for the resume, as before.
+    expect(of(plan(false), "#avatar")?.source).toBe("jobops:tailored-pdf");
+  });
+});

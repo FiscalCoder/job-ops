@@ -17,7 +17,7 @@ export function trimmedForm(refs: readonly string[], max: number): string {
   refs.forEach((ref, i) => {
     let el: Element | null = null;
     try {
-      el = document.querySelector(ref);
+      el = (document.querySelector(ref) ?? (window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(ref) ?? null);
     } catch {
       el = null;
     }
@@ -25,11 +25,28 @@ export function trimmedForm(refs: readonly string[], max: number): string {
     el.setAttribute("data-aa-field", String(i));
     found.push(el);
   });
+  // A field inside a web component counts as its outermost host on the page.
+  const onPage = (e: Element): Element => {
+    let node = e;
+    for (let root = node.getRootNode(); root instanceof ShadowRoot; root = node.getRootNode())
+      node = root.host;
+    return node;
+  };
+  const placed = found.map(onPage);
   // The smallest element holding every field (the form), else the whole page.
-  let root: Element = found[0]?.parentElement ?? document.body;
-  while (root !== document.body && !found.every((e) => root.contains(e)))
+  let root: Element = placed[0]?.parentElement ?? document.body;
+  while (root !== document.body && !placed.every((e) => root.contains(e)))
     root = root.parentElement ?? document.body;
-  const copy = root.cloneNode(true) as Element;
+  // A copy with each web component's own content (its shadow root) written in, where its
+  // fields are, so Claude reads what's on screen.
+  const flat = (node: Node): Node => {
+    const copy = node.cloneNode(false);
+    const shadow = node instanceof Element ? node.shadowRoot : null;
+    for (const child of [...(shadow?.childNodes ?? []), ...node.childNodes])
+      copy.appendChild(flat(child));
+    return copy;
+  };
+  const copy = flat(root) as Element;
   for (const el of found) el.removeAttribute("data-aa-field");
   for (const gone of copy.querySelectorAll(
     "script, style, link, meta, noscript, template, svg, img, picture, video, canvas, iframe",

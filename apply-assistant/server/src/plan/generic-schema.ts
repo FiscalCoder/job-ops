@@ -26,6 +26,8 @@ const BY_LABEL: readonly [RegExp, string, readonly PageField["kind"][]][] = [
   [/e-?mail/i, "email", ["text"]],
   [/phone|mobile( number)?$|contact number/i, "phone", ["text"]],
   [/cover letter/i, "cover_letter", ["file"]],
+  // A photo of you (SmartRecruiters' "Upload profile image"): never the resume, yours to add.
+  [/photo|picture|profile (image|pic)|avatar|headshot|selfie/i, "attachment", ["file"]],
   [/resume|résumé|\bcv\b|curriculum/i, "resume", ["file"]],
   // Other documents (Oracle shows "Upload Attachment" on every page): never the resume again.
   [
@@ -85,7 +87,7 @@ function canonicalOf(field: PageField): string | undefined {
  * no upload asks for it by name; the rest are other documents, yours to pick.
  */
 function uploadMeanings(fields: readonly PageField[]): (string | undefined)[] {
-  const named = fields.map(canonicalOf);
+  const named = fields.map((f) => yourMeaning(f) ?? canonicalOf(f));
   let resume = named.includes("resume");
   return fields.map((f, i) => {
     if (named[i] || f.kind !== "file") return named[i];
@@ -123,6 +125,10 @@ const MAPPED = new Set([
 export const mappedMeaning = (f: PageField): string | undefined =>
   f.meaning && MAPPED.has(f.meaning) ? f.meaning : undefined;
 
+/** Claude's meaning, when Claude mapped the page with your instruction: it comes first. */
+const yourMeaning = (f: PageField): string | undefined =>
+  f.meaningByYou ? mappedMeaning(f) : undefined;
+
 /**
  * A list where the phone goes is its country code ("(+91)" beside Zoho's Mobile): it takes
  * your country, which finds "India (+91)", as on Workday; the number goes in the box beside it.
@@ -149,7 +155,7 @@ export function parseGenericPage(
     // Claude's page map only where the label alone says nothing.
     const canonical = dialCode(
       f,
-      history.get(f.ref) ?? meanings[i] ?? mappedMeaning(f),
+      history.get(f.ref) ?? yourMeaning(f) ?? meanings[i] ?? mappedMeaning(f),
     );
     const label = f.label.replace(/\*$/, "").trim();
     return {

@@ -153,9 +153,14 @@ const withSnapshot = (prompt: string, snapshot: string) =>
 export interface MapRequest {
   readonly earlier?: readonly string[];
   readonly snapshot?: string;
+  /** What you told Claude about this page mid-fill ("the resume goes in the Resume box"). */
+  readonly note?: string;
   /** With the closer read you asked for: what the page shows now (JPEG, base64). */
   readonly screenshot?: string;
 }
+
+/** The most of your instruction sent. */
+export const MAX_NOTE = 1_000;
 
 /** The most of a screenshot sent (base64 characters). */
 export const MAX_SCREENSHOT = 4_000_000;
@@ -191,8 +196,12 @@ export function createPageMapper(options: {
       const key = `${user} ${signature(host, page)}`;
       const kept = known.get(key);
       const deep = Boolean(request.snapshot);
-      if (kept && !deep) return kept;
-      const prompt = pageMapPrompt(page, request.earlier);
+      if (kept && !deep && !request.note) return kept;
+      // Your instruction first: it overrides what the labels suggest.
+      const told = request.note
+        ? `The person filling this form told you (follow it; it overrides what the labels suggest): "${request.note.slice(0, MAX_NOTE)}"\n`
+        : "";
+      const prompt = `${told}${pageMapPrompt(page, request.earlier)}`;
       const text = deep ? withSnapshot(prompt, request.snapshot ?? "") : prompt;
       const shot =
         deep && request.screenshot && request.screenshot.length <= MAX_SCREENSHOT
@@ -245,7 +254,12 @@ const HEADING = { experience: "Experience", education: "Education" } as const;
  * (tags, date pickers, captchas) go with it as hints; sections Claude saw an Add for are added.
  * What the reader found itself is never changed.
  */
-export function mergePageMap(page: WorkdayPage, map: PageMap): WorkdayPage {
+export function mergePageMap(
+  page: WorkdayPage,
+  map: PageMap,
+  /** Mapped with your instruction: its meanings come before the labels'. */
+  options: { readonly followed?: boolean } = {},
+): WorkdayPage {
   const byRef = new Map(map.fields.map((f) => [f.ref, f]));
   const fields = page.fields.map((field) => {
     const seen = byRef.get(field.ref);
@@ -262,6 +276,9 @@ export function mergePageMap(page: WorkdayPage, map: PageMap): WorkdayPage {
       ...field,
       ...(block ? { block } : {}),
       ...(seen.meaning !== "question" ? { meaning: seen.meaning } : {}),
+      ...(options.followed && seen.meaning !== "question"
+        ? { meaningByYou: true }
+        : {}),
       ...(seen.input !== "plain" ? { widget: seen.input } : {}),
     };
   });

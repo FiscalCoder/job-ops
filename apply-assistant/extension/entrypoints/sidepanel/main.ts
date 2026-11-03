@@ -216,6 +216,7 @@ async function startFill(
             activeRun
               ? activeRun.fixField(seq, how)
               : "The run has ended.",
+          (note) => activeRun?.tellClaude(note) ?? "The run has ended.",
         );
       },
     };
