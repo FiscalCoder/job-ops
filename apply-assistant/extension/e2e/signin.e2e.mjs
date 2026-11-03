@@ -198,16 +198,18 @@ try {
     !(await panel.locator("#run-box").innerText()).includes("Enable Cookies"),
   );
 
+  // Claude's read of a page alongside its fill posts the page too (with its HTML): not counted.
+  const plain = () => posted.filter((p) => typeof p.snapshot !== "string");
   // Signing in sends the whole tab to LinkedIn and back, to the form in a new iframe.
   await inner(form).locator("#linkedin").click();
   await form.waitForURL(CANDIDATE_URL, { timeout: 15_000 });
   await inner(form).locator("#fn").waitFor();
   // The candidate page is planned, a job block added, and planned again.
-  await wait(() => posted.length >= 3, 30_000);
-  const noticed = posted.length >= 3;
+  await wait(() => plain().length >= 3, 30_000);
+  const noticed = plain().length >= 3;
   if (!noticed)
     await panel.locator("#run-box").getByRole("button", { name: "Fill this page" }).click();
-  await wait(() => posted.length >= 3, 30_000);
+  await wait(() => plain().length >= 3, 30_000);
   await done();
   await new Promise((r) => setTimeout(r, 1_000));
   const filled = {
@@ -217,14 +219,14 @@ try {
   };
   check(
     "after signing in, the application in the new iframe is planned and filled",
-    posted.length >= 3 && filled.fn === "Testy" && filled.city === "Chennai",
-    `${posted.length} plans · ${JSON.stringify(filled)}`,
+    plain().length >= 3 && filled.fn === "Testy" && filled.city === "Chennai",
+    `${plain().length} plans · ${JSON.stringify(filled)}`,
   );
   check(
     "a job missing from the site's saved profile gets a block from Add More, filled; the others kept",
     JSON.stringify(filled.jobs) === JSON.stringify(["EduFund", CURRENT_JOB]) &&
-      jobBlocks(posted[1]) === 1 &&
-      jobBlocks(posted[2]) === 2,
+      jobBlocks(plain()[1]) === 1 &&
+      jobBlocks(plain()[2]) === 2,
     JSON.stringify(filled.jobs),
   );
   check("the new page was noticed without pressing Fill this page", noticed);
@@ -232,12 +234,12 @@ try {
   // "Fill this page" still reads the page on screen.
   await inner(form).locator("#city").fill("");
   await panel.locator("#run-box").getByRole("button", { name: "Fill this page" }).click();
-  await wait(() => posted.length >= 4, 20_000);
+  await wait(() => plain().length >= 4, 20_000);
   await done();
   check(
     "Fill this page fills the page on screen again",
-    posted.length >= 4 && (await inner(form).locator("#city").inputValue()) === "Chennai",
-    `${posted.length} plans`,
+    plain().length >= 4 && (await inner(form).locator("#city").inputValue()) === "Chennai",
+    `${plain().length} plans`,
   );
   check("no side panel errors", errors.length === 0, errors.join(" | "));
 } catch (error) {

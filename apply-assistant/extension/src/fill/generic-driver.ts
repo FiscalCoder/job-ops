@@ -3,6 +3,7 @@ import type {
   Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import { bestFound, searchWords } from "./options";
+import { deepFind, ensureLocator, entrySaves } from "./locate";
 import { pickOpenChoice, showsValue, visibleChoices } from "./site-help";
 import type { PlanEntry } from "./supervisor";
 import {
@@ -72,6 +73,21 @@ export interface GenericPage {
   readonly sections: readonly never[];
   /** Sections offering "+ Add …" for an entry ("Education Details"), even with none yet. */
   readonly addable?: readonly string[];
+  /**
+   * Entries the page shows as summaries already (a job or degree it read from your resume,
+   * with an Edit button), not as fields: they count as filled.
+   */
+  readonly cards?: readonly { readonly heading: string; readonly text: string }[];
+  /**
+   * Buttons that show fields kept hidden until clicked: an entry's Edit, a collapsed section.
+   * ref is its mark ([data-ac-reveal="rN"]); collapsed: it says it's closed (aria-expanded).
+   */
+  readonly revealers?: readonly {
+    readonly ref: string;
+    readonly label: string;
+    readonly heading: string;
+    readonly collapsed: boolean;
+  }[];
 }
 
 /** The page's step: where you are and its heading; runs inside the page. */
@@ -496,6 +512,60 @@ export function readGenericPage(): GenericPage {
       if (fields.length >= 200) break;
       consider(el, true);
     }
+  // Buttons that show hidden fields, and entries shown as summaries with an Edit, on the page
+  // and inside web components. Never one that submits, saves, deletes or leaves.
+  const composedParent = (el: Element): Element | null =>
+    el.parentElement ??
+    (el.getRootNode() instanceof ShadowRoot ? (el.getRootNode() as ShadowRoot).host : null);
+  const nameOf = (b: Element) =>
+    (b.getAttribute("aria-label")?.trim() || text(b)).replace(/\s+/g, " ").slice(0, 120);
+  const shownBox = (b: Element) => {
+    const r = b.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+  const headingNear = (el: Element): string => {
+    for (let at: Element | null = el, hops = 0; at && hops < 12; at = composedParent(at), hops++) {
+      const head = at.querySelector?.("h1, h2, h3, h4, [role=heading], [data-test='section-title']");
+      if (head && text(head)) return text(head).slice(0, 80);
+    }
+    return "";
+  };
+  const CONTROLS = "input:not([type=hidden]), select, textarea";
+  const NEVER = /\b(submit|apply|save|send|continue|next|finish|delete|remove|cancel|upload|sign ?in|log ?in|back)\b/i;
+  const REVEAL = /^(edit|change|modify|update|show|expand|view|open|more details|add details)\b/i;
+  const clickable = [document, ...shadowRoots()].flatMap((root) => [
+    ...root.querySelectorAll<HTMLElement>("button, [role=button], a:not([href]), a[href^='#'], summary"),
+  ]);
+  const revealers: { ref: string; label: string; heading: string; collapsed: boolean }[] = [];
+  // Marks already given stay; a new one never takes a number another button has.
+  let nextReveal =
+    Math.max(
+      -1,
+      ...clickable.map((b) => Number(b.getAttribute("data-ac-reveal")?.slice(1) ?? -1)),
+    ) + 1;
+  const cards: { heading: string; text: string }[] = [];
+  for (const b of clickable) {
+    if (revealers.length >= 30 || !shownBox(b) || b.closest("header, nav, footer, #ac-badge")) continue;
+    const label = nameOf(b);
+    const collapsed =
+      b.getAttribute("aria-expanded") === "false" &&
+      !b.hasAttribute("aria-haspopup") &&
+      !/^(combobox|listbox|option)$/.test(b.getAttribute("role") ?? "");
+    if (!label || NEVER.test(label) || (!collapsed && !REVEAL.test(label))) continue;
+    const mark = b.getAttribute("data-ac-reveal") ?? `r${nextReveal++}`;
+    b.setAttribute("data-ac-reveal", mark);
+    revealers.push({ ref: `[data-ac-reveal="${mark}"]`, label, heading: headingNear(b), collapsed });
+    // An entry's Edit: the card around it (no fields in it) is an entry filled already.
+    if (!/^edit\b/i.test(label)) continue;
+    let card: Element | null = composedParent(b);
+    for (let hops = 0; card && hops < 8; hops++) {
+      const words = text(card);
+      if (words.length > 25 || card.querySelector(CONTROLS)) break;
+      card = composedParent(card);
+    }
+    if (card && !card.querySelector(CONTROLS) && text(card).length <= 3_000)
+      cards.push({ heading: headingNear(card), text: `${label} · ${text(card)}`.slice(0, 600) });
+  }
   const heading = [...document.querySelectorAll("h1, h2")]
     .find((h) => (h as HTMLElement).offsetParent !== null)
     ?.textContent?.replace(/\s+/g, " ")
@@ -512,7 +582,13 @@ export function readGenericPage(): GenericPage {
           .filter((b) => b.offsetParent !== null || b.getClientRects().length > 0)
           .map((b) =>
             /^add (?:more |another |new )?(.{3,60})$/i
-              .exec(text(b).replace(/^[^a-z]+/i, ""))?.[1]
+              // An icon button's own name ("Add experience entry") when its text is just "Add".
+              .exec(
+                (/^\W*add\W*$/i.test(text(b)) ? (b.getAttribute("aria-label") ?? "") : text(b)).replace(
+                  /^[^a-z]+/i,
+                  "",
+                ),
+              )?.[1]
               ?.replace(/[()]/g, "")
               .trim(),
           )
@@ -522,6 +598,8 @@ export function readGenericPage(): GenericPage {
           ),
       ),
     ].slice(0, 10),
+    ...(cards.length ? { cards: cards.slice(0, 40) } : {}),
+    ...(revealers.length ? { revealers } : {}),
   };
 }
 
@@ -628,7 +706,19 @@ export function shownValue(selector: string): string {
     return [...(input.files ?? [])].map((f) => f.name).join(", ");
   // A dropdown showing its prompt ("— Make a Selection —") shows nothing picked (as PLACEHOLDER).
   if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") {
-    const said = text(el);
+    // What it shows on screen when its own text is empty: a web component's button shows what
+    // the page puts into its slots (SmartRecruiters' country code: a flag "India" and "+91").
+    const rendered = (node: Node): string => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+      if (!(node instanceof Element)) return "";
+      if (node.tagName === "IMG") return ` ${node.getAttribute("alt") ?? ""} `;
+      const kids =
+        node instanceof HTMLSlotElement
+          ? node.assignedNodes({ flatten: true })
+          : [...(node.shadowRoot?.childNodes ?? node.childNodes)];
+      return kids.map(rendered).join(" ");
+    };
+    const said = text(el) || rendered(el).replace(/\s+/g, " ").replace(/\+ (\d)/g, "+$1").trim();
     return /^[\s—–\-.…]*(make a selection|select( one| an option)?|choose( one| an option)?|please (select|choose)( one)?|none selected|type to search|no \w+ available)[\s—–\-.…]*$/i.test(
       said,
     )
@@ -671,6 +761,8 @@ export function shownValue(selector: string): string {
 }
 
 const FIELD_COUNT_MS = 3_000;
+/** After a button that shows hidden fields: their time to appear. */
+const REVEAL_WAIT_MS = 700;
 
 function fieldCount(frame: Frame): Promise<number> {
   if (frame.detached) return Promise.resolve(0);
@@ -693,8 +785,10 @@ async function formFrame(
 }
 
 /** A field inside a web component (marked "acs…"): found through the page's shadow roots. */
+/** Refs found only inside web components after the page was read (a selector Claude gave). */
+const piercedRefs = new Set<string>();
 export const deep = (ref: string): string =>
-  ref.includes('data-ac-ref="acs') ? `pierce/${ref}` : ref;
+  ref.includes('data-ac-ref="acs') || piercedRefs.has(ref) ? `pierce/${ref}` : ref;
 
 export class GenericDriver extends TrustedDriver {
   readonly system = "generic" as const;
@@ -951,6 +1045,14 @@ export class GenericDriver extends TrustedDriver {
         this.frame.$eval(deep(entry.ref), domKind).catch(() => null);
       let kind = await kindOf();
       if (!kind && (await this.refind(entry))) kind = await kindOf();
+      // Not on the page itself: inside a web component, where Puppeteer's deep lookup finds it.
+      if (!kind && !deep(entry.ref).startsWith("pierce/")) {
+        const inside = await this.frame.$(`pierce/${entry.ref}`).catch(() => null);
+        if (inside) {
+          piercedRefs.add(entry.ref);
+          kind = await kindOf();
+        }
+      }
       if (!kind)
         return {
           ok: false,
@@ -996,10 +1098,18 @@ export class GenericDriver extends TrustedDriver {
       case "combobox":
         return this.combobox(entry, wanted);
       case "custom":
+        // A formatted text editor (a contenteditable box): typed into, not a list.
+        if (entry.widget === "rich-text" || (await this.isEditable(entry.ref)))
+          return this.richText(entry.ref, wanted.join(", "));
         return this.custom(entry, wanted);
       default: {
         const input = await this.frame.$(deep(entry.ref));
         if (!input) return { ok: false, reason: "Field not found on the page" };
+        // Claude's map says it suggests choices as you type (a city, a school): one is picked.
+        if (entry.widget === "autocomplete" || entry.widget === "search") {
+          const picked = await this.combobox(entry, wanted);
+          if (picked.ok) return picked;
+        }
         // Several answers into a box that collects tags (Keka's "Add new skill", or one
         // Claude's page map calls tags): one by one.
         if (
@@ -1418,7 +1528,7 @@ export class GenericDriver extends TrustedDriver {
    */
   private async clearSearch(ref: string): Promise<void> {
     const length = await this.frame
-      .$eval(ref, (el) => {
+      .$eval(deep(ref), (el) => {
         const input = el as HTMLInputElement;
         input.focus();
         return input.value?.length ?? 0;
@@ -1539,6 +1649,79 @@ export class GenericDriver extends TrustedDriver {
     return selectionMatches(await this.readBackRef(ref), choice)
       ? { ok: true, result: how }
       : { ok: false, reason: `"${choice}" wasn't selected` };
+  }
+
+  /** Buttons clicked to show hidden fields, per page ("step|mark"): each once. */
+  private readonly revealed = new Set<string>();
+
+  /**
+   * Clicks the buttons that show hidden fields (an entry's Edit, a collapsed section), each
+   * once per page, on the page or inside a web component. How many it clicked.
+   */
+  async reveal(refs: readonly string[]): Promise<number> {
+    const step = await this.step();
+    let clicked = 0;
+    for (const ref of refs) {
+      const key = `${step}|${ref}`;
+      if (this.revealed.has(key)) continue;
+      this.revealed.add(key);
+      const button = await deepFind(this.frame, ref);
+      if (!button) continue;
+      await button.evaluate((el) => el.scrollIntoView({ block: "center" })).catch(() => undefined);
+      await button
+        .click()
+        .catch(() => button.evaluate((el) => (el as HTMLElement).click()))
+        .catch(() => undefined);
+      clicked++;
+      await sleep(REVEAL_WAIT_MS);
+    }
+    return clicked;
+  }
+
+  /**
+   * Saves the entries open for editing with their own Save (a job or degree opened with Edit
+   * or Add, filled): never the page's main Save or Submit. Their names; none when there's none.
+   */
+  async saveEntries(): Promise<string[]> {
+    await ensureLocator(this.frame);
+    const saves = await this.frame.evaluate(entrySaves).catch(() => [] as [string, string][]);
+    const saved: string[] = [];
+    for (const [mark, name] of saves) {
+      const button = await deepFind(this.frame, mark);
+      if (!button) continue;
+      await button
+        .click()
+        .catch(() => button.evaluate((el) => (el as HTMLElement).click()))
+        .catch(() => undefined);
+      saved.push(name);
+      await sleep(REVEAL_WAIT_MS);
+    }
+    return saved;
+  }
+
+  /** A contenteditable box (a formatted text editor), not a list. */
+  private isEditable(ref: string): Promise<boolean> {
+    return this.frame
+      .$eval(deep(ref), (el) => (el as HTMLElement).isContentEditable)
+      .catch(() => false);
+  }
+
+  /** Types into a formatted text editor: what was there replaced, then its text checked. */
+  private async richText(ref: string, value: string): Promise<FillOutcome> {
+    const box = await this.frame.$(deep(ref));
+    if (!box) return { ok: false, reason: "Field not found on the page" };
+    await box.click();
+    await this.page.keyboard.down("Control");
+    await this.page.keyboard.press("a");
+    await this.page.keyboard.up("Control");
+    await this.page.keyboard.press("Backspace");
+    await this.page.keyboard.sendCharacter(value);
+    await sleep(150);
+    const shown = await box.evaluate((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim());
+    const want = value.replace(/\s+/g, " ").trim();
+    return shown.includes(want.slice(0, 200))
+      ? { ok: true, result: "typed into the editor" }
+      : { ok: false, reason: `The editor shows "${shown.slice(0, 40)}"` };
   }
 
   private async verify(ref: string, expected: string): Promise<FillOutcome> {

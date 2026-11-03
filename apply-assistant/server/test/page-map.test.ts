@@ -305,3 +305,67 @@ describe("you tell Claude what to do on the page (mid-fill)", () => {
     expect(of(plan(false), "#avatar")?.source).toBe("jobops:tailored-pdf");
   });
 });
+
+describe("fields Claude found in the page's HTML that the reader didn't (inside a web component)", () => {
+  const missed: PageMap = {
+    fields: [],
+    add: [],
+    missed: [
+      { selector: "#spl-form-element_10", label: "City", kind: "text", meaning: "location", input: "autocomplete" },
+      // A mark only the HTML sent to Claude has: never a selector for the live page.
+      { selector: "[data-aa-field='3']", label: "Email", kind: "text", meaning: "email", input: "plain" },
+      // The reader has it already (same label, or same selector).
+      { selector: "#fn2", label: "First Name", kind: "text", meaning: "first_name", input: "plain" },
+      { selector: "#fn", label: "Given name", kind: "text", meaning: "first_name", input: "plain" },
+    ],
+  };
+  const merged = mergePageMap(page, missed);
+
+  it("are added with Claude's selector, kind, meaning and input; the reader's fields stay as they were", () => {
+    expect(merged.fields.slice(0, page.fields.length)).toEqual(page.fields);
+    expect(merged.fields.slice(page.fields.length)).toEqual([
+      {
+        ref: "#spl-form-element_10",
+        key: "",
+        label: "City",
+        kind: "text",
+        required: false,
+        options: [],
+        context: "found by Claude in the page's HTML",
+        meaning: "location",
+        widget: "autocomplete",
+      },
+    ]);
+  });
+
+  it("are planned like the reader's (your city goes in)", () => {
+    const schema = parseGenericPage(merged, "Engineer", resumeFacts(fakeDesignResume));
+    expect(schema.fields.some((f) => f.ref === "#spl-form-element_10")).toBe(true);
+  });
+
+  it("a map without them (older ones) adds nothing", () => {
+    expect(mergePageMap(page, { fields: [], add: [] }).fields).toEqual(page.fields);
+  });
+});
+
+describe("fields behind a button (an entry's Edit, a closed section)", () => {
+  const withButtons: WorkdayPage = {
+    ...page,
+    cards: [{ heading: "Experience", text: "Edit experience Lead Acme · Lead Acme 2021" }],
+    revealers: [
+      { ref: '[data-ac-reveal="r0"]', label: "Edit experience Lead Acme", heading: "Experience", collapsed: false },
+      { ref: '[data-ac-reveal="r1"]', label: "Additional questions", heading: "Questions", collapsed: true },
+    ],
+  };
+
+  it("Claude is told the cards and the buttons", () => {
+    const prompt = pageMapPrompt(withButtons);
+    expect(prompt).toContain("Entries shown as cards (filled already):\nExperience | Edit experience Lead Acme");
+    expect(prompt).toContain('[data-ac-reveal="r1"] | Additional questions | Questions | collapsed');
+  });
+
+  it("the buttons Claude picks are marked to click; the others aren't", () => {
+    const merged = mergePageMap(withButtons, { fields: [], add: [], reveal: ['[data-ac-reveal="r1"]'] });
+    expect(merged.revealers?.map((r) => r.reveal ?? false)).toEqual([false, true]);
+  });
+});

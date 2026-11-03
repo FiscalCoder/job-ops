@@ -4,6 +4,8 @@
  * runs in the page's frame, so each is self-contained.
  */
 
+import type { Locator } from "./locate";
+
 /** Why an action was refused (null: allowed), and what to save as a step if it worked. */
 export interface Inspection {
   readonly refused: string | null;
@@ -22,7 +24,10 @@ export function outlineField(
   scale: number,
   limit: number,
 ): string {
-  for (const el of document.querySelectorAll("[data-ac-el], [data-ac-box], [data-ac-target]")) {
+  // The locator (installed first): fields and lists inside web components too.
+  const ac = (window as unknown as { __ac?: Locator }).__ac;
+  const MARKS = "[data-ac-el], [data-ac-box], [data-ac-target]";
+  for (const el of ac ? ac.all(MARKS) : document.querySelectorAll(MARKS)) {
     el.removeAttribute("data-ac-el");
     el.removeAttribute("data-ac-box");
     el.removeAttribute("data-ac-target");
@@ -30,12 +35,14 @@ export function outlineField(
   const target = document.querySelector(selector) ?? (window as unknown as { __acDeep?: (s: string) => Element | null }).__acDeep?.(selector) ?? null;
   if (!target) return "";
   target.setAttribute("data-ac-target", "1");
-  // The field's own area: up from the field until a parent holds another field too.
+  // The field's own area: up from the field until a parent holds another field too (out of
+  // a web component to the component itself, its neighbours' insides counted).
+  const CONTROLS = "input:not([type=hidden]), select, textarea, [role=combobox]";
   const controls = (el: Element) =>
-    el.querySelectorAll("input:not([type=hidden]), select, textarea, [role=combobox]").length;
+    ac ? ac.all(CONTROLS, el).length : el.querySelectorAll(CONTROLS).length;
   let box: Element = target;
   for (let depth = 0; depth < 6; depth++) {
-    const parent: Element | null = box.parentElement;
+    const parent: Element | null = ac ? ac.parent(box) : box.parentElement;
     if (!parent || parent === document.body || parent.outerHTML.length > 8_000) break;
     if (controls(parent) > Math.max(controls(box), 1)) break;
     box = parent;
@@ -113,11 +120,16 @@ export function outlineField(
       lines.push(line(el, ref));
     }
   };
-  add([box, ...box.querySelectorAll(INTERACTIVE)].filter((el) => el.matches(INTERACTIVE)));
-  for (const popup of document.querySelectorAll(POPUPS)) {
-    if (box.contains(popup) || !visible(popup)) continue;
+  add(
+    [box, ...(ac ? ac.all(INTERACTIVE, box) : box.querySelectorAll(INTERACTIVE))].filter((el) =>
+      el.matches(INTERACTIVE),
+    ),
+  );
+  const inside = (outer: Element, el: Element) => outer.contains(el) || !!ac?.contains(outer, el);
+  for (const popup of ac ? ac.all(POPUPS) : document.querySelectorAll(POPUPS)) {
+    if (inside(box, popup) || !visible(popup)) continue;
     lines.push(`Open ${roleOf(popup)} "${nameOf(popup).slice(0, 40)}" box=${boxOf(popup)}:`);
-    add(popup.querySelectorAll(INTERACTIVE));
+    add(ac ? ac.all(INTERACTIVE, popup) : popup.querySelectorAll(INTERACTIVE));
   }
   if (n >= limit) lines.push(`(more elements not listed)`);
   return lines.join("\n");
@@ -137,16 +149,21 @@ export function inspectTarget(
   y: number,
   forbidden: string,
 ): Inspection {
+  // The locator (installed first): what's inside a web component is the field's, not its host's.
+  const ac = (window as unknown as { __ac?: Locator }).__ac;
+  const closest = (from: Element, selector: string) =>
+    from.closest(selector) ?? ac?.closest(from, selector) ?? null;
+  const elRef = `[data-ac-el="${String(refOrX).replace(/["\\]/g, "")}"]`;
   const el =
     mode === "ref"
-      ? document.querySelector(`[data-ac-el="${String(refOrX).replace(/["\\]/g, "")}"]`)
-      : document.elementFromPoint(Number(refOrX), y);
+      ? (document.querySelector(elRef) ?? ac?.one(elRef) ?? null)
+      : (ac?.fromPoint(Number(refOrX), y) ?? document.elementFromPoint(Number(refOrX), y));
   if (!el) return { refused: "Nothing there", learn: null };
-  if (el.closest("#ac-operate-banner, #ac-badge"))
+  if (closest(el, "#ac-operate-banner, #ac-badge"))
     return { refused: "That's Apply Copilot's banner", learn: null };
   const text = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
   const actionable =
-    el.closest("a[href], button, input, [role=button], [role=link], [role=menuitem], [role=option], label") ??
+    closest(el, "a[href], button, input, [role=button], [role=link], [role=menuitem], [role=option], label") ??
     el;
   const input = actionable as HTMLInputElement;
   const opensList =
@@ -170,9 +187,9 @@ export function inspectTarget(
   const href = actionable.getAttribute("href");
   if (actionable.tagName === "A" && href && !/^(#|javascript:)/i.test(href))
     return { refused: "Refused: that link leaves the page", learn: null };
-  const box = document.querySelector("[data-ac-box='1']");
-  const inBox = !!box?.contains(el);
-  const popup = el.closest(
+  const box = document.querySelector("[data-ac-box='1']") ?? ac?.one("[data-ac-box='1']") ?? null;
+  const inBox = !!box && (box.contains(el) || !!ac?.contains(box, el));
+  const popup = closest(el, 
     "[role=listbox], [role=option], [role=menu], [role=menuitem], [role=dialog], [role=grid], [role=tree], [class*='menu' i], [class*='popover' i], [class*='dropdown' i], [class*='picker' i], [class*='calendar' i], [class*='option' i]",
   );
   if (!inBox && !popup) return { refused: "Refused: that's outside this field", learn: null };
@@ -191,7 +208,7 @@ export function inspectTarget(
   ].filter(Boolean);
   const selector = candidates.find((s) => {
     try {
-      const found = box?.querySelectorAll(s) ?? [];
+      const found = box ? (ac ? ac.all(s, box) : [...box.querySelectorAll(s)]) : [];
       return found.length === 1 && found[0] === actionable;
     } catch {
       return false;
@@ -203,14 +220,17 @@ export function inspectTarget(
 /** Typing only into the field (or a search box of a list it opened), never a password. */
 export function focusCheck(forEnter: boolean): string | null {
   // Run in the frame that has the focus (the caller finds it).
-  const el = document.activeElement;
+  // Focus inside a web component: the element itself, not the component.
+  const ac = (window as unknown as { __ac?: Locator }).__ac;
+  const el = ac?.focused() ?? document.activeElement;
+  const closest = (selector: string) => el?.closest(selector) ?? (el && ac?.closest(el, selector)) ?? null;
   if (!el || el === document.body || el.tagName === "IFRAME") return forEnter ? null : "Refused: nothing has focus to type into";
   const input = el as HTMLInputElement;
   if (input.type === "password" || /one-time-code/i.test(input.autocomplete ?? "") || /\botp\b/i.test(input.name ?? ""))
     return "Refused: that's a password or one-time-code field";
   const inField =
-    !!el.closest("[data-ac-box='1']") ||
-    !!el.closest("[role=listbox], [role=menu], [role=dialog], [role=grid], [role=combobox]");
+    !!closest("[data-ac-box='1']") ||
+    !!closest("[role=listbox], [role=menu], [role=dialog], [role=grid], [role=combobox]");
   if (!inField) return "Refused: the focus is outside this field";
   if (!forEnter) return null;
   // Enter in a plain text box submits its form: only where it picks (a combobox, a list).
@@ -220,6 +240,6 @@ export function focusCheck(forEnter: boolean): string | null {
     el.hasAttribute("aria-autocomplete") ||
     el.hasAttribute("aria-expanded") ||
     el.hasAttribute("aria-activedescendant") ||
-    !!el.closest("[role=listbox], [role=menu], [role=grid]");
+    !!closest("[role=listbox], [role=menu], [role=grid]");
   return picks ? null : "Refused: Enter here could submit the form";
 }

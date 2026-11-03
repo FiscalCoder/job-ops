@@ -253,15 +253,17 @@ export function blocksToAdd(
   resume: ResumeFacts,
   /** Sections the page offers an Add for, by name ("Education Details"), even when empty. */
   addable: readonly string[] = [],
+  /** Entries the page shows as cards already (filled from your resume): never added again. */
+  onPage: Readonly<Record<Section, number>> = { experience: 0, education: 0 },
 ): { section: string; count: number }[] {
   const blocks = blocksOf(fields);
   return (["experience", "education"] as const).flatMap((section) => {
     const mine = blocks.filter((b) => b.section === section);
     const first = mine[0];
     const wanted =
-      section === "experience"
+      (section === "experience"
         ? resume.experience.length
-        : resume.education.length;
+        : resume.education.length) - onPage[section];
     // None yet, but the page offers to add one (Keka's empty Education Details).
     const offered = addable.find(
       (name) =>
@@ -278,4 +280,44 @@ export function blocksToAdd(
       },
     ];
   });
+}
+
+/** An entry the page shows as a summary already (a card with an Edit), not as fields. */
+export interface EntryCard {
+  readonly heading: string;
+  readonly text: string;
+}
+
+const squash = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+/**
+ * The jobs and degrees on your resume the page shows as cards already (SmartRecruiters reads
+ * your resume into them): each card's section from its heading or Edit button, and the resume
+ * entry whose company (or school) it names; a card naming none takes the first entry not
+ * taken, so it's never added again. Counts per section, and the entries used.
+ */
+export function cardsOnPage(
+  cards: readonly EntryCard[],
+  resume: ResumeFacts,
+): { used: UsedEntries; count: Record<Section, number> } {
+  const used = { experience: new Set<number>(), education: new Set<number>() };
+  const count: Record<Section, number> = { experience: 0, education: 0 };
+  for (const card of cards) {
+    const section =
+      SECTION_OF.find(([pattern]) => pattern.test(card.heading))?.[1] ??
+      SECTION_OF.find(([pattern]) => pattern.test(card.text.split(" · ")[0] ?? ""))?.[1];
+    if (!section) continue;
+    count[section]++;
+    const words = ` ${squash(card.text)} `;
+    const names =
+      section === "experience"
+        ? resume.experience.map((e) => squash(e.company))
+        : resume.education.map((e) => squash(e.school));
+    const named = names.findIndex(
+      (n, i) => n.length > 1 && !used[section].has(i) && words.includes(` ${n} `),
+    );
+    const index = named >= 0 ? named : names.findIndex((_, i) => !used[section].has(i));
+    if (index >= 0) used[section].add(index);
+  }
+  return { used, count };
 }

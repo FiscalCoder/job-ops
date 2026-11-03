@@ -26,6 +26,17 @@ export function captureDom(maxChars: number): DomCapture {
     /^(id|class|name|type|value|checked|selected|disabled|required|readonly|multiple|for|role|href|placeholder|autocomplete|title|alt|src|tabindex|aria-.*|data-.*)$/;
   const SECRET = /password|one-time-code/i;
 
+  // Web components (open shadow roots, nested too) are marked, to write their insides in.
+  const hosts: Element[] = [];
+  const findHosts = (from: Document | ShadowRoot) => {
+    for (const el of from.querySelectorAll("*"))
+      if (el.shadowRoot) {
+        el.setAttribute("data-ac-sh", String(hosts.length));
+        hosts.push(el);
+        findHosts(el.shadowRoot);
+      }
+  };
+  findHosts(document);
   const live = document.querySelectorAll("input, textarea, select");
   const root = document.documentElement.cloneNode(true) as HTMLElement;
   const copies = root.querySelectorAll("input, textarea, select");
@@ -56,6 +67,31 @@ export function captureDom(maxChars: number): DomCapture {
     }
   }
 
+  // Each component's insides, in a <div data-ac-shadow> inside it, with what its fields hold.
+  const pending = [...root.querySelectorAll("[data-ac-sh]")];
+  for (let at = pending.shift(); at; at = pending.shift()) {
+    const shadow = hosts[Number(at.getAttribute("data-ac-sh"))]?.shadowRoot;
+    if (!shadow) continue;
+    const box = document.createElement("div");
+    box.setAttribute("data-ac-shadow", "");
+    for (const child of shadow.childNodes) box.append(child.cloneNode(true));
+    const fields = shadow.querySelectorAll("input, textarea, select");
+    const copied = box.querySelectorAll("input, textarea, select");
+    for (let i = 0; i < fields.length && i < copied.length; i++) {
+      const from = fields[i] as HTMLInputElement;
+      const to = copied[i] as HTMLElement;
+      if (from.type === "checkbox" || from.type === "radio") {
+        if (from.checked) to.setAttribute("checked", "");
+      } else if (from.type === "file")
+        to.setAttribute("data-ac-files", [...(from.files ?? [])].map((f) => f.name).join(", "));
+      else if (from.tagName === "TEXTAREA") to.textContent = from.value;
+      else if (from.tagName !== "SELECT" && !SECRET.test(from.type ?? "") && !SECRET.test(from.autocomplete ?? ""))
+        to.setAttribute("value", from.value);
+    }
+    at.append(box);
+    pending.push(...box.querySelectorAll("[data-ac-sh]"));
+  }
+  for (const host of hosts) host.removeAttribute("data-ac-sh");
   for (const el of root.querySelectorAll(DROP)) el.remove();
   for (const el of root.querySelectorAll("*")) {
     for (const attr of [...el.attributes]) {

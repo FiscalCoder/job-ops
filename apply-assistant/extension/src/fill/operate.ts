@@ -3,6 +3,7 @@ import type {
   Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import type { OperateRequest, OperateShot, OperateTurn } from "../lib/api";
+import { deepFind, ensureLocator } from "./locate";
 import { focusCheck, type Inspection, inspectTarget, outlineField } from "./operate-page";
 import { sleep } from "./options";
 import { type ActStep, pickOpenChoice, type SiteHelp, showsValue } from "./site-help";
@@ -120,8 +121,10 @@ export async function operateField(
     return box ? { x: box.x, y: box.y, w: box.width, h: box.height } : null;
   };
 
-  const outline = async () =>
-    frame
+  const outline = async () => {
+    // Every frame: the outline and checks see inside web components (the locator).
+    for (const f of page.frames()) if (!f.detached) await ensureLocator(f);
+    return frame
       .evaluate(
         outlineField,
         target.selector,
@@ -131,6 +134,7 @@ export async function operateField(
         OUTLINE_LIMIT,
       )
       .catch((error: unknown) => `(no outline: ${error instanceof Error ? error.message : String(error)})`);
+  };
 
   /** The frame under a point (CSS pixels of the tab), and the point inside it. */
   async function frameAt(x: number, y: number) {
@@ -225,7 +229,9 @@ export async function operateField(
     }
     if (input.action !== "click" && input.action !== "type")
       return { ok: false, text: "action is click, type or pick" };
-    const handle = await frame.$(`[data-ac-el="${ref.replace(/["\\]/g, "")}"]`);
+    const elRef = `[data-ac-el="${ref.replace(/["\\]/g, "")}"]`;
+    // Inside a web component, Puppeteer's own lookup finds nothing: the locator's does.
+    const handle = (await frame.$(elRef)) ?? (await deepFind(frame, elRef));
     if (!handle) return { ok: false, text: `No element ${ref} (take a screenshot for a fresh outline)` };
     const inspection = await frame
       .evaluate(inspectTarget, "ref", ref, 0, FORBIDDEN)

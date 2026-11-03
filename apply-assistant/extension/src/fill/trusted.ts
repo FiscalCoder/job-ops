@@ -5,6 +5,7 @@ import type {
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import { captureDom, type DomCapture, MAX_DOM_CHARS } from "../trace/dom";
 import { MAX_SNAPSHOT, trimmedForm } from "./form-snapshot";
+import { checkControls } from "./locate";
 import { type OperateApi, operateField } from "./operate";
 import { keptNumber, sameNumber, sleep } from "./options";
 import { rescueField, type SiteHelp } from "./site-help";
@@ -125,6 +126,14 @@ export abstract class TrustedDriver implements FormDriver {
       () => this.frame.evaluate(trimmedForm, refs, MAX_SNAPSHOT),
       READ_MS,
     ).catch(() => null);
+  }
+
+  /** Of fields Claude found that the reader didn't (its selectors): the ones really on the page,
+   * each to the mark it's found by from now on. */
+  liveRefs(refs: readonly string[]): Promise<Map<string, string>> {
+    return within(() => checkControls(this.frame, refs), READ_MS).catch(
+      () => new Map<string, string>(),
+    );
   }
 
   /** What the tab shows now (JPEG, base64), for Claude's closer read you asked for; null if none. */

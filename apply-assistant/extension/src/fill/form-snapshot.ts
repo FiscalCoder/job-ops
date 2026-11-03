@@ -11,7 +11,7 @@ export const MAX_SNAPSHOT = 60_000;
 /** Runs in the page (self-contained): the trimmed HTML around these fields. */
 export function trimmedForm(refs: readonly string[], max: number): string {
   const KEEP =
-    /^(id|name|type|placeholder|aria-label|aria-labelledby|aria-expanded|aria-haspopup|aria-required|role|for|value|readonly|disabled|multiple|checked|selected|title|class|data-aa-field|data-automation-id|contenteditable)$/;
+    /^(id|name|type|placeholder|aria-label|aria-labelledby|aria-expanded|aria-haspopup|aria-required|role|for|value|readonly|disabled|multiple|checked|selected|title|class|data-aa-field|data-automation-id|contenteditable|data-test|data-testid|data-qa|data-cy|aria-autocomplete|aria-controls)$/;
   const CHOICE = /^(radio|checkbox|submit|button)$/i;
   const found: Element[] = [];
   refs.forEach((ref, i) => {
@@ -38,12 +38,17 @@ export function trimmedForm(refs: readonly string[], max: number): string {
   while (root !== document.body && !placed.every((e) => root.contains(e)))
     root = root.parentElement ?? document.body;
   // A copy with each web component's own content (its shadow root) written in, where its
-  // fields are, so Claude reads what's on screen.
+  // fields are, so Claude reads what's on screen: inside <shadow-root> in the component, so
+  // Claude knows where one starts (its ids are its own: "host >>> inner" finds them).
   const flat = (node: Node): Node => {
     const copy = node.cloneNode(false);
     const shadow = node instanceof Element ? node.shadowRoot : null;
-    for (const child of [...(shadow?.childNodes ?? []), ...node.childNodes])
-      copy.appendChild(flat(child));
+    if (shadow) {
+      const inside = document.createElement("shadow-root");
+      for (const child of shadow.childNodes) inside.appendChild(flat(child));
+      copy.appendChild(inside);
+    }
+    for (const child of node.childNodes) copy.appendChild(flat(child));
     return copy;
   };
   const copy = flat(root) as Element;

@@ -52,10 +52,31 @@ export const workdayPageSchema = z.object({
         /** Set when Claude mapped the page with your instruction: its meaning comes first. */
         meaningByYou: z.boolean().optional(),
         /** Set by Claude's page map: what kind of input it really is. */
-        widget: z.enum(["tags", "date", "search", "captcha"]).optional(),
+        widget: z
+          .enum(["tags", "date", "search", "captcha", "autocomplete", "phone-country", "rich-text"])
+          .optional(),
       }),
     )
     .max(200),
+  /** Company pages: entries shown as summaries already (a card with an Edit), not as fields. */
+  cards: z
+    .array(z.object({ heading: z.string().max(200), text: z.string().max(600) }))
+    .max(40)
+    .optional(),
+  /** Company pages: buttons that show hidden fields (an entry's Edit, a collapsed section). */
+  revealers: z
+    .array(
+      z.object({
+        ref: z.string().max(60),
+        label: z.string().max(200),
+        heading: z.string().max(200),
+        collapsed: z.boolean(),
+        /** Set by Claude's page map: click it, fields that need filling are behind it. */
+        reveal: z.boolean().optional(),
+      }),
+    )
+    .max(30)
+    .optional(),
   /** My Experience's sections with an Add button, and how many entries each has now. */
   sections: z
     .array(

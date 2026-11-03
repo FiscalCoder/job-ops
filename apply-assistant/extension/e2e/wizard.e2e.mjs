@@ -230,7 +230,9 @@ try {
 
   // You click Next: same address, same heading, new fields.
   await form.locator("#next").click();
-  for (let i = 0; i < 60 && posted.length < 2; i++) await new Promise((r) => setTimeout(r, 250));
+  // Claude's read of a page alongside its fill posts the page too (with its HTML): not a part.
+  const plain = () => posted.filter((p) => typeof p.snapshot !== "string");
+  for (let i = 0; i < 60 && plain().length < 2; i++) await new Promise((r) => setTimeout(r, 250));
   await done();
   const part2 = await form.evaluate(() => ({
     city: document.querySelector("#city").value,
@@ -238,10 +240,10 @@ try {
   }));
   check(
     "the part Next swapped in is noticed, planned and filled",
-    labels(posted[1]) === "City|Have you been employed with Acme previously?" &&
+    labels(plain()[1]) === "City|Have you been employed with Acme previously?" &&
       part2.city === "Chennai" &&
       part2.before === "No",
-    `${labels(posted[1])} · ${JSON.stringify(part2)}`,
+    `${labels(plain()[1])} · ${JSON.stringify(part2)}`,
   );
 
   // "Fill this page" reads the page on screen again and fills it.
@@ -250,13 +252,13 @@ try {
   });
   const refill = panel.locator("#run-box").getByRole("button", { name: "Fill this page" });
   await refill.click();
-  for (let i = 0; i < 60 && posted.length < 3; i++) await new Promise((r) => setTimeout(r, 250));
+  for (let i = 0; i < 60 && plain().length < 3; i++) await new Promise((r) => setTimeout(r, 250));
   await done();
   check(
     "Fill this page beside Pause and Abort reads the page again and fills it",
-    posted.length === 3 &&
+    plain().length === 3 &&
       (await form.evaluate(() => document.querySelector("#city").value)) === "Chennai",
-    `${posted.length} plans`,
+    `${plain().length} plans`,
   );
   check("no side panel errors", errors.length === 0, errors.join(" | "));
 } catch (error) {

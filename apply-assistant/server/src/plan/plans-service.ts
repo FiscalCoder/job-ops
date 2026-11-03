@@ -31,7 +31,12 @@ import {
   type PlanInput,
   summarise,
 } from "./planner.js";
-import { blocksToAdd, type UsedEntries, usedEntries } from "./history-blocks.js";
+import {
+  blocksToAdd,
+  cardsOnPage,
+  type UsedEntries,
+  usedEntries,
+} from "./history-blocks.js";
 import { normalizeQuestion } from "./question-norm.js";
 import { type ResumeFacts, resumeFacts } from "./resume-facts.js";
 import { parseFormSchema } from "./schemas.js";
@@ -48,7 +53,12 @@ import {
  */
 export type WorkdayPagePlan = FillPlan & {
   readonly add: readonly { section: string; count: number }[];
+  /** Company pages: buttons to click first (their marks), the fields that need filling behind them. */
+  readonly reveal?: readonly string[];
 };
+
+/** The most buttons clicked on a page to show hidden fields. */
+const MAX_REVEAL = 6;
 
 /**
  * Builds and stores fill plans. Inputs: the matched Greenhouse posting's stored form, your Job
@@ -607,8 +617,15 @@ export function createPlans(deps: PlansDeps) {
         screenshot,
         note,
       );
+      // Jobs and degrees the page shows as cards already (read from your resume): used, so its
+      // blocks take the others, and never added again.
+      const cards = cardsOnPage(read.cards ?? [], resume);
+      const earlier = usedBefore(before);
       const schema = generic
-        ? parseGenericPage(read, job.title, resume, usedBefore(before))
+        ? parseGenericPage(read, job.title, resume, {
+            experience: new Set([...earlier.experience, ...cards.used.experience]),
+            education: new Set([...earlier.education, ...cards.used.education]),
+          })
         : parseWorkdayPage(read, job.title);
       remember(
         jobId,
@@ -632,7 +649,7 @@ export function createPlans(deps: PlansDeps) {
       const { summary } = plan;
       // Fewer job or degree blocks than on your resume: the site's Add More, then planned again.
       const add = generic
-        ? blocksToAdd(read.fields, resume, read.addable)
+        ? blocksToAdd(read.fields, resume, read.addable, cards.count)
         : entriesToAdd(page, resume);
       trace({
         jobId,
@@ -651,11 +668,19 @@ export function createPlans(deps: PlansDeps) {
           ...(add.length ? { add } : {}),
         },
       });
+      // Fields kept hidden behind a button: the ones Claude's map says, and closed sections.
+      const reveal = generic
+        ? (read.revealers ?? [])
+            .filter((r) => r.reveal || r.collapsed)
+            .map((r) => r.ref)
+            .slice(0, MAX_REVEAL)
+        : [];
       // A date answer in a field that asks for days ("Available To Join (in days)").
       return {
         ...plan,
         entries: generic ? daysForDateAnswers(plan.entries, new Date()) : plan.entries,
         add,
+        ...(reveal.length ? { reveal } : {}),
       };
     },
 

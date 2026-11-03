@@ -12,6 +12,7 @@ import {
   selectionMatches,
   sleep,
 } from "./options";
+import { deepChoices, deepFind } from "./locate";
 import type { PlanEntry } from "./supervisor";
 import type { FillOutcome } from "./trusted";
 
@@ -136,9 +137,13 @@ const OPEN_CHOICES =
  * attribute values. Runs inside the page.
  */
 function fieldHtml(selector: string, limit: number): string {
-  for (const el of document.querySelectorAll(
-    "[data-ac-target], [data-ac-box]",
-  )) {
+  const deepAll =
+    (window as unknown as { __acDeepAll?: (s: string) => Element[] }).__acDeepAll ?? (() => []);
+  // Marks left inside web components are cleared too: one field area at a time.
+  for (const el of [
+    ...document.querySelectorAll("[data-ac-target], [data-ac-box]"),
+    ...deepAll("[data-ac-target], [data-ac-box]"),
+  ]) {
     el.removeAttribute("data-ac-target");
     el.removeAttribute("data-ac-box");
   }
@@ -188,6 +193,12 @@ export async function pickOpenChoice(
       handles.push(option);
       labels.push(label);
     }
+    // None on the page itself: a list open inside a web component, or in a fixed popup.
+    if (!labels.length)
+      for (const { handle, label } of await deepChoices(frame, OPEN_CHOICES)) {
+        handles.push(handle);
+        labels.push(label);
+      }
     // Nothing that matches yet (only other lists' choices, or tags already picked): keep looking.
     const index = bestOption(labels, wanted);
     if (index === null) continue;
@@ -215,6 +226,8 @@ export async function visibleChoices(
       )
       .catch(() => [] as string[]);
     if (labels.length) return [...new Set(labels)];
+    const deep = (await deepChoices(frame, OPEN_CHOICES)).map((c) => c.label);
+    if (deep.length) return [...new Set(deep)];
   } while (Date.now() < deadline);
   return [];
 }
@@ -343,9 +356,12 @@ async function runSteps(
     const value = step.value.split("{value}").join(wanted);
     switch (step.action) {
       case "click": {
-        const element = await frame
-          .$(`[data-ac-box="1"] :is(${value}), [data-ac-box="1"]:is(${value})`)
-          .catch(() => null);
+        const element =
+          (await frame
+            .$(`[data-ac-box="1"] :is(${value}), [data-ac-box="1"]:is(${value})`)
+            .catch(() => null)) ??
+          // Inside a web component (its own box is there too), still only in the field's area.
+          (await deepFind(frame, value, true));
         if (!element) return false;
         const blocked = await element.evaluate(
           (el, pattern) =>

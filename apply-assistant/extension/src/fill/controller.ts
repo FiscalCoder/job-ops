@@ -307,10 +307,12 @@ async function planPagedPage(
   closely: Closely = false,
   /** What you told Claude about this page (with the closer read). */
   note?: string,
+  /** False while the page is being filled: no "Add" clicks of its own (a read alongside). */
+  mayAdd = true,
 ): Promise<PlanEntry[]> {
   if (driver.system === "workday" && FINAL_STEP.test(await driver.step()))
     return [];
-  type PagePlan = { entries: PlanEntry[]; add?: EntriesToAdd[] };
+  type PagePlan = { entries: PlanEntry[]; add?: EntriesToAdd[]; reveal?: string[] };
   const page = await driver.readPage();
   const snapshot = closely
     ? await driver.formSnapshot(page.fields.map((f) => f.ref))
@@ -328,7 +330,31 @@ async function planPagedPage(
         }
       : page,
   )) as PagePlan;
-  if (!plan.add?.length) return plan.entries;
+  // Fields kept behind a button (an entry's Edit, a closed section): shown, then planned again
+  // (each button once per page, so this ends).
+  if (
+    mayAdd &&
+    plan.reveal?.length &&
+    driver instanceof GenericDriver &&
+    (await driver.reveal(plan.reveal)) > 0
+  )
+    return planPagedPage(client, jobId, driver);
+  // Fields Claude found in the HTML that the reader didn't: only those really on the page.
+  const read = new Set(page.fields.map((f) => f.ref));
+  const extra = plan.entries
+    .filter((e) => !read.has(e.ref) && !e.ref.startsWith("[data-ac-ref="))
+    .map((e) => e.ref);
+  if (extra.length && driver instanceof GenericDriver) {
+    const live = await driver.liveRefs(extra);
+    // Each found by the reader's kind of mark from now on (a selector Claude wrote with
+    // "host >>> inner" isn't one the page's own lookups take).
+    plan.entries = plan.entries.flatMap((e) => {
+      if (read.has(e.ref) || e.ref.startsWith("[data-ac-ref=")) return [e];
+      const mark = live.get(e.ref);
+      return mark ? [{ ...e, ref: mark }] : [];
+    });
+  }
+  if (!plan.add?.length || !mayAdd) return plan.entries;
   // My Experience: one entry per job and degree on your resume, then the page is planned again.
   await driver.addEntries(plan.add);
   const again = (await client.planPage(
@@ -370,6 +396,8 @@ export class RunController {
   private readonly autopilot: boolean;
   /** Pages Claude has read closely (by step): once per page, by itself or when you ask. */
   private readonly readClosely = new Set<string>();
+  /** Claude's read of a generic form's page, started with it: its plan, once it's back. */
+  private early: { readonly step: string; readonly entries: PlanEntry[] } | null = null;
   /** How often each step went to Claude by itself: at most MAX_CLAUDE_TRIES (no loops). */
   private readonly escalated = new Map<number, number>();
   /** Claude's budget for this application is spent: no more hand-overs. */
@@ -615,7 +643,10 @@ export class RunController {
       trace,
       page,
     );
-    if (isPaged(driver)) controller.pageStep = await driver.step();
+    if (isPaged(driver)) {
+      controller.pageStep = await driver.step();
+      controller.readAlongside();
+    }
     void controller.snapshot("start");
     void controller.loop();
     return controller;
@@ -804,6 +835,8 @@ export class RunController {
 
   private async loop(): Promise<void> {
     this.clearTimer();
+    // Claude's read of the page came back: taken between fields (never while paused).
+    if (this.early && !this.busy && !this.state.paused && (await this.takeEarly())) return;
     const action = nextAction(this.state);
     this.emit();
     switch (action.kind) {
@@ -840,6 +873,7 @@ export class RunController {
       case "review":
         if (await this.fillTheRest()) return this.loop();
         if (await this.recheck()) return this.loop();
+        if (await this.saveEntries()) return this.loop();
         await this.driver.highlight(
           null,
           this.wizard?.system === "generic"
@@ -1000,6 +1034,30 @@ export class RunController {
    * page marks invalid ("End date must be in the past") are filled once more, plain code first
    * and then Claude, who is told what went wrong. True when it started that.
    */
+  /** Pages whose open entries were saved: once each. */
+  private readonly entriesSaved = new Set<string>();
+
+  /**
+   * At review, once per page: entries opened for editing (with Edit or Add) and filled are
+   * saved with their own Save, so they aren't lost; the page's main Save or Submit stays yours.
+   * True when one was saved (the page is looked at again).
+   */
+  private async saveEntries(): Promise<boolean> {
+    const wizard = this.wizard;
+    const step = this.pageStep;
+    if (!(wizard instanceof GenericDriver) || !step || this.entriesSaved.has(step)) return false;
+    this.entriesSaved.add(step);
+    const saved = await wizard.saveEntries().catch(() => [] as string[]);
+    if (!saved.length) return false;
+    this.trace.event(
+      "decision",
+      `Saved ${saved.length} entr${saved.length === 1 ? "y" : "ies"} with ${saved.length === 1 ? "its" : "their"} own button (${saved.join(", ")}); the page's main Save or Submit is yours`,
+      { data: { saved } },
+    );
+    void this.snapshot("entries saved");
+    return true;
+  }
+
   private async recheck(): Promise<boolean> {
     if (!this.autopilot || this.rechecked || this.state.paused) return false;
     this.rechecked = true;
@@ -1345,6 +1403,8 @@ export class RunController {
     closely: Closely = false,
     /** What you told Claude about this page. */
     note?: string,
+    /** Planned already (Claude's read alongside): these to fill; `all`, the page's whole plan. */
+    preplanned?: { readonly entries: PlanEntry[]; readonly all: PlanEntry[] },
   ): Promise<void> {
     if (!this.wizard || this.closed) return;
     this.clearTimer();
@@ -1354,7 +1414,10 @@ export class RunController {
     this.busy = true;
     this.notice = null;
     this.problems = [];
-    if (step !== this.pageStep) this.leftAlone.clear();
+    if (step !== this.pageStep) {
+      this.leftAlone.clear();
+      this.early = null;
+    }
     this.pageStep = step;
     this.reviewTraced = false;
     this.rechecked = false;
@@ -1373,18 +1436,17 @@ export class RunController {
       paused: this.state.paused && !pausedBefore,
     });
     try {
-      await sleep(PAGE_SETTLE_MS);
-      const planned = await planPagedPage(
-        this.client,
-        this.job.jobId,
-        wizard,
-        closely,
-        note,
-      );
+      if (!preplanned) await sleep(PAGE_SETTLE_MS);
+      const planned =
+        preplanned?.entries ??
+        (await planPagedPage(this.client, this.job.jobId, wizard, closely, note));
       // Uploads you said are wrong stay out (until you leave this page).
       const kept = planned.filter((e) => !this.leftAlone.has(e.ref));
       const entries = choice ? chosen(kept, choice, true) : kept;
-      if (kept.length) this.pageEntries = inFillOrder(kept, true);
+      const whole = preplanned
+        ? preplanned.all.filter((e) => !this.leftAlone.has(e.ref))
+        : kept;
+      if (whole.length) this.pageEntries = inFillOrder(whole, true);
       this.state = begin(entries);
       if (!this.state.paused) this.shownAtPause = null;
       this.claudeTakes(choice);
@@ -1401,6 +1463,9 @@ export class RunController {
         },
       );
       void this.snapshot(`page: ${step}`);
+      // A form no site driver knows: Claude reads the whole page (HTML and a screenshot) while
+      // the obvious fields are filled, and what it sees is taken in between fields.
+      if (!preplanned && !closely) this.readAlongside();
     } catch (error) {
       this.notice = `Couldn't plan the "${step}" page (${errorText(error)}): fill it yourself, then continue.`;
       this.trace.event("error", this.notice, { data: { step } });
@@ -1409,6 +1474,97 @@ export class RunController {
       this.busy = false;
     }
     void this.loop();
+  }
+
+  /**
+   * A form no site driver knows (the generic driver's own page, not the rest of a Greenhouse
+   * form): once per page, Claude reads it alongside the fill. Site drivers' forms get Claude
+   * only when a field gets stuck.
+   */
+  private readAlongside(): void {
+    const wizard = this.wizard;
+    const step = this.pageStep;
+    if (!(wizard instanceof GenericDriver) || !step || this.readClosely.has(step) || this.claudeSpent)
+      return;
+    this.readClosely.add(step);
+    void this.readEarly(step, wizard);
+  }
+
+  /** Claude's read alongside the fill: kept for the next point between fields. */
+  private async readEarly(step: string, wizard: GenericDriver): Promise<void> {
+    this.trace.event(
+      "decision",
+      `Claude reads page "${step}" closely (its HTML and a screenshot) while the fields it's sure of are filled`,
+    );
+    const planned = await planPagedPage(
+      this.client,
+      this.job.jobId,
+      wizard,
+      "html+screenshot",
+      undefined,
+      false,
+    ).catch((error: unknown) => {
+      this.trace.event("error", `Claude's read of the page failed: ${errorText(error)}`);
+      return null;
+    });
+    if (!planned?.length || this.closed || this.pageStep !== step) return;
+    this.early = { step, entries: planned };
+    // At rest (review, waiting for you): taken now; mid-field: right after it.
+    if (!this.busy && !this.state.paused) {
+      this.clearTimer();
+      void this.loop();
+    }
+  }
+
+  /**
+   * Claude's read is back: an upload it says isn't for the file is emptied, and what's new or
+   * different (a field the reader missed, a value it now reads otherwise) is filled; fields
+   * done already the same way stay as they are. False when there's nothing to take.
+   */
+  private async takeEarly(): Promise<boolean> {
+    const early = this.early;
+    this.early = null;
+    if (!early || early.step !== this.pageStep || !this.wizard || this.closed) return false;
+    const done = new Map(
+      this.state.steps
+        .filter((s) => s.state === "done" || s.state === "you-did-it")
+        .map((s) => [s.entry.ref, s]),
+    );
+    for (const s of done.values()) {
+      if (s.entry.type !== "file" || s.state === "you-did-it") continue;
+      const now = early.entries.find((e) => e.ref === s.entry.ref);
+      if (now?.status === "fill" && now.value !== null) continue;
+      const cleared = (await this.driver.clearFile?.(s.entry.ref)) ?? false;
+      this.leftAlone.add(s.entry.ref);
+      this.trace.event(
+        "decision",
+        `Claude's read says "${s.entry.label}" isn't for this file: ${cleared ? "emptied it" : "couldn't empty it"}`,
+        { stepSeq: s.seq, data: { ref: s.entry.ref, cleared } },
+      );
+    }
+    const same = (a: PlanEntry, b: PlanEntry) =>
+      a.status === b.status && JSON.stringify(a.value) === JSON.stringify(b.value);
+    const all = early.entries.filter((e) => !this.leftAlone.has(e.ref));
+    const todo = all.filter((e) => {
+      const before = done.get(e.ref);
+      return !before || (before.state !== "you-did-it" && !same(before.entry, e));
+    });
+    const known = new Set(this.pageEntries.map((e) => e.ref));
+    const added = todo.filter((e) => !known.has(e.ref)).length;
+    // The plan in progress has every one of them, the same: carry on as it is.
+    const inProgress = (e: PlanEntry) =>
+      this.state.steps.some((s) => s.entry.ref === e.ref && s.state !== "done" && same(s.entry, e));
+    if (!added && todo.every(inProgress)) {
+      this.trace.event("page-map", "Claude's read of the page is back: it agrees with the plan in progress");
+      return false;
+    }
+    this.trace.event(
+      "page-map",
+      `Claude's read of the page is back: ${todo.length} field(s) to fill or fix${added ? `, ${added} the reader missed` : ""}`,
+      { data: { todo: todo.length, added, refs: todo.map((e) => e.ref).slice(0, 40) } },
+    );
+    await this.nextPage(early.step, undefined, false, undefined, { entries: todo, all });
+    return true;
   }
 
   private currentSeq() {

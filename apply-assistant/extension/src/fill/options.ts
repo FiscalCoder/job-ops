@@ -1,3 +1,5 @@
+import { bestCountryOption, showsCountry } from "./countries";
+
 /** Timing and option matching that every driver (and site help) shares. */
 
 export const OPTION_WAIT_MS = 5_000;
@@ -81,7 +83,8 @@ export function bestOption(
         a.rank - b.rank ||
         (labels[a.index]?.length ?? 0) - (labels[b.index]?.length ?? 0),
     );
-  return ranked[0]?.index ?? null;
+  // Nothing words it the same: the same country another way ("+91" or "IN +91" for "India").
+  return ranked[0]?.index ?? bestCountryOption(labels, wanted);
 }
 
 /** Words that don't change what a choice means ("Bachelor of Science" = "Bachelors Science"). */
@@ -137,5 +140,11 @@ export function selectionMatches(shown: string, picked: string): boolean {
   const b = picked.trim().toLowerCase();
   // Nothing shown means nothing was chosen (e.g. text typed but the menu never closed).
   if (!a) return false;
-  return a === b || containsWords(b, a) || containsWords(a, b);
+  return (
+    a === b ||
+    containsWords(b, a) ||
+    containsWords(a, b) ||
+    // A phone field's country picker shows "+91" or "IN" for "India".
+    showsCountry(shown, picked)
+  );
 }

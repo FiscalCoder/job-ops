@@ -576,3 +576,37 @@ describe("Keka's form (Zono)", () => {
     expect(daysForDateAnswers([entry], new Date(2026, 11, 1))[0]?.value).toBe("0");
   });
 });
+
+describe("entries the page shows as cards already (SmartRecruiters reads your resume into them)", () => {
+  it("count as filled: no Add for them, and their jobs aren't given to a blank block", async () => {
+    const { blocksToAdd, cardsOnPage } = await import("../src/plan/history-blocks.js");
+    const resume = resumeFacts(fakeDesignResume);
+    const cards = cardsOnPage(
+      [
+        { heading: "Experience", text: "Edit experience Designer Beta · Designer Beta 2019 - 2021" },
+        { heading: "Experience", text: "Edit experience Lead Acme · Lead Acme 2021 - Present" },
+        { heading: "Education", text: "Edit education · Some Institute of Technology 2015" },
+      ],
+      resume,
+    );
+    expect(cards.count).toEqual({ experience: 2, education: 1 });
+    expect([...cards.used.experience].sort()).toEqual([0, 1]);
+    expect([...cards.used.education]).toEqual([0]);
+    // A blank job form opened beside the cards: nothing more to add.
+    expect(blocksToAdd(jobBlock("o1", 1), resume, [], cards.count)).toEqual([]);
+    // Without the cards (as before): one more job was added.
+    expect(blocksToAdd(jobBlock("o1", 1), resume)).toEqual([
+      { section: "Professional Experience", count: 1 },
+    ]);
+  });
+
+  it("a card that names no job on your resume takes the first not taken", async () => {
+    const { cardsOnPage } = await import("../src/plan/history-blocks.js");
+    const resume = resumeFacts(fakeDesignResume);
+    const cards = cardsOnPage(
+      [{ heading: "Work history", text: "Edit · Something Else 2020" }],
+      resume,
+    );
+    expect([...cards.used.experience]).toEqual([0]);
+  });
+});

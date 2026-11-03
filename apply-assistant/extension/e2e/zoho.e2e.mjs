@@ -219,11 +219,11 @@ try {
   );
   const closer = posted.find((p) => typeof p.snapshot === "string");
   check(
-    "a stuck field: Claude reads the page's HTML (fields marked, nothing you typed), planned again",
+    // Claude's read alongside the fill (HTML with a screenshot) is the page's closer read now.
+    "Claude reads the page's HTML (fields marked, nothing you typed in it) and the field it fixes is right",
     Boolean(closer) &&
       closer.snapshot.includes('data-aa-field="0"') &&
       !closer.snapshot.includes("Testy") &&
-      !("screenshot" in closer) &&
       (await value("[name=rec-form_4]")) === "30",
     `${posted.length} plans; notice ${await value("[name=rec-form_4]")}`,
   );
