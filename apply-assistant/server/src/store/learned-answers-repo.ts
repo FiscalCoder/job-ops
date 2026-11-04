@@ -3,7 +3,7 @@ import { currentUser } from "./owner.js";
 
 /** Answers you gave to form questions, keyed by the normalised question (question-norm.ts). */
 
-export type LearnedHow = "edited" | "typed";
+export type LearnedHow = "edited" | "typed" | "accepted";
 
 export interface LearnedAnswer {
   readonly id: number;
@@ -12,7 +12,10 @@ export interface LearnedAnswer {
   readonly label: string;
   readonly fieldType: string;
   readonly value: string | readonly string[];
-  /** Edited in the side panel, or typed on the page yourself ("I'll do it"). */
+  /**
+   * Edited in the side panel, typed on the page yourself ("I'll do it"), or Claude's choice
+   * left as it was in an application you submitted.
+   */
   readonly how: LearnedHow;
   readonly lastJobId: string | null;
   readonly updatedAt: string;
@@ -46,7 +49,8 @@ export function createLearnedAnswersRepo(db: DatabaseSync) {
      values (?, ?, ?, ?, ?, ?, ?)
      on conflict(user_id, question_norm) do update set label = excluded.label, field_type = excluded.field_type,
        answer_json = excluded.answer_json, how = excluded.how, last_job_id = excluded.last_job_id,
-       updated_at = datetime('now')`,
+       updated_at = datetime('now')
+     where excluded.how <> 'accepted' or learned_answers.how = 'accepted'`,
   );
   const byNorm = db.prepare(
     "select * from learned_answers where user_id = ? and question_norm = ?",
@@ -77,6 +81,7 @@ export function createLearnedAnswersRepo(db: DatabaseSync) {
         input.how,
         input.jobId,
       );
+      // An answer you gave yourself is never replaced by one of Claude's you kept.
       return toAnswer(byNorm.get(user, input.questionNorm) as unknown as Row);
     },
     get(questionNorm: string): LearnedAnswer | null {

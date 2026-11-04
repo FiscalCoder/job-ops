@@ -178,6 +178,14 @@ export async function showKit(
 
   const groups = kit.groups.map((group) => {
     const rows = group.items.map(itemRow);
+    // Each job's parts: closed until you open the one you're pasting.
+    if (group.collapsed)
+      return el(
+        "details",
+        { class: "kit-group" },
+        el("summary", {}, group.name),
+        ...rows,
+      );
     if (group.items.some((i) => i.sensitive))
       return el(
         "details",

@@ -1,20 +1,42 @@
-import {
-  type Browser,
-  connect,
-  ExtensionTransport,
-  type Page,
+import type {
+  Browser,
+  Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import type { ApplyClient, QueueItem } from "../lib/api";
-import { samePosting } from "../lib/tab-match";
 import { isWorkdayApply } from "../track/job-match";
 import { errorText, TraceRecorder } from "../trace/recorder";
 import { setSupervised, trackTab } from "../track/tabs";
 import { attachDriver, formUrlFor, resumeFirst } from "./drivers";
+import { GenericDriver } from "./generic-driver";
+import { KeptAnswers } from "./kept-answers";
+import {
+  chosen,
+  describeChoice,
+  FINAL_STEP,
+  helpPicking,
+  isPaged,
+  learnable,
+  type Closely,
+  type PageChoice,
+  type PagedDriver,
+  planPagedPage,
+  siteHelp,
+  toLogEntry,
+} from "./run-page";
+import {
+  type Attached,
+  allowedHost,
+  attachTab,
+  DETACHED,
+  openForm,
+  release,
+  waitForTabSettled,
+} from "./run-tab";
 import { decisionEvent, pageCapture, watchPage } from "./run-trace";
+import { recipeHost, unlearn } from "./site-help";
 import {
   changedSince,
   type FillFrom,
-  maskValue,
   type NextAction,
   nextAction,
   type PlanEntry,
@@ -22,9 +44,6 @@ import {
   type RunState,
   reduce,
   type Step,
-  onlyField,
-  onlySection,
-  startingFrom,
   startRun,
 } from "./supervisor";
 import {
@@ -35,26 +54,11 @@ import {
   sleep,
   TrustedDriver,
 } from "./trusted";
-import { GenericDriver } from "./generic-driver";
-import {
-  labelKey,
-  recipeHost,
-  type SiteHelp,
-  type SiteRecipe,
-} from "./site-help";
-import {
-  type Chooser,
-  type EntriesToAdd,
-  WorkdayDriver,
-} from "./workday-driver";
+import { WorkdayDriver } from "./workday-driver";
 
-/** The saved steps' name for a kind of widget (any field of it, on any site). */
-const WIDGET_LABEL = "Any field of this kind";
-
-/** A form filled page by page as you reach each page: Workday, or any company's own site. */
-type PagedDriver = WorkdayDriver | GenericDriver;
-const isPaged = (driver: FormDriver): driver is PagedDriver =>
-  driver instanceof WorkdayDriver || driver instanceof GenericDriver;
+// Kept importable from here, where they used to live.
+export { allowedHost, openForm, waitForTabSettled } from "./run-tab";
+export { learnable } from "./run-page";
 
 /**
  * Runs one supervised application from the side panel: opens the posting, drives the
@@ -69,6 +73,8 @@ export interface RunView {
   readonly busy: boolean;
   readonly notice: string | null;
   readonly problems: readonly string[];
+  /** Filled fields worth a look before you submit ("Notice period: Claude was unsure (40%)…"). */
+  readonly checks: readonly string[];
   /**
    * Filled page by page (Workday, any company's site): the page being filled, whether it's the
    * last (Workday's Review), and which kind of site.
@@ -89,107 +95,7 @@ const inFillOrder = (entries: readonly PlanEntry[], resumeFirst: boolean) =>
 const REVIEW_POLL_MS = 2_000;
 /** A fill still busy after this long is a stall: the trace gets a snapshot. */
 const STALL_MS = 20_000;
-const TAB_LOAD_TIMEOUT_MS = 30_000;
 const DONE_STATES = new Set(["done", "skipped", "you-did-it"]);
-
-function waitForTabLoad(tabId: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
-      reject(new Error("The posting took too long to load"));
-    }, TAB_LOAD_TIMEOUT_MS);
-    const listener = (id: number, info: { status?: string }) => {
-      if (id === tabId && info.status === "complete") {
-        clearTimeout(timer);
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
-    };
-    chrome.tabs.onUpdated.addListener(listener);
-  });
-}
-
-/** A careers page may send you on (to the job's own page) right after loading. */
-const REDIRECT_SETTLE_MS = 1_500;
-const MAX_REDIRECTS = 3;
-
-/** Waits for the tab's load and any redirect right after it. */
-export async function waitForTabSettled(tabId: number): Promise<void> {
-  for (let i = 0; i < MAX_REDIRECTS; i++) {
-    await new Promise((resolve) => setTimeout(resolve, REDIRECT_SETTLE_MS));
-    const tab = await chrome.tabs.get(tabId).catch(() => null);
-    if (tab?.status !== "loading") return;
-    await waitForTabLoad(tabId);
-  }
-}
-
-/**
- * The tab to fill: a new one on the form, or the tab you're on (moved to the form only when
- * it shows something else, so nothing you already typed there is reloaded away).
- */
-export async function openForm(
-  url: string,
-  tabId?: number,
-): Promise<chrome.tabs.Tab> {
-  if (tabId === undefined) {
-    const tab = await chrome.tabs.create({ url, active: true });
-    if (tab.id !== undefined) {
-      await waitForTabLoad(tab.id);
-      await waitForTabSettled(tab.id);
-    }
-    return tab;
-  }
-  const current = await chrome.tabs.get(tabId);
-  if (current.url && samePosting(current.url, url)) {
-    if (current.status !== "complete") await waitForTabLoad(tabId);
-    return (await chrome.tabs.update(tabId, { active: true })) ?? current;
-  }
-  const loading = waitForTabLoad(tabId);
-  const moved = await chrome.tabs.update(tabId, { url, active: true });
-  await loading;
-  await waitForTabSettled(tabId);
-  return moved ?? current;
-}
-
-/**
- * Lets go of the form's tab. Puppeteer detaches Chrome's debugger without handling errors, so
- * on a tab you already closed it logged "No tab with given id"; Chrome detaches by itself then.
- */
-async function release(browser: Browser, tabId: number): Promise<void> {
-  await setSupervised(tabId, false);
-  const open = await chrome.tabs.get(tabId).then(
-    () => true,
-    () => false,
-  );
-  if (open) await browser.disconnect().catch(() => {});
-}
-
-/** Puppeteer's error for a frame the page replaced (it navigated) while being read. */
-const DETACHED = /detached frame/i;
-
-interface Attached {
-  readonly browser: Browser;
-  readonly page: Page | undefined;
-  readonly driver: FormDriver | null;
-}
-
-/** Connects to the tab and finds the form; lets go of the tab if that fails. */
-async function attachTab(
-  tabId: number,
-  attach: (page: Page) => Promise<FormDriver | null>,
-): Promise<Attached> {
-  const browser = await connect({
-    transport: await ExtensionTransport.connectTab(tabId),
-    defaultViewport: null,
-  });
-  try {
-    const [page] = await browser.pages();
-    return { browser, page, driver: page ? await attach(page) : null };
-  } catch (error) {
-    await release(browser, tabId);
-    throw error;
-  }
-}
 
 interface StartOptions {
   readonly client: ApplyClient;
@@ -226,152 +132,11 @@ const REDRAWN =
   /cannot find context|execution context was destroyed|detached frame|node is detached|target closed/i;
 const REDRAW_SETTLE_MS = 800;
 
-/** Workday's last page: nothing to fill, you check everything and submit. */
-const FINAL_STEP = /^review$/i;
 /** Workday swaps a page's content in place: give the new one a moment to finish. */
 const PAGE_SETTLE_MS = 1_500;
 
-/** The server's plan for the page on screen (none on Workday's final Review page). */
 /** Claude works a field by itself at most this often: a first try, then one with its result. */
 const MAX_CLAUDE_TRIES = 2;
-
-/**
- * A driver's help with lists: Claude's pick among a list's choices when none is worded like
- * your answer, and broader words to search a list for when your answer's own find nothing.
- */
-function helpPicking(
-  driver: WorkdayDriver | GenericDriver,
-  client: ApplyClient,
-  jobId: string,
-): void {
-  driver.chooser = chooserFor(client, jobId);
-  driver.searchTerms = async (label, wanted) =>
-    (await client.searchTerms(jobId, { label, wanted })).terms ?? [];
-}
-
-/** Claude picks among a list's choices when none is worded like your answer. */
-function chooserFor(client: ApplyClient, jobId: string): Chooser {
-  return async (label, wanted, choices) => {
-    const answer = await client
-      .choose(jobId, { label, wanted, options: choices })
-      .catch(() => null);
-    const value = answer?.value;
-    return (typeof value === "string" ? value : value?.[0]) ?? null;
-  };
-}
-
-/**
- * Filling the page again: from a field you chose, only one section of it, or only one field
- * ("Fix a field": filled again, or by Claude with what you said was wrong).
- */
-type PageChoice =
-  | { readonly kind: "from"; readonly from: FillFrom }
-  | { readonly kind: "only"; readonly section: string }
-  | {
-      readonly kind: "field";
-      readonly field: FillFrom;
-      /** Claude works it on the page, told this (what was wrong); absent, filled again as usual. */
-      readonly claude?: string;
-    };
-
-function chosen(
-  entries: readonly PlanEntry[],
-  choice: PageChoice,
-  resumeFirst: boolean,
-): PlanEntry[] {
-  if (choice.kind === "field")
-    return onlyField(entries, choice.field, resumeFirst);
-  return choice.kind === "from"
-    ? startingFrom(entries, choice.from, resumeFirst)
-    : onlySection(entries, choice.section, resumeFirst);
-}
-
-const describeChoice = (choice: PageChoice) =>
-  choice.kind === "from"
-    ? `from "${choice.from.label}"`
-    : choice.kind === "only"
-      ? `only "${choice.section}"`
-      : `only the field "${choice.field.label}"${choice.claude !== undefined ? ", by Claude" : ""}`;
-
-/** Claude's closer read of a page: its HTML; when you asked, a screenshot too. */
-type Closely = false | "html" | "html+screenshot";
-
-/**
- * The server's plan for the page on screen. `closely`: the form's HTML goes too (and when you
- * asked, a screenshot), for Claude's closer read of the page.
- */
-async function planPagedPage(
-  client: ApplyClient,
-  jobId: string,
-  driver: PagedDriver,
-  closely: Closely = false,
-  /** What you told Claude about this page (with the closer read). */
-  note?: string,
-  /** False while the page is being filled: no "Add" clicks of its own (a read alongside). */
-  mayAdd = true,
-): Promise<PlanEntry[]> {
-  if (driver.system === "workday" && FINAL_STEP.test(await driver.step()))
-    return [];
-  type PagePlan = { entries: PlanEntry[]; add?: EntriesToAdd[]; reveal?: string[] };
-  const page = await driver.readPage();
-  const snapshot = closely
-    ? await driver.formSnapshot(page.fields.map((f) => f.ref))
-    : null;
-  const screenshot =
-    snapshot && closely === "html+screenshot" ? await driver.pageShot() : null;
-  const plan = (await client.planPage(
-    jobId,
-    snapshot
-      ? {
-          ...page,
-          snapshot,
-          ...(screenshot ? { screenshot } : {}),
-          ...(note ? { note } : {}),
-        }
-      : page,
-  )) as PagePlan;
-  // Fields kept behind a button (an entry's Edit, a closed section): shown, then planned again
-  // (each button once per page, so this ends).
-  if (
-    mayAdd &&
-    plan.reveal?.length &&
-    driver instanceof GenericDriver &&
-    (await driver.reveal(plan.reveal)) > 0
-  )
-    return planPagedPage(client, jobId, driver);
-  // Fields Claude found in the HTML that the reader didn't: only those really on the page.
-  const read = new Set(page.fields.map((f) => f.ref));
-  const extra = plan.entries
-    .filter((e) => !read.has(e.ref) && !e.ref.startsWith("[data-ac-ref="))
-    .map((e) => e.ref);
-  if (extra.length && driver instanceof GenericDriver) {
-    const live = await driver.liveRefs(extra);
-    // Each found by the reader's kind of mark from now on (a selector Claude wrote with
-    // "host >>> inner" isn't one the page's own lookups take).
-    plan.entries = plan.entries.flatMap((e) => {
-      if (read.has(e.ref) || e.ref.startsWith("[data-ac-ref=")) return [e];
-      const mark = live.get(e.ref);
-      return mark ? [{ ...e, ref: mark }] : [];
-    });
-  }
-  if (!plan.add?.length || !mayAdd) return plan.entries;
-  // My Experience: one entry per job and degree on your resume, then the page is planned again.
-  await driver.addEntries(plan.add);
-  const again = (await client.planPage(
-    jobId,
-    await driver.readPage(),
-  )) as PagePlan;
-  return again.entries;
-}
-
-/** Only the job's own site and Greenhouse; anything else pauses the run. */
-export function allowedHost(host: string, startHost: string): boolean {
-  return (
-    host === startHost ||
-    host === "greenhouse.io" ||
-    host.endsWith(".greenhouse.io")
-  );
-}
 
 export class RunController {
   private state: RunState;
@@ -380,6 +145,8 @@ export class RunController {
   private problems: string[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
   private logged = new Set<number>();
+  /** Claude's choices still showing as you review: remembered once you submit. */
+  private readonly keptAnswers = new KeptAnswers();
   private resume: ResumeFile | null = null;
   private closed = false;
 
@@ -660,6 +427,9 @@ export class RunController {
       busy: this.busy,
       notice: this.notice,
       problems: this.problems,
+      checks: this.state.steps
+        .filter((s) => s.state === "done" && s.entry.check)
+        .map((s) => `${s.entry.label}: ${s.entry.check}`),
       page: this.wizard
         ? {
             step: this.pageStep,
@@ -1029,11 +799,6 @@ export class RunController {
     return true;
   }
 
-  /**
-   * Autopilot, once per page at review: fields filled earlier that are empty again or that the
-   * page marks invalid ("End date must be in the past") are filled once more, plain code first
-   * and then Claude, who is told what went wrong. True when it started that.
-   */
   /** Pages whose open entries were saved: once each. */
   private readonly entriesSaved = new Set<string>();
 
@@ -1058,8 +823,13 @@ export class RunController {
     return true;
   }
 
+  /**
+   * Once per page at review, in every run: fields filled earlier that are empty again or that
+   * the page marks invalid ("End date must be in the past") are filled once more, plain code
+   * first and then Claude, who is told what went wrong. True when it started that.
+   */
   private async recheck(): Promise<boolean> {
-    if (!this.autopilot || this.rechecked || this.state.paused) return false;
+    if (this.rechecked || this.state.paused) return false;
     this.rechecked = true;
     const wrong: { step: Step; why: string }[] = [];
     for (const step of this.state.steps) {
@@ -1077,9 +847,11 @@ export class RunController {
       if (why) wrong.push({ step, why });
     }
     if (!wrong.length) return false;
+    const help = this.driver instanceof TrustedDriver ? this.driver.help : null;
+    for (const { step } of wrong) await unlearn(help, step.entry.label, step.result);
     this.trace.event(
       "recheck",
-      `Autopilot fills ${wrong.length} field(s) again: ${wrong.map((w) => `${w.step.entry.label} (${w.why})`).join("; ").slice(0, 400)}`,
+      `Filling ${wrong.length} field(s) again: ${wrong.map((w) => `${w.step.entry.label} (${w.why})`).join("; ").slice(0, 400)}`,
       { data: { fields: wrong.map((w) => ({ seq: w.step.seq, why: w.why })) } },
     );
     await this.logFinishedSteps();
@@ -1828,6 +1600,9 @@ export class RunController {
       void this.loop();
       return;
     }
+    await this.keptAnswers.note(this.state.steps, (entry) =>
+      this.driver.readBack(entry),
+    );
     const moved = await this.movedTo();
     if (moved) return this.nextPage(moved);
     this.timer = setTimeout(() => void this.checkSubmitted(), REVIEW_POLL_MS);
@@ -1848,6 +1623,14 @@ export class RunController {
     await this.snapshot(outcome === "submitted" ? "submitted" : "stopped");
     // The whole trail reaches the server before the run is marked finished there.
     await this.trace.flush();
+    if (outcome === "submitted" && this.keptAnswers.size) {
+      const kept = await this.keptAnswers.remember(this.client, this.job.jobId);
+      this.trace.event(
+        "learned",
+        `Remembered ${kept} of Claude's answers you kept, for the next form asking the same`,
+        { data: { kept } },
+      );
+    }
     try {
       await this.logFinishedSteps();
       await this.client.completeRun(this.runId, outcome);
@@ -1878,85 +1661,4 @@ export class RunController {
   async stop(): Promise<void> {
     if (!this.closed) this.dispatch({ type: "abort" });
   }
-}
-
-/** Answers from the bank, your resume or Job Ops are fixed at their source, not learned. */
-const FIXED_SOURCE = /^(bank:|resume:|jobops:|rule:)/;
-
-/** Your edit or own answer to a form question, worth reusing on the next form. */
-export function learnable(step: Step): boolean {
-  const { entry } = step;
-  const yours =
-    (step.decision === "edited" && step.state === "done") ||
-    step.decision === "you-did-it";
-  return (
-    yours &&
-    entry.type !== "file" &&
-    entry.actionClass !== "protected" &&
-    entry.section !== "demographic" &&
-    entry.section !== "compliance" &&
-    !FIXED_SOURCE.test(entry.source)
-  );
-}
-
-function toLogEntry(step: Step) {
-  return {
-    seq: step.seq,
-    actionClass: step.entry.actionClass,
-    fieldRef: step.entry.ref,
-    valueMasked: maskValue(step.value),
-    source: step.entry.source,
-    decision: step.decision ?? "approved",
-    decidedBy: step.decidedBy ?? "you",
-    result: step.result ?? step.state,
-  };
-}
-
-/** This site's saved steps and Claude, for fields a driver can't fill by itself. */
-async function siteHelp(
-  client: ApplyClient,
-  jobId: string,
-  host: string,
-): Promise<SiteHelp> {
-  const saved = await client.recipes(host).catch(() => []);
-  const recipes = new Map(saved.map((r) => [r.labelKey, r]));
-  // A kind of widget's steps are kept like a site's, under "widget.<kind>" (any site).
-  const widgets = new Map<string, Promise<SiteRecipe | null>>();
-  const widgetHost = (kind: string) => `widget.${kind}`;
-  return {
-    recipes,
-    widget: (kind) => {
-      let found = widgets.get(kind);
-      if (!found) {
-        found = client
-          .recipes(widgetHost(kind))
-          .then((list) => list.find((r) => r.labelKey === labelKey(WIDGET_LABEL)) ?? null)
-          .catch(() => null);
-        widgets.set(kind, found);
-      }
-      return found;
-    },
-    recordWidget: async (kind, steps, ok) => {
-      widgets.delete(kind);
-      await client.recordRecipe({
-        host: widgetHost(kind),
-        label: WIDGET_LABEL,
-        steps,
-        ok,
-        jobId,
-      });
-    },
-    act: async (ask) => (await client.act(jobId, ask)).steps,
-    record: async (label, steps, ok) => {
-      await client.recordRecipe({ host, label, steps, ok, jobId });
-      const key = labelKey(label);
-      const before = recipes.get(key);
-      recipes.set(key, {
-        labelKey: key,
-        steps: ok ? steps : (before?.steps ?? steps),
-        worked: (before?.worked ?? 0) + (ok ? 1 : 0),
-        failed: (before?.failed ?? 0) + (ok ? 0 : 1),
-      });
-    },
-  };
 }

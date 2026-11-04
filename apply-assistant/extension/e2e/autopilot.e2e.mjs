@@ -397,7 +397,14 @@ try {
   );
 
   // 2. No Apply wording: Claude picks "Join us"; the form is filled, its search dropdown too.
-  const applied = panel.locator("#run-box").getByRole("button", { name: "I applied" });
+  // "I applied" takes a second click (a stray one never marks a job applied).
+  const appliedButton = panel.locator("#run-box").getByRole("button", { name: "I applied" });
+  const applied = {
+    click: async () => {
+      await appliedButton.click();
+      await panel.locator("#run-box").getByRole("button", { name: "Click again: applied" }).click();
+    },
+  };
   // The page is filled when the run asks you to check it ("I applied" shows all along).
   const reviewing = () =>
     panel.locator("#run-box").getByText("Check this page", { exact: false }).waitFor({ timeout: 90_000 });
@@ -477,7 +484,7 @@ try {
       await new Promise((r) => setTimeout(r, 250));
     return trail.map((e) => e.message).join(" | ");
   };
-  const said = await heard(/Autopilot fills/);
+  const said = await heard(/Filling \d+ field\(s\) again/);
   check(
     "a missing job entry is added with Add another and filled; the current job's box ticked",
     JSON.stringify(ghShown?.companies) === '["Athenahealth","EduFund"]' &&
@@ -497,8 +504,8 @@ try {
   );
   check(
     "a field the page cleared after it was filled is filled again once the page is done",
-    ghShown?.city === "Chennai" && /fills 1 field\(s\) again: City/.test(said),
-    `${ghShown?.city} · ${said.match(/Autopilot fills[^|]*/)?.[0] ?? "no recheck"}`,
+    ghShown?.city === "Chennai" && /Filling 1 field\(s\) again: City/.test(said),
+    `${ghShown?.city} · ${said.match(/Filling \d+ field\(s\) again[^|]*/)?.[0] ?? "no recheck"}`,
   );
   // Fill only one section: the page read again (Fill this page), then "Only this section".
   await panel.locator("#run-box").getByRole("button", { name: "Fill this page" }).click();

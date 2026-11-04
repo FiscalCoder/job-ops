@@ -187,6 +187,8 @@ export interface Kit {
   readonly groups: readonly {
     readonly name: string;
     readonly items: readonly KitItem[];
+    /** Shown closed until opened (each job's parts). */
+    readonly collapsed?: boolean;
   }[];
 }
 
@@ -465,7 +467,7 @@ export class ApplyClient implements TraceApi {
     label: string;
     type: string;
     value: string | readonly string[];
-    how: "edited" | "typed";
+    how: "edited" | "typed" | "accepted";
   }): Promise<unknown> {
     return this.request("/learned", answer);
   }

@@ -22,6 +22,8 @@ export interface PlanEntry {
   readonly reason?: string;
   /** A searched list without your answer: what else to search for, in order ("Other"). */
   readonly alternatives?: readonly string[];
+  /** Filled, but worth a look at review (Claude was unsure). */
+  readonly check?: string;
   /** The page's heading for the group it sits in ("Professional Experience (2)"). */
   readonly group?: string;
   /** What kind of input it really is, from Claude's page map (tags, a date picker…). */

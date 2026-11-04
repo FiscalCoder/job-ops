@@ -43,6 +43,42 @@ function button(
   return b;
 }
 
+/** A click arms "I applied"; a second click within this time ends the run as applied. */
+const CONFIRM_APPLIED_MS = 4_000;
+/** Kept across redraws (the panel is drawn again on every change while it fills). */
+let appliedArmedUntil = 0;
+
+/**
+ * "I applied" / "I submitted it": two clicks, so a click meant for a button that just moved
+ * (the panel redrawn as a field finishes) never marks the job applied.
+ */
+function appliedButton(
+  label: string,
+  send: (event: RunEvent) => void,
+  primary = false,
+): HTMLButtonElement {
+  const armedLabel = "Click again: applied";
+  const armed = () => Date.now() < appliedArmedUntil;
+  const b = button(
+    armed() ? armedLabel : label,
+    () => {
+      if (armed()) {
+        appliedArmedUntil = 0;
+        send({ type: "submitted" });
+        return;
+      }
+      appliedArmedUntil = Date.now() + CONFIRM_APPLIED_MS;
+      b.textContent = armedLabel;
+      setTimeout(() => {
+        if (!armed()) b.textContent = label;
+      }, CONFIRM_APPLIED_MS);
+    },
+    primary,
+  );
+  b.title = "Ends the run and marks the job Applied in Job Ops";
+  return b;
+}
+
 const valueText = (value: Step["value"]) =>
   value === null
     ? ""
@@ -525,7 +561,7 @@ export function renderRun(
           action.kind === "review" &&
             !(view.page && (view.busy || !view.page.last))
             ? null
-            : button("I applied", () => send({ type: "submitted" })),
+            : appliedButton("I applied", send),
         ),
   );
 
@@ -576,7 +612,7 @@ export function renderRun(
       el(
         "div",
         { class: "controls" },
-        button("I submitted it", () => send({ type: "submitted" }), true),
+        appliedButton("I submitted it", send, true),
       ),
     );
   if (action.kind === "finished")
@@ -609,6 +645,14 @@ export function renderRun(
     ...view.problems.map((p) =>
       el("p", { class: "error" }, `On the page: ${p}`),
     ),
+    action.kind === "review" && view.checks.length
+      ? el(
+          "div",
+          { class: "muted" },
+          el("strong", {}, "Worth a look before you submit"),
+          el("ul", {}, ...view.checks.map((c) => el("li", {}, c))),
+        )
+      : null,
     body,
     finished.length
       ? el(

@@ -12,6 +12,8 @@ import { usedEntries } from "../src/plan/history-blocks.js";
 import { buildPlan } from "../src/plan/planner.js";
 import { resumeFacts } from "../src/plan/resume-facts.js";
 import { parseWorkdayPage, type WorkdayPage } from "../src/plan/workday-schema.js";
+import { openStore } from "../src/store/db.js";
+import { createPageMapsRepo } from "../src/store/page-maps-repo.js";
 import { fakeDesignResume } from "./fixtures/fake-resume.js";
 
 /**
@@ -114,6 +116,29 @@ describe("asking Claude for the map", () => {
     expect(create).toHaveBeenCalledTimes(1);
     expect(usage).toHaveBeenCalledTimes(1);
     expect(pageMapPrompt(page).split("\n")).toContain("#q7 | text | Field 7 | #q7 | placeholder: you@example.com");
+  });
+
+  it("a map kept in the database is used after a restart, without asking again", async () => {
+    const db = openStore(":memory:");
+    const store = createPageMapsRepo(db);
+    const create = vi.fn<MessagesApi["create"]>(async () => reply);
+    await createPageMapper({ messages: { create }, model: "claude-haiku-5-5", store }).map("u1", "", page);
+    // A new server: a new mapper with nothing in memory.
+    const restarted = createPageMapper({ messages: { create }, model: "claude-haiku-5-5", store });
+    expect(await restarted.map("u1", "", page)).toEqual(map);
+    expect(create).toHaveBeenCalledTimes(1);
+    // Another user's same layout is theirs to map.
+    await restarted.map("u2", "", page);
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("a kept map that no longer fits the reply's shape is asked for again", async () => {
+    const create = vi.fn<MessagesApi["create"]>(async () => reply);
+    const store = { get: () => ({ fields: "old shape" }), set: vi.fn() };
+    const mapper = createPageMapper({ messages: { create }, model: "claude-haiku-5-5", store });
+    expect(await mapper.map("u1", "", page)).toEqual(map);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(store.set).toHaveBeenCalledOnce();
   });
 
   it("an answer it can't use: no map (the page reader alone)", async () => {

@@ -19,6 +19,7 @@ import { createCompanyLimitsRepo } from "../store/company-limits-repo.js";
 import { createSiteRecipesRepo } from "../store/site-recipes-repo.js";
 import { createNavigator } from "../claude/navigate.js";
 import { createPageMapper } from "../claude/page-map.js";
+import { createPageMapsRepo } from "../store/page-maps-repo.js";
 import { createOperator } from "../claude/operate.js";
 import { savedAnswersForPrompt } from "../claude/questions.js";
 import { createNavigateRoutes } from "./navigate-routes.js";
@@ -173,6 +174,7 @@ export function createApp({
           messages: access.messages,
           model: claude.mapModel,
           deepModel: claude.draftModel,
+          store: createPageMapsRepo(db),
         })
       : null;
   const learned = createLearnedAnswersRepo(db);

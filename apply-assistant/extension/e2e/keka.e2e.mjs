@@ -27,6 +27,9 @@ const FORM = String.raw`<!doctype html><html><head><title>Keka</title></head><bo
 <div class="col-sm-12"><label class="font-large font-weight-bold"> Experience Details </label>
   <div id="experienceDetails"></div>
   <div><a class="kh-link" id="add-exp">+ Add Experience Details</a></div></div>
+<div class="form-group"><label for="tech">Type to add Skills</label>
+  <div id="tech-chips"></div><input type="text" class="form-control" id="tech" autocomplete="off" value="">
+  <ul role="listbox" id="tech-list" hidden></ul></div>
 <div class="form-group"><label for="captcha">Captcha</label><input id="captcha" name="captcha"></div>
 </form>
 <script>
@@ -59,6 +62,29 @@ skills.addEventListener("keydown", (e) => {
   tags++;
   skills.value = "";
 });
+// Mastercard's skills box: Enter does nothing; a tag is made only by clicking a suggestion,
+// which shows a moment after you type (and only for skills on its list).
+const tech = document.getElementById("tech");
+const techList = document.getElementById("tech-list");
+const KNOWN = ["Node.js", "Docker", "Docker Compose", "Kubernetes"];
+let lookup = null;
+tech.addEventListener("input", () => {
+  clearTimeout(lookup);
+  techList.hidden = true;
+  lookup = setTimeout(() => {
+    const typed = tech.value.trim().toLowerCase();
+    const found = typed ? KNOWN.filter((k) => k.toLowerCase().includes(typed)) : [];
+    techList.innerHTML = found.map((k) => '<li role="option">' + k + "</li>").join("");
+    techList.hidden = !found.length;
+  }, 300);
+});
+techList.addEventListener("click", (e) => {
+  const li = e.target.closest("li");
+  if (!li) return;
+  document.getElementById("tech-chips").insertAdjacentHTML("beforeend", '<span class="pill">' + li.textContent + "</span>");
+  tech.value = "";
+  techList.hidden = true;
+});
 </script></body></html>`;
 
 const COMPANIES = { "Experience Details-0": "Athenahealth", "Experience Details-1": "EduFund" };
@@ -76,6 +102,7 @@ function plan(page) {
     if (f.label === "Email") return { value: "testy@example.com" };
     if (f.label.startsWith("Available To Join")) return { value: "20" };
     if (f.label === "Skills") return { value: "Node.js, Docker, Redis" };
+    if (f.label === "Type to add Skills") return { value: "Node.js, Docker, Redis", widget: "tags" };
     if (f.label === "Company Name") return { value: COMPANIES[block] ?? null };
     if (f.label === "Job Title") return { value: block === "Experience Details-0" ? "Senior Member of Technical Staff" : "Product Engineer 2" };
     // As the planner gives a job's month.
@@ -106,6 +133,7 @@ function plan(page) {
         value: p.value,
         optionValues: null,
         source: "bank:stub",
+        ...(p.widget ? { widget: p.widget } : {}),
         ...(f.block ? { group: f.block.heading } : {}),
       };
     }),
@@ -185,6 +213,8 @@ try {
     skills: [...document.querySelectorAll("input[name^='skills[']")].map((i) => i.value),
     left: document.getElementById("skills").value,
     days: document.getElementById("availability").value,
+    tech: [...document.querySelectorAll("#tech-chips .pill")].map((p) => p.textContent),
+    techLeft: document.getElementById("tech").value,
   }));
   const first = posted[0];
   check(
@@ -209,6 +239,11 @@ try {
     "skills go in one at a time with Enter, each a tag",
     JSON.stringify(shown.skills) === '["Node.js","Docker","Redis"]' && shown.left === "",
     JSON.stringify({ skills: shown.skills, left: shown.left }),
+  );
+  check(
+    "a tag box that ignores Enter gets its tags from its own suggestions; ones it doesn't list are left out",
+    JSON.stringify(shown.tech) === '["Node.js","Docker"]' && shown.techLeft === "",
+    JSON.stringify({ tech: shown.tech, left: shown.techLeft }),
   );
   check("days to join typed as a number", shown.days === "20", shown.days);
   check(

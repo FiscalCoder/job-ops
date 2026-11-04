@@ -230,13 +230,29 @@ function signature(host: string, page: WorkdayPage): string {
     .digest("hex");
 }
 
+/** Where maps are kept between restarts (by layout key). */
+export interface PageMapStore {
+  get(key: string): unknown;
+  set(key: string, map: PageMap): void;
+}
+
 export function createPageMapper(options: {
   readonly messages: MessagesApi;
   readonly model: string;
   /** The closer read's model (a field got stuck); the usual one when not set. */
   readonly deepModel?: string;
+  /** Keeps maps across restarts and deploys; in memory only without it. */
+  readonly store?: PageMapStore;
 }) {
   const known = new Map<string, PageMap>();
+  // A kept map that no longer fits the reply's shape is asked for again.
+  const stored = (key: string): PageMap | null => {
+    const raw = options.store?.get(key);
+    const parsed = raw === undefined || raw === null ? null : reply.safeParse(raw);
+    if (!parsed?.success) return null;
+    known.set(key, parsed.data);
+    return parsed.data;
+  };
   return {
     /**
      * The page's map (remembered per user, site and layout); null when Claude can't say. A
@@ -251,7 +267,7 @@ export function createPageMapper(options: {
     ): Promise<PageMap | null> {
       if (!page.fields.length || page.fields.length > MAX_FIELDS) return null;
       const key = `${user} ${signature(host, page)}`;
-      const kept = known.get(key);
+      const kept = known.get(key) ?? stored(key);
       const deep = Boolean(request.snapshot);
       if (kept && !deep && !request.note) return kept;
       // Your instruction first: it overrides what the labels suggest.
@@ -295,6 +311,11 @@ ${text}` },
       const parsed = reply.safeParse(JSON.parse(replyText(message)));
       if (!parsed.success) return null;
       known.set(key, parsed.data);
+      try {
+        options.store?.set(key, parsed.data);
+      } catch {
+        // Not kept past a restart; this run still has it.
+      }
       return parsed.data;
     },
   };

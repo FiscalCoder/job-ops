@@ -334,6 +334,12 @@ export const MIGRATIONS: readonly string[] = [
      until text not null,
      primary key (user_id, keyword)
    );`,
+  // Claude's map of a page layout (the key names the user and layout), kept across restarts.
+  `create table page_maps (
+     cache_key text primary key,
+     map_json text not null,
+     created_at text not null default (datetime('now'))
+   );`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

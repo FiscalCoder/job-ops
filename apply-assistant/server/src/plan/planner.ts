@@ -39,6 +39,8 @@ export interface PlanEntry {
   readonly widget?: FormField["widget"];
   /** A searched list without your answer: what else to search for, in order ("Other"). */
   readonly alternatives?: readonly string[];
+  /** Filled, but worth a look at review (Claude was unsure). */
+  readonly check?: string;
 }
 
 export interface PlanSummary {
@@ -83,6 +85,8 @@ interface Resolved {
   readonly option?: { label: string; value: string };
   /** Overrides the field's class (a Claude answer that points to a protected saved answer). */
   readonly actionClass?: ActionClass;
+  /** Filled, but worth a look at review (Claude was unsure). */
+  readonly check?: string;
 }
 
 const DEGREE_LABEL: Record<DegreeLevel, string> = {
@@ -612,11 +616,19 @@ function resolveRule(
   }
 }
 
-/** Below this, Claude's answer is shown as a suggestion and the field waits for you. */
+/** Below this, Claude's answer is still filled, and listed at review for you to check. */
 const MIN_CONFIDENCE = 0.5;
 const percent = (confidence: number) => `${Math.round(confidence * 100)}%`;
+const unsure = (confidence: number, what: string) =>
+  `Claude was unsure (${percent(confidence)}) about ${what}`;
 const shortModel = (model: string) =>
   model.replace(/^claude-/, "").replace(/-\d.*$/, "");
+
+const LEARNED_HOW = {
+  typed: "typed this answer",
+  edited: "gave this answer",
+  accepted: "kept Claude's answer in an application you submitted",
+} as const;
 
 /** Your remembered answer, when it still fits this form's choices. */
 function fromLearned(
@@ -638,7 +650,7 @@ function fromLearned(
   const when = learned.updatedAt.slice(0, 10);
   return {
     value: field.type === "multiselect" ? values : values.join(", "),
-    source: `learned: you ${learned.how === "typed" ? "typed" : "gave"} this answer on ${when}`,
+    source: `learned: you ${LEARNED_HOW[learned.how]} on ${when}`,
   };
 }
 
@@ -676,21 +688,23 @@ function resolveClaude(
         ...resolved,
         source: `${by} → bank:${answer.key} (${percent(answer.confidence)})`,
         actionClass: isProtectedKey(answer.key) ? "protected" : "confirm",
+        ...(answer.confidence < MIN_CONFIDENCE
+          ? { check: unsure(answer.confidence, `your saved ${answer.key}`) }
+          : {}),
       };
     }
     case "answer": {
-      const shown = Array.isArray(answer.value)
-        ? answer.value.join(", ")
-        : answer.value;
-      return answer.confidence < MIN_CONFIDENCE
-        ? missing(
-            by,
-            `Claude's unsure guess (${percent(answer.confidence)}): ${shown}. ${answer.why}`,
-          )
-        : {
-            value: answer.value,
-            source: `${by} (${percent(answer.confidence)}): ${answer.why}`,
-          };
+      const shown =
+        typeof answer.value === "string"
+          ? answer.value
+          : answer.value.join(", ");
+      return {
+        value: answer.value,
+        source: `${by} (${percent(answer.confidence)}): ${answer.why}`,
+        ...(answer.confidence < MIN_CONFIDENCE
+          ? { check: unsure(answer.confidence, shown) }
+          : {}),
+      };
     }
     case "draft":
       return { value: answer.value, source: `${by} draft` };
@@ -878,6 +892,7 @@ function planField(
     ...(typed.reason ? { reason: typed.reason } : {}),
     ...(resolved.bankKey ? { bankKey: resolved.bankKey } : {}),
     ...(typed.alternatives ? { alternatives: typed.alternatives } : {}),
+    ...(resolved.check && status === "fill" ? { check: resolved.check } : {}),
   };
 }
 

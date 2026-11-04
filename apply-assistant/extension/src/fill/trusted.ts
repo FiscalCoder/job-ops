@@ -427,9 +427,62 @@ export abstract class TrustedDriver implements FormDriver {
               opacityProperty: true,
             }),
         );
+        // Required fields still empty, whether or not the plan knew them (one that appeared
+        // late). Comboboxes are left out: their typing box is empty even with a pick shown.
+        const shown = (el: HTMLElement) =>
+          el.offsetWidth > 1 &&
+          el.checkVisibility({ visibilityProperty: true, opacityProperty: true });
+        const labelOf = (el: HTMLElement) =>
+          (
+            (el.id &&
+              document.querySelector(`label[for="${CSS.escape(el.id)}"]`)
+                ?.textContent) ||
+            el.getAttribute("aria-label") ||
+            el.closest("label")?.textContent ||
+            (el.getAttribute("aria-labelledby") ?? "")
+              .split(/\s+/)
+              .map((id) => (id && document.getElementById(id)?.textContent) || "")
+              .join(" ") ||
+            el.getAttribute("placeholder") ||
+            ""
+          )
+            .replace(/[*\s]+/g, " ")
+            .trim()
+            .slice(0, 80);
+        const radios = new Set<string>();
+        const empty: string[] = [];
+        for (const el of document.querySelectorAll<
+          HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+        >(
+          ':is(input, select, textarea):is([required], [aria-required="true"])',
+        )) {
+          const input = el as HTMLInputElement;
+          if (
+            el.disabled ||
+            ["hidden", "file", "submit", "button"].includes(input.type) ||
+            el.getAttribute("role") === "combobox" ||
+            el.hasAttribute("aria-autocomplete") ||
+            !shown(el)
+          )
+            continue;
+          if (input.type === "radio") {
+            if (radios.has(input.name)) continue;
+            radios.add(input.name);
+            if (
+              document.querySelector(
+                `input[type="radio"][name="${CSS.escape(input.name)}"]:checked`,
+              )
+            )
+              continue;
+          } else if (input.type === "checkbox" ? input.checked : el.value.trim())
+            continue;
+          const label = labelOf(el);
+          if (label) empty.push(`Required and still empty: ${label}`);
+        }
+        const found = [...errors, ...empty.slice(0, 8)];
         return challenge
-          ? [...errors, "CAPTCHA on the page: solve it there"]
-          : errors;
+          ? [...found, "CAPTCHA on the page: solve it there"]
+          : found;
       }, this.errorSelector),
       READ_MS,
     ).catch(() => []);

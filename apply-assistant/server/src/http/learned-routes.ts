@@ -22,7 +22,7 @@ const learnBody = z.object({
     z.string().trim().min(1).max(2_000),
     z.array(z.string().trim().min(1).max(300)).min(1).max(30),
   ]),
-  how: z.enum(["edited", "typed"]),
+  how: z.enum(["edited", "typed", "accepted"]),
 });
 
 export interface LearnedRoutesDeps {
@@ -78,7 +78,7 @@ export function createLearnedRoutes(deps: LearnedRoutesDeps) {
     trace({
       jobId,
       kind: "learned",
-      message: `Remembered your answer to "${label.slice(0, 100)}"`,
+      message: `Remembered ${how === "accepted" ? "Claude's answer you kept" : "your answer"} to "${label.slice(0, 100)}"`,
       data: { questionNorm: saved.questionNorm, how },
     });
     refreshPlans(tokenOf(req));

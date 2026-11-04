@@ -291,7 +291,7 @@ describe("buildPlan with Claude's answers", () => {
     });
   });
 
-  it("shows an unsure guess as a suggestion and waits for you", () => {
+  it("fills an unsure guess and lists it for you to check at review", () => {
     const built = plan(
       new Map([
         [
@@ -307,8 +307,9 @@ describe("buildPlan with Claude's answers", () => {
       ]),
     );
     expect(entry(built, SELECT)).toMatchObject({
-      status: "needs-you",
-      reason: expect.stringContaining("unsure guess (30%): Yes"),
+      status: "fill",
+      value: "Yes",
+      check: "Claude was unsure (30%) about Yes",
     });
   });
 

@@ -177,8 +177,9 @@ function fieldHtml(selector: string, limit: number): string {
 export async function pickOpenChoice(
   frame: Frame,
   wanted: string,
+  waitMs: number = OPTION_WAIT_MS,
 ): Promise<string | null> {
-  const deadline = Date.now() + OPTION_WAIT_MS;
+  const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     await sleep(POLL_MS * 2);
     const handles: ElementHandle[] = [];
@@ -306,11 +307,28 @@ export async function rescueField(
   };
 }
 
+/** Results of a fill made with saved or Claude's steps (what `rescueField` returns). */
+const BY_STEPS = /saved steps|steps that worked|Claude's steps/;
+
+/**
+ * A field filled with saved or Claude's steps didn't hold (empty again, or invalid at review):
+ * its recipe counts a failure, so a bad one stops being used. Nothing when no steps filled it.
+ */
+export async function unlearn(
+  help: SiteHelp | null,
+  label: string,
+  result: string | undefined,
+): Promise<void> {
+  if (!help || !result || !BY_STEPS.test(result)) return;
+  const recipe = help.recipes.get(labelKey(label));
+  if (recipe) await help.record(label, recipe.steps, false).catch(() => {});
+}
+
 /**
  * The choice the steps picked by name (a "pick" without "{value}"), when the field now shows
  * it; else null.
  */
-async function pickedInstead(
+export async function pickedInstead(
   target: RescueTarget,
   steps: readonly ActStep[],
 ): Promise<string | null> {
@@ -318,6 +336,10 @@ async function pickedInstead(
     .filter((s) => s.action === "pick" && !s.value.includes("{value}"))
     .at(-1)?.value;
   if (!named) return null;
+  // Typed as it's named: a text box shows it whether or not a choice was clicked (Mastercard's
+  // skills box still holding "Bash"), so that's no pick.
+  const same = (a: string) => a.trim().toLowerCase() === named.trim().toLowerCase();
+  if (steps.some((s) => s.action === "type" && same(s.value))) return null;
   return selectionMatches(await target.readBack(), named) ? named : null;
 }
 

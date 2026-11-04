@@ -69,7 +69,10 @@ describe("buildKit", () => {
       "You",
       "Links",
       "Work and location",
+      "Experience 1: Senior Engineer · Acme",
+      "Experience 2: Engineer · Beta",
       "Education",
+      "Skills",
       "This job",
       "Sensitive",
     ]);
@@ -140,6 +143,28 @@ describe("buildKit", () => {
         label: "Authorised to work in India?",
         value: "Yes",
       },
+    ]);
+  });
+
+  it("gives each job's parts on their own to paste, the role description among them, closed until opened", () => {
+    const kit = buildKit(input());
+    const current = group(kit, "Experience 1: Senior Engineer · Acme");
+    expect(current?.collapsed).toBe(true);
+    expect(current?.items.map((i) => [i.label, i.value])).toEqual([
+      ["Job title", "Senior Engineer"],
+      ["Company", "Acme"],
+      ["Location", "Remote"],
+      ["Dates", "Sep 2023 – Present"],
+      ["From", "Sep 2023"],
+      ["To", "Present"],
+      ["Role description", "Built things"],
+    ]);
+    expect(
+      group(kit, "Experience 2: Engineer · Beta")?.items.find((i) => i.label === "Dates")?.value,
+    ).toBe("Jan 2020 – Aug 2023");
+    expect(group(kit, "Skills")?.items).toEqual([
+      { key: "resume:skills", label: "All skills", value: "React, TypeScript" },
+      { key: "resume:skills.0", label: "Frontend", value: "React, TypeScript" },
     ]);
   });
 

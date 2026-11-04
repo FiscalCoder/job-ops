@@ -1,6 +1,6 @@
 import { BANK_KEYS } from "../bank/catalogue.js";
 import type { FillPlan } from "../plan/planner.js";
-import type { ResumeFacts } from "../plan/resume-facts.js";
+import type { ExperienceFact, ResumeFacts } from "../plan/resume-facts.js";
 
 /**
  * The apply kit: every answer a person needs to fill an application by hand, grouped for the
@@ -20,6 +20,8 @@ export interface KitItem {
 export interface KitGroup {
   readonly name: string;
   readonly items: readonly KitItem[];
+  /** Shown closed until opened (each job's parts). */
+  readonly collapsed?: boolean;
 }
 
 export interface KitJob {
@@ -165,6 +167,69 @@ function educationGroup({ resume }: KitInput): KitGroup {
   };
 }
 
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;
+
+/** "Sep 2023", or the year alone when the month isn't known. */
+const monthName = (point: ExperienceFact["start"]) =>
+  point
+    ? point.month
+      ? `${MONTH_NAMES[point.month - 1]} ${point.year}`
+      : String(point.year)
+    : null;
+
+const period = (job: ExperienceFact) => {
+  const from = monthName(job.start);
+  const to = job.current ? "Present" : monthName(job.end);
+  return from || to ? `${from ?? "?"} – ${to ?? "?"}` : null;
+};
+
+/**
+ * One group per job on the resume the job's PDF was made from, in the resume's order: each
+ * part on its own, to paste into a site's own experience boxes (the role description most of
+ * all).
+ */
+function experienceGroups({ resume }: KitInput): KitGroup[] {
+  return resume.experience.map((job, n) => {
+    const key = `resume:experience.${n}`;
+    return {
+      name: `Experience ${n + 1}: ${[job.title, job.company].filter(Boolean).join(" · ")}`,
+      collapsed: true,
+      items: present([
+        item(`${key}.title`, "Job title", job.title),
+        item(`${key}.company`, "Company", job.company),
+        item(`${key}.location`, "Location", job.location),
+        item(`${key}.dates`, "Dates", period(job)),
+        item(`${key}.start`, "From", monthName(job.start)),
+        item(`${key}.end`, "To", job.current ? "Present" : monthName(job.end)),
+        item(`${key}.description`, "Role description", job.description),
+      ]),
+    };
+  });
+}
+
+/** The tailored resume's skills, as one list to paste (and the groups as they're written). */
+function skillsGroup({ resume }: KitInput): KitGroup {
+  const all = [
+    ...new Set(
+      resume.skills.flatMap((s) => (s.keywords.length ? s.keywords : [s.name])),
+    ),
+  ].filter(Boolean);
+  return {
+    name: "Skills",
+    items: present([
+      item("resume:skills", "All skills", all.join(", ")),
+      ...resume.skills
+        .filter((s) => s.keywords.length > 0)
+        .map((s, n) =>
+          item(`resume:skills.${n}`, s.name || "Skills", s.keywords.join(", ")),
+        ),
+    ]),
+  };
+}
+
 const planValue = (value: string | readonly string[] | null) =>
   value === null
     ? null
@@ -209,7 +274,9 @@ export function buildKit(input: KitInput): Kit {
       youGroup(input),
       linksGroup(input),
       workGroup(input),
+      ...experienceGroups(input),
       educationGroup(input),
+      skillsGroup(input),
       thisJobGroup(input),
       sensitiveGroup(input),
     ].filter((g) => g.items.length > 0),
