@@ -3,6 +3,7 @@ import {
   matchesRequestedCountry,
   shouldApplyStrictCityFilter,
 } from "./search-cities.js";
+import { postingKeysOf } from "./posting-key.js";
 import type { CreateJobInput } from "./types/jobs.js";
 import type { LocationIntent } from "./types/location";
 import { normalizeWhitespace } from "./utils/string";
@@ -333,4 +334,40 @@ export function deduplicateJobsByTitleAndEmployer(
   }
 
   return merged.map((entry) => entry.job);
+}
+
+/**
+ * Jobs naming the same posting in their links (a Greenhouse id, a Workday requisition…) are
+ * one job: merged before the fuzzy title+employer match. A job whose posting is already
+ * stored (`known` keys) is dropped. Links naming no known system are left to the fuzzy match.
+ */
+export function deduplicateJobsByPostingKey(
+  jobs: CreateJobInput[],
+  known: ReadonlySet<string> = new Set(),
+): { jobs: CreateJobInput[]; merged: number; alreadyStored: number } {
+  const kept: { job: CreateJobInput; keys: string[] }[] = [];
+  const byKey = new Map<string, { job: CreateJobInput; keys: string[] }>();
+  let merged = 0;
+  let alreadyStored = 0;
+  for (const incoming of jobs) {
+    const keys = postingKeysOf(incoming);
+    if (keys.some((key) => known.has(key))) {
+      alreadyStored += 1;
+      continue;
+    }
+    const match = keys.map((key) => byKey.get(key)).find(Boolean);
+    if (match) {
+      match.job = mergeJobInputs(match.job, incoming);
+      for (const key of keys) {
+        if (!match.keys.includes(key)) match.keys.push(key);
+        byKey.set(key, match);
+      }
+      merged += 1;
+      continue;
+    }
+    const entry = { job: incoming, keys: [...keys] };
+    kept.push(entry);
+    for (const key of keys) byKey.set(key, entry);
+  }
+  return { jobs: kept.map((entry) => entry.job), merged, alreadyStored };
 }

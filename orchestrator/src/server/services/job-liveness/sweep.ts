@@ -11,6 +11,7 @@ import { sanitizeUnknown } from "@infra/sanitize";
 import * as jobsRepo from "@server/repositories/jobs";
 import { asyncPool } from "@server/utils/async-pool";
 import type { Job, JobStatus } from "@shared/types";
+import { checkWithAtsApi } from "./ats-api";
 import { classifyLivenessResponse, type LivenessVerdict } from "./classify";
 import { getJobLivenessConfig, type JobLivenessConfig } from "./config";
 import { getPostingAgeDays } from "./posting-age";
@@ -27,6 +28,8 @@ export const LIVENESS_CHECKED_STATUSES: readonly JobStatus[] = [
 type CheckPosting = (
   jobUrl: string,
   expectedTitle?: string | null,
+  /** Where you apply (a LinkedIn job's ATS link): its ATS may answer for it. */
+  applicationLink?: string | null,
 ) => Promise<LivenessVerdict>;
 
 export interface ExpiredJobSummary {
@@ -67,7 +70,13 @@ const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 function createPostingChecker(config: JobLivenessConfig): CheckPosting {
-  return async (jobUrl, expectedTitle) => {
+  return async (jobUrl, expectedTitle, applicationLink) => {
+    // Fork: the posting's own ATS first, when it has a public API that answers plainly.
+    const fromApi = await checkWithAtsApi(
+      [jobUrl, applicationLink],
+      config.requestTimeoutMs,
+    ).catch(() => null);
+    if (fromApi) return fromApi;
     try {
       const page = await fetchPublicPage(jobUrl, {
         timeoutMs: config.requestTimeoutMs,
@@ -147,7 +156,7 @@ async function checkJob(
   config: JobLivenessConfig,
   now: Date,
 ): Promise<JobOutcome> {
-  const verdict = await checkPosting(job.jobUrl, job.title);
+  const verdict = await checkPosting(job.jobUrl, job.title, job.applicationLink);
   const reason = resolveExpiryReason(job, verdict, config, now);
 
   if (reason === null) {

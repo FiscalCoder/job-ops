@@ -429,6 +429,16 @@ export async function listJobSummariesByIds(jobIds: string[]): Promise<
 /**
  * Get a job by its URL (for deduplication).
  */
+/** Every stored job's links (its page and where you apply), for posting-key matching. */
+export async function listJobLinks(): Promise<
+  { jobUrl: string; applicationLink: string | null }[]
+> {
+  return db
+    .select({ jobUrl: jobs.jobUrl, applicationLink: jobs.applicationLink })
+    .from(jobs)
+    .where(jobsScopeFilter());
+}
+
 export async function getJobByUrl(jobUrl: string): Promise<Job | null> {
   const [row] = await db
     .select()
