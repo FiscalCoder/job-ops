@@ -5,17 +5,19 @@ description: Recommended end-to-end pre-application workflow from running a job 
 sidebar_position: 1
 ---
 
-## Goal
+## What it is
 
 This guide documents the main intended pre-application workflow in JobOps.
 
-If you follow this order, you get the strongest results from discovery, scoring, tailoring, and tracking.
+## Why it exists
 
-## Recommended flow (in order)
+Following this order keeps discovery, review, tailoring, and application tracking connected.
+
+## How to use it
 
 ### 1) Run a search first
 
-From the **Jobs** page, use the top-right **Run search** control.
+From the **Jobs** page, select **Find jobs**. If you already have a job link, description, or PDF, use **Add a job** instead.
 
 What this does:
 
@@ -31,9 +33,9 @@ Important:
 
 ### 2) Configure search settings
 
-In Automatic mode, start with **Describe search** when you want AI to fill the options from a plain-language brief. Add as much detail as possible, including what to surface or lower-score. Review the generated settings before running; AI does not start the search for you.
+Describe what you want and select **Build my search** for AI assistance, or select **Enter search details instead** to fill the same criteria yourself. AI does not start discovery.
 
-In **Configure details**, review or edit:
+In **Configure your search**, review or edit:
 
 - how many jobs to discover (approximate target)
 - ranking preferences for scoring this search
@@ -51,6 +53,11 @@ For each discovered job:
 - review the suitability score
 - read the AI fit justification in **Fit Assessment**
 - decide whether the opportunity is worth advancing
+
+Posting-age labels use your browser's local calendar dates. A date-only source value
+such as `2026-05-25` stays on May 25 for the age label, tooltip, and posting-date
+sort. Day counts remain consistent across daylight-saving clock changes. Jobs
+are marked fresh through day 4, aging from day 5 through day 14, and old from day 15.
 
 ### 4) Work from `Ready` for applications
 
@@ -87,7 +94,9 @@ Once a job is marked `applied`, it becomes part of:
 - pipeline outcome analytics on [Overview](../features/overview)
 - optional post-application workflows (inbox/review routing)
 
-## Practical tips
+## Common problems
+
+If discovery is slow, start with fewer sources or a smaller run budget. If results look stale, run a fresh search before applying.
 
 - Start with conservative run sizes while tuning sources.
 - Re-run the pipeline after time away when you want fresh listings.

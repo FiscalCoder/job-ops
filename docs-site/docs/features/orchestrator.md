@@ -44,6 +44,13 @@ It exists to ensure:
 
 ## How to use it
 
+### Find opportunities or add an existing job
+
+- Select **Find jobs** to describe a search or enter its criteria, review the existing configuration form, then select **Run search**.
+- Select **Add a job** to import a link, description, or PDF you already have.
+
+See [Find jobs](/docs/next/features/pipeline-run) for the search review flow.
+
 ### Intended ready flow
 
 1. Manual flow:
@@ -72,8 +79,11 @@ What the panel includes:
 - source filters
 - sponsor status filters
 - salary filters
+- include and exclude keyword filters
 - date filters
 - sorting controls
+
+The include and exclude keyword boxes take comma-separated terms. A job stays if it matches any include term (when set) and none of the exclude terms. Matching ignores case and accents and looks at the title, employer, location, job type and job function, not the full description.
 
 Job rows and the detail header can also show a `Previously Applied` warning when JobOps finds a high-confidence fuzzy match against one of your past applied or in-progress jobs using title and company, not just URL dedupe. To avoid flagging genuinely new openings, JobOps only shows this warning when the matched historical application falls within 30 days of the current job's discovery date.
 

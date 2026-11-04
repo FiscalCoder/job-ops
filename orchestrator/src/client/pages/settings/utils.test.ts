@@ -6,6 +6,15 @@ import {
 } from "./utils";
 
 describe("settings utils", () => {
+  it("offers API Route with authenticated model discovery", () => {
+    const config = getLlmProviderConfig("api_route");
+    expect(config.label).toBe("API Route");
+    expect(config.showApiKey).toBe(true);
+    expect(config.showBaseUrl).toBe(false);
+    expect(config.keyHelperHref).toBe("https://www.api-route.com/api-keys");
+    expect(supportsLlmModelSuggestions("api_route")).toBe(true);
+    expect(normalizeLlmProvider("api-route")).toBe("api_route");
+  });
   it("treats openai-compatible as a dedicated configurable provider", () => {
     const config = getLlmProviderConfig("openai_compatible");
 
@@ -85,6 +94,20 @@ describe("settings utils", () => {
     expect(config.baseUrlHelper).toContain("http://172.17.0.1:11434");
   });
 
+  it("treats LiteLLM as a proxy with a base URL and an optional virtual key", () => {
+    const config = getLlmProviderConfig("litellm");
+
+    expect(config.label).toBe("LiteLLM");
+    expect(config.showApiKey).toBe(true);
+    expect(config.requiresApiKey).toBe(false);
+    expect(config.showBaseUrl).toBe(true);
+    expect(config.baseUrlPlaceholder).toBe("http://localhost:4000");
+    expect(config.baseUrlHelper).toContain("http://host.docker.internal:4000");
+    expect(config.keyHelperHref).toBe(
+      "https://docs.litellm.ai/docs/proxy/virtual_keys",
+    );
+  });
+
   it("normalizes the hyphenated openai-compatible alias", () => {
     expect(normalizeLlmProvider("openai-compatible")).toBe("openai_compatible");
   });
@@ -118,6 +141,7 @@ describe("settings utils", () => {
 
   it("only enables model suggestions for supported providers", () => {
     expect(supportsLlmModelSuggestions("atlascloud")).toBe(true);
+    expect(supportsLlmModelSuggestions("litellm")).toBe(true);
     expect(supportsLlmModelSuggestions("openai")).toBe(true);
     expect(supportsLlmModelSuggestions("anthropic")).toBe(true);
     expect(supportsLlmModelSuggestions("glm")).toBe(true);

@@ -3,8 +3,6 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { PipelineFanoutCard } from "./PipelineFanoutCard";
 
-vi.mock("framer-motion", () => ({ useReducedMotion: () => false }));
-
 const fanout: PipelineFanoutProgress = {
   termCount: 5,
   locationCount: 2,
@@ -25,20 +23,21 @@ const fanout: PipelineFanoutProgress = {
 };
 
 describe("PipelineFanoutCard", () => {
-  it("rolls each part of the live combination independently", () => {
+  it("shows the latest reported activity beneath a stable heading", () => {
     render(
       <PipelineFanoutCard
         fanout={fanout}
         elapsedSeconds={134}
-        currentCombination="linkedin · frontend · edinburgh"
+        activity="JobSpy: term 1/2 (Frontend Engineer)"
         solvingExtractor={null}
         onSolveChallenge={vi.fn()}
       />,
     );
 
+    expect(screen.getByText("Searching jobs")).toBeInTheDocument();
     expect(
-      screen.getByText("Searching linkedin for “frontend” in edinburgh"),
-    ).toBeInTheDocument();
+      screen.getByText("Latest activity:").parentElement,
+    ).toHaveTextContent("JobSpy: term 1/2 (Frontend Engineer)");
     expect(screen.getByText("15")).toBeInTheDocument();
   });
 
@@ -91,6 +90,75 @@ describe("PipelineFanoutCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Solve" }));
     expect(onSolveChallenge).toHaveBeenCalledWith("gradcracker");
+  });
+
+  it("shows a pending browser check after all searches are complete", () => {
+    render(
+      <PipelineFanoutCard
+        fanout={{
+          ...fanout,
+          total: 1,
+          roles: [
+            { role: "Backend", complete: 1, running: 0, queued: 0, check: 0 },
+          ],
+        }}
+        elapsedSeconds={0}
+        activity="Hiring Cafe: browser check required"
+        challenges={[
+          {
+            extractorId: "hiringcafe",
+            extractorName: "Hiring Cafe",
+            url: "https://hiringcafe.com/job/req-1",
+            sources: ["hiringcafe"],
+          },
+        ]}
+        solvingExtractor={null}
+        onSolveChallenge={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Browser check needed")).toBeInTheDocument();
+    expect(screen.queryByText("Searching jobs")).toBeNull();
+    const searchCount = screen.getByText("search complete").parentElement;
+    expect(searchCount?.firstElementChild).toHaveTextContent("1");
+  });
+
+  it("shows skip for a Hiring Cafe search only after a solve attempt", () => {
+    const onSkipChallengeSearch = vi.fn();
+    const searchChallenge = {
+      extractorId: "hiringcafe",
+      extractorName: "Hiring Cafe",
+      url: "https://hiringcafe.com/?searchState=%7B%7D",
+      sources: ["hiringcafe" as const],
+      canSkipSearch: true,
+      solveAttempted: false,
+    };
+    const { rerender } = render(
+      <PipelineFanoutCard
+        fanout={fanout}
+        elapsedSeconds={0}
+        challenges={[searchChallenge]}
+        solvingExtractor={null}
+        onSolveChallenge={vi.fn()}
+        onSkipChallengeSearch={onSkipChallengeSearch}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Skip this search" }),
+    ).toBeNull();
+
+    rerender(
+      <PipelineFanoutCard
+        fanout={fanout}
+        elapsedSeconds={0}
+        challenges={[{ ...searchChallenge, solveAttempted: true }]}
+        solvingExtractor={null}
+        onSolveChallenge={vi.fn()}
+        onSkipChallengeSearch={onSkipChallengeSearch}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Skip this search" }));
+    expect(onSkipChallengeSearch).toHaveBeenCalledWith("hiringcafe");
   });
 
   it("keeps every busy-role status in the responsive row", () => {

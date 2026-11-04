@@ -36,6 +36,7 @@ import {
   createJobPdfFingerprint,
   resolvePdfFingerprintContext,
 } from "../services/pdf-fingerprint";
+import { removeStoredJobPdf } from "../services/pdf-storage";
 import { getProfile } from "../services/profile";
 import { pickProjectIdsForJob } from "../services/projectSelection";
 import {
@@ -95,11 +96,14 @@ type TenantPipelineState = {
   activePipelineRunId: string | null;
   cancelRequestedAt: string | null;
   activeChallengeState: ChallengeState | null;
+  attemptedChallengeSearchStates: Set<string>;
+  skippedChallengeSearchStates: Set<string>;
   activeLlmConfigState: LlmConfigState | null;
 };
 
 type ChallengeState = {
   challenges: Map<string, PendingChallenge>;
+  solving: Set<string>;
   resolve: () => void;
 };
 
@@ -123,6 +127,8 @@ function getPipelineState(
       activePipelineRunId: null,
       cancelRequestedAt: null,
       activeChallengeState: null,
+      attemptedChallengeSearchStates: new Set(),
+      skippedChallengeSearchStates: new Set(),
       activeLlmConfigState: null,
     };
     pipelineStateByTenant.set(scopeKey, state);
@@ -194,6 +200,19 @@ async function resolveEnableAutoTailoring(
 // kills a running one. This is intentional: challenges happen at most once
 // per day per extractor, and the user is actively present to solve them.
 
+function hiringCafeSearchState(challenge: PendingChallenge): string | null {
+  if (challenge.extractorId !== "hiringcafe") return null;
+  try {
+    const url = new URL(challenge.url);
+    if (url.origin !== "https://hiringcafe.com" || url.pathname !== "/") {
+      return null;
+    }
+    return url.searchParams.get("searchState");
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Returns the list of challenges currently blocking the pipeline, or empty if
  * the pipeline is not paused on challenges.
@@ -202,6 +221,52 @@ export function getPendingChallenges(): PendingChallenge[] {
   const challengeState = getPipelineState().activeChallengeState;
   if (!challengeState) return [];
   return Array.from(challengeState.challenges.values());
+}
+
+/** Mark a browser solve attempt and prevent a concurrent skip. */
+export function beginPipelineChallengeSolve(
+  extractorId: string,
+): (() => void) | null {
+  const state = getPipelineState();
+  const challengeState = state.activeChallengeState;
+  const challenge = challengeState?.challenges.get(extractorId);
+  if (!challengeState || !challenge || challengeState.solving.has(extractorId))
+    return null;
+
+  challengeState.solving.add(extractorId);
+  const searchState = hiringCafeSearchState(challenge);
+  if (searchState) {
+    state.attemptedChallengeSearchStates.add(searchState);
+    challenge.solveAttempted = true;
+    progressHelpers.challengeRequired(
+      Array.from(challengeState.challenges.values()),
+    );
+  }
+
+  return () => challengeState.solving.delete(extractorId);
+}
+
+export function skipPipelineChallengeSearch(
+  extractorId: string,
+):
+  | { status: "skipped"; remaining: number }
+  | { status: "not_found" }
+  | { status: "not_allowed" }
+  | { status: "busy" } {
+  const state = getPipelineState();
+  const challengeState = state.activeChallengeState;
+  const challenge = challengeState?.challenges.get(extractorId);
+  if (!challengeState || !challenge) return { status: "not_found" };
+  if (challengeState.solving.has(extractorId)) return { status: "busy" };
+
+  const searchState = hiringCafeSearchState(challenge);
+  if (!searchState || !state.attemptedChallengeSearchStates.has(searchState)) {
+    return { status: "not_allowed" };
+  }
+
+  state.skippedChallengeSearchStates.add(searchState);
+  const { remaining } = resolvePipelineChallenge(extractorId);
+  return { status: "skipped", remaining };
 }
 
 /**
@@ -253,6 +318,9 @@ class PipelineCancelledError extends Error {
     this.name = "PipelineCancelledError";
   }
 }
+
+/** Pauses for another solve when a source is still challenged after one, before it's skipped. */
+const MAX_REPEAT_CHALLENGE_PAUSES = 1;
 
 function ensureNotCancelled(scopeKey = getPipelineScopeKey()): void {
   if (getPipelineState(scopeKey).cancelRequestedAt) {
@@ -347,6 +415,8 @@ export async function runPipeline(
   tenantState.isRunning = true;
   tenantState.activePipelineRunId = "pending";
   tenantState.cancelRequestedAt = null;
+  tenantState.attemptedChallengeSearchStates.clear();
+  tenantState.skippedChallengeSearchStates.clear();
   resetProgress();
   const locationIntent = await resolveLocationIntent(config);
   const resolvedEnableAutoTailoring = await resolveEnableAutoTailoring(config);
@@ -424,7 +494,21 @@ export async function runPipeline(
       });
 
       // ---------- Challenge pause/resume ----------
+      // Upstream pauses again while a source stays challenged after its solve; the fork allows
+      // this many more pauses, then skips the source (the daily run is unattended).
+      let repeatPauses = 0;
       while (pendingChallenges.length > 0) {
+        pendingChallenges = pendingChallenges.map((challenge) => {
+          const searchState = hiringCafeSearchState(challenge);
+          return searchState
+            ? {
+                ...challenge,
+                canSkipSearch: true,
+                solveAttempted:
+                  tenantState.attemptedChallengeSearchStates.has(searchState),
+              }
+            : challenge;
+        });
         pipelineLogger.info("Challenges detected, pausing pipeline", {
           challenges: pendingChallenges.map((c) => ({
             extractorId: c.extractorId,
@@ -446,12 +530,20 @@ export async function runPipeline(
             challenge.url,
           ]),
         );
+        const resumeStates = Object.fromEntries(
+          pendingChallenges.flatMap((challenge) =>
+            challenge.resumeState !== undefined
+              ? [[challenge.extractorId, challenge.resumeState]]
+              : [],
+          ),
+        );
 
         await new Promise<void>((resolve) => {
           tenantState.activeChallengeState = {
             challenges: new Map(
               pendingChallenges.map((c) => [c.extractorId, c]),
             ),
+            solving: new Set(),
             resolve,
           };
         });
@@ -471,6 +563,10 @@ export async function runPipeline(
           preserveFanout: true,
           fanoutSeedJobs: discoveredJobs,
           retryChallengeUrls,
+          resumeStates,
+          skippedChallengeSearchStates: Array.from(
+            tenantState.skippedChallengeSearchStates,
+          ),
           shouldCancel: () =>
             getPipelineState(scopeKey).cancelRequestedAt !== null,
         });
@@ -481,72 +577,63 @@ export async function runPipeline(
         );
         sourceErrors = [...sourceErrors, ...retryResult.sourceErrors];
 
-        // A partial extractor result must never be imported if the retry is
-        // still challenged. Other sources retain their existing partial-result
-        // behavior when the retry found useful jobs.
+        // Still challenged after the solve: one more pause for another solve (upstream), then
+        // the fork's fallback: skip the source and keep the other sources' jobs.
+        if (
+          retryResult.pendingChallenges.length > 0 &&
+          repeatPauses < MAX_REPEAT_CHALLENGE_PAUSES
+        ) {
+          repeatPauses += 1;
+          pendingChallenges = retryResult.pendingChallenges;
+          pipelineLogger.warn("Challenge persists; pausing again", {
+            retryPendingChallenges: pendingChallenges.map(
+              (challenge) => challenge.extractorId,
+            ),
+          });
+          continue;
+        }
         if (retryResult.pendingChallenges.length > 0) {
-          const detailChallenges = retryResult.pendingChallenges.filter(
-            (challenge) => challenge.pauseOnRepeat,
-          );
-          const ordinaryChallenges = retryResult.pendingChallenges.filter(
-            (challenge) => !challenge.pauseOnRepeat,
-          );
-          const unrecoveredOrdinary = ordinaryChallenges.filter(
+          const unrecovered = retryResult.pendingChallenges.filter(
             (challenge) =>
               !discoveredJobs.some((job) =>
                 challenge.sources.some((source) => source === job.source),
               ),
           );
-          if (unrecoveredOrdinary.length > 0) {
+          if (unrecovered.length > 0) {
             // Nothing to import at all: fail loudly, as before.
             if (discoveredJobs.length === 0) {
               throw new Error(
                 buildRepeatedChallengeMessage({
-                  challenges: unrecoveredOrdinary,
+                  challenges: unrecovered,
                   sourceErrors: retryResult.sourceErrors,
                 }),
               );
             }
-            // Fork: a source still blocked after the solve contributed no jobs, so skip it
-            // and keep the other sources' results instead of discarding the whole run.
-            const skippedMessage =
-              buildSkippedChallengeMessage(unrecoveredOrdinary);
+            const skippedMessage = buildSkippedChallengeMessage(unrecovered);
             pipelineLogger.warn(skippedMessage, {
-              skippedSources: unrecoveredOrdinary.map(
+              skippedSources: unrecovered.map(
                 (challenge) => challenge.extractorId,
               ),
             });
             sourceErrors = [...sourceErrors, skippedMessage];
             await persistResultSummary({ stage: "discovery", sourceErrors });
           }
-
-          const recoveredOrdinary = ordinaryChallenges.filter(
-            (challenge) => !unrecoveredOrdinary.includes(challenge),
+          const recovered = retryResult.pendingChallenges.filter(
+            (challenge) => !unrecovered.includes(challenge),
           );
-          if (recoveredOrdinary.length > 0) {
+          if (recovered.length > 0) {
             pipelineLogger.warn(
               buildRepeatedChallengeMessage({
-                challenges: recoveredOrdinary,
+                challenges: recovered,
                 sourceErrors: retryResult.sourceErrors,
               }),
               {
-                retryPendingChallenges: recoveredOrdinary.map(
+                retryPendingChallenges: recovered.map(
                   (challenge) => challenge.extractorId,
                 ),
               },
             );
           }
-
-          pendingChallenges = detailChallenges;
-          if (detailChallenges.length > 0) {
-            pipelineLogger.warn("Detail challenge persists; pausing again", {
-              retryPendingChallenges: detailChallenges.map(
-                (c) => c.extractorId,
-              ),
-            });
-            continue;
-          }
-          break;
         }
         pendingChallenges = [];
       }
@@ -730,6 +817,8 @@ export async function runPipeline(
       tenantState.activePipelineRunId = null;
       tenantState.cancelRequestedAt = null;
       tenantState.activeChallengeState = null;
+      tenantState.attemptedChallengeSearchStates.clear();
+      tenantState.skippedChallengeSearchStates.clear();
       tenantState.activeLlmConfigState = null;
       if (options?.hostedUsageReservationId) {
         await settleHostedUsageReservation({
@@ -983,13 +1072,13 @@ export async function generateFinalPdf(
       await reservePdfUsage();
 
       // Ready jobs already have a usable PDF; keep them visible while regenerating.
-      if (job.status !== "ready") {
-        await jobsRepo.updateJob(job.id, {
-          status: "processing",
-          pdfRegenerating: true,
-        });
-      } else {
-        await jobsRepo.updateJob(job.id, { pdfRegenerating: true });
+      const claimedJob = await jobsRepo.updateJob(job.id, {
+        ...(job.status !== "ready" ? { status: "processing" } : {}),
+        pdfRegenerating: true,
+      });
+      if (!claimedJob) {
+        await settlePdfUsage(0);
+        return { success: false, error: "Job not found" };
       }
       pdfRegeneratingMarked = true;
 
@@ -1048,6 +1137,13 @@ export async function generateFinalPdf(
       });
       if (!updatedJob) {
         const latestJob = await jobsRepo.getJobById(job.id);
+        if (!latestJob) {
+          await removeStoredJobPdf(job.id).catch((error) => {
+            jobLogger.warn("Failed to remove PDF generated for a deleted job", {
+              error,
+            });
+          });
+        }
         if (
           latestJob?.pdfRegenerating &&
           (latestJob.status !== expectedStatusAtCommit ||

@@ -2,12 +2,10 @@ import {
   getPipelineProgressSnapshot,
   prepareChallengeViewer,
   resumePipelineScoring,
+  skipPipelineChallengeSearch,
   solvePipelineChallenge,
 } from "@client/api";
-import type {
-  PipelineFanoutProgress,
-  PipelineProgressState,
-} from "@shared/types";
+import type { PipelineProgressState } from "@shared/types";
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { showErrorToast } from "@/client/lib/error-toast";
@@ -27,31 +25,14 @@ const TERMINAL_STEPS: ReadonlySet<PipelineProgressState["step"]> = new Set([
   "failed",
 ]);
 
-const getCurrentCombination = (
-  fanout: PipelineFanoutProgress,
-  index: number,
-): string | undefined => {
-  if (
-    fanout.sources.length === 0 ||
-    fanout.roles.length === 0 ||
-    fanout.locations.length === 0
-  ) {
-    return undefined;
-  }
-
-  const source = fanout.sources[index % fanout.sources.length];
-  const role = fanout.roles[index % fanout.roles.length]?.role;
-  const location = fanout.locations[index % fanout.locations.length];
-  if (!source || !role || !location) return undefined;
-
-  return `${source.toLowerCase()} · ${role.toLowerCase()} · ${location.toLowerCase()}`;
-};
-
 export const PipelineProgress: React.FC<PipelineProgressProps> = ({
   isRunning,
 }) => {
   const [progress, setProgress] = useState<PipelineProgressState | null>(null);
   const [solvingExtractor, setSolvingExtractor] = useState<string | null>(null);
+  const [skippingExtractor, setSkippingExtractor] = useState<string | null>(
+    null,
+  );
   const [resumingScoring, setResumingScoring] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
@@ -69,11 +50,26 @@ export const PipelineProgress: React.FC<PipelineProgressProps> = ({
         viewerWindow?.close();
       }
       await solvePipelineChallenge(extractorId);
+      if (viewerWindow && !viewerWindow.closed) {
+        viewerWindow.location.href = "/challenge-viewer/solved";
+        window.setTimeout(() => viewerWindow.close(), 3_000);
+      }
     } catch (error) {
       viewerWindow?.close();
       showErrorToast(error, "Failed to solve challenge");
     } finally {
       setSolvingExtractor(null);
+    }
+  }, []);
+
+  const handleSkipChallengeSearch = useCallback(async (extractorId: string) => {
+    setSkippingExtractor(extractorId);
+    try {
+      await skipPipelineChallengeSearch(extractorId);
+    } catch (error) {
+      showErrorToast(error, "Failed to skip search");
+    } finally {
+      setSkippingExtractor(null);
     }
   }, []);
 
@@ -194,13 +190,12 @@ export const PipelineProgress: React.FC<PipelineProgressProps> = ({
     <PipelineFanoutCard
       fanout={progress.fanout}
       elapsedSeconds={elapsedSeconds}
-      currentCombination={getCurrentCombination(
-        progress.fanout,
-        elapsedSeconds,
-      )}
+      activity={progress.detail || progress.message}
       challenges={progress.pendingChallenges}
       solvingExtractor={solvingExtractor}
+      skippingExtractor={skippingExtractor}
       onSolveChallenge={handleSolveChallenge}
+      onSkipChallengeSearch={handleSkipChallengeSearch}
     />
   );
 };

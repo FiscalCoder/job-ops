@@ -1,8 +1,10 @@
 export type LlmProvider =
   | "atlascloud"
+  | "litellm"
   | "openrouter"
   | "orcarouter"
   | "requesty"
+  | "api_route"
   | "lmstudio"
   | "ollama"
   | "openai"

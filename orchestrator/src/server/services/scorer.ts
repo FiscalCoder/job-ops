@@ -107,7 +107,10 @@ const SCORING_SCHEMA: JsonSchemaDefinition = {
           specifics: {
             type: "array",
             maxItems: 18,
-            items: { type: "string" },
+            items: {
+              type: "string",
+              description: "A concise highlight of at most 4 words",
+            },
           },
           company_offers: {
             type: "array",
@@ -214,7 +217,7 @@ const SCORING_SCHEMA: JsonSchemaDefinition = {
 const SCORING_OUTPUT_INSTRUCTIONS = `
 Perform these tasks in one response:
 1. JOB FACT REVIEW (candidate-independent): compare JOB DATA with the original listing. Use only those sources, never the candidate profile. Propose a patch only for a missing or clearly incorrect whitelisted field with an exact supporting listing excerpt. Do not guess, infer from general knowledge, estimate, annualise compensation, or paraphrase/invent evidence. Use high confidence for clear corrections; medium may only fill missing values; omit ambiguous corrections. Candidate evaluation must use the proposed corrected facts.
-2. JOB BRIEF: use only stated job information, remain neutral, remove employer fluff, never judge candidate fit, and use "Not stated" for missing practical details.
+2. JOB BRIEF: use only stated job information, remain neutral, remove employer fluff, never judge candidate fit, and use "Not stated" for missing practical details. Write specifics (Highlights) as concise phrases of at most 4 words each. Preserve negations, numbers, and essential qualifiers; omit a highlight if it cannot be shortened accurately.
 3. CANDIDATE EVALUATION: score the candidate against the listing, corrected facts, and scoring instructions. The scoring prompt above is the rubric; SCORING INSTRUCTIONS in the system context add to it, and where the two conflict, follow the scoring prompt.
    - scoreParts: when the rubric scores separate parts, list each with the points given and its maximum, in the rubric's order; otherwise [].
    - caps: every hard cap from the rubric or instructions that applies to this job, with its cap value; otherwise []. Name it as the rubric names it.
@@ -230,7 +233,7 @@ Respond with ONLY valid JSON in this exact shape:
   "jobBrief": {
     "role_summary": "<one sentence describing what the person would do>",
     "they_want": ["<up to 6 stated requirements>"],
-    "specifics": ["<up to 18 concrete tools, responsibilities, domain or working-pattern details>"],
+    "specifics": ["<up to 18 concrete tools, responsibilities, domain or working-pattern details; at most 4 words per item>"],
     "company_offers": ["<up to 5 concrete offerings>"],
     "practical_details": ["<up to 8 key-value details such as Salary: Not stated>"],
     "missing_or_unclear": ["<up to 5 important missing details>"],
