@@ -19,6 +19,7 @@ import {
 } from "./policies/retry-policy";
 import { withSchemaInstruction } from "./policies/schema-prompt";
 import { strategies } from "./providers";
+import { normalizeLiteLlmBaseUrl } from "./providers/litellm";
 import type {
   JsonSchemaDefinition,
   LlmApiError,
@@ -268,11 +269,13 @@ export class LlmService {
     if (
       this.provider !== "openai" &&
       this.provider !== "atlascloud" &&
+      this.provider !== "litellm" &&
       this.provider !== "anthropic" &&
       this.provider !== "glm" &&
       this.provider !== "gemini" &&
       this.provider !== "ollama" &&
       this.provider !== "requesty" &&
+      this.provider !== "api_route" &&
       this.provider !== "orcarouter"
     ) {
       return [];
@@ -281,6 +284,9 @@ export class LlmService {
     const models = await (async () => {
       if (this.provider === "atlascloud") {
         return this.listAtlasCloudModels();
+      }
+      if (this.provider === "litellm") {
+        return this.listLiteLlmModels();
       }
       if (this.provider === "openai") {
         return this.listOpenAiModels();
@@ -296,6 +302,15 @@ export class LlmService {
       }
       if (this.provider === "requesty") {
         return this.listRequestyModels();
+      }
+      if (this.provider === "api_route") {
+        const models = await this.listRequestyModels();
+        return models.filter(
+          (model) =>
+            !/image|seedance|embedding|rerank|whisper|(?:^|[-/])(?:tts|asr)(?:[-/]|$)/i.test(
+              model,
+            ),
+        );
       }
       if (this.provider === "orcarouter") {
         return this.listRequestyModels();
@@ -601,6 +616,56 @@ export class LlmService {
       .filter(Boolean);
   }
 
+  private async listLiteLlmModels(): Promise<string[]> {
+    const baseUrl = normalizeLiteLlmBaseUrl(this.baseUrl);
+    const headers = buildHeaders({
+      apiKey: this.apiKey,
+      provider: this.provider,
+    });
+
+    // /model/info carries each deployment's mode, so embedding, image and
+    // audio models can be kept out of a picker that only needs chat models.
+    // Keys scoped to specific models may not be allowed to read it, so fall
+    // back to the OpenAI-compatible list.
+    const infoResponse = await fetch(joinUrl(baseUrl, "/model/info"), {
+      method: "GET",
+      headers,
+    }).catch(() => null);
+    if (infoResponse?.ok) {
+      const payload = (await infoResponse.json()) as {
+        data?: Array<{
+          model_name?: string | null;
+          model_info?: { mode?: string | null } | null;
+        }>;
+      };
+      const models = (payload.data ?? [])
+        .filter((entry) => {
+          const mode = entry.model_info?.mode?.trim().toLowerCase();
+          return !mode || mode === "chat" || mode === "responses";
+        })
+        .map((entry) => entry.model_name?.trim() ?? "")
+        .filter(Boolean);
+      if (models.length > 0) return Array.from(new Set(models));
+    }
+
+    const response = await fetch(joinUrl(baseUrl, "/v1/models"), {
+      method: "GET",
+      headers,
+    });
+
+    if (!response.ok) {
+      const detail = await getResponseDetail(response);
+      throw new Error(detail || `LiteLLM returned ${response.status}.`);
+    }
+
+    const payload = (await response.json()) as {
+      data?: Array<{ id?: string | null }>;
+    };
+    return (payload.data ?? [])
+      .map((entry) => entry.id?.trim() ?? "")
+      .filter(Boolean);
+  }
+
   private async listAnthropicModels(): Promise<string[]> {
     const response = await fetch(joinUrl(this.baseUrl, "/v1/models"), {
       method: "GET",
@@ -700,7 +765,9 @@ export class LlmService {
 
     if (!response.ok) {
       const detail = await getResponseDetail(response);
-      throw new Error(detail || `Requesty returned ${response.status}.`);
+      const providerName =
+        this.provider === "api_route" ? "API Route" : "Requesty";
+      throw new Error(detail || `${providerName} returned ${response.status}.`);
     }
 
     const payload = (await response.json()) as {
@@ -752,6 +819,9 @@ function normalizeProvider(
   if (normalized === "atlascloud" || normalized === "atlas_cloud") {
     return "atlascloud";
   }
+  if (normalized === "litellm" || normalized === "litellm_proxy") {
+    return "litellm";
+  }
   if (normalized === "anthropic" || normalized === "claude") {
     return "anthropic";
   }
@@ -763,6 +833,7 @@ function normalizeProvider(
   if (normalized === "ollama") return "ollama";
   if (normalized === "codex") return "codex";
   if (normalized === "requesty") return "requesty";
+  if (normalized === "api_route") return "api_route";
   if (normalized === "orcarouter") return "orcarouter";
   if (normalized && normalized !== "openrouter") {
     logger.warn("Unknown LLM provider, defaulting to openrouter", {
@@ -780,6 +851,7 @@ function normalizeProviderName(raw: string | null): string | undefined {
 
 function providerUsesConfiguredBaseUrl(provider: LlmProvider): boolean {
   return (
+    provider === "litellm" ||
     provider === "lmstudio" ||
     provider === "ollama" ||
     provider === "openai_compatible" ||
@@ -815,6 +887,7 @@ function normalizeGeminiModelName(value: string): string {
 }
 
 function getPreferredModel(provider: LlmProvider): string | null {
+  if (provider === "api_route") return "gpt-6.1-sol";
   if (provider === "atlascloud") return "deepseek-ai/deepseek-v3.2";
   if (provider === "openai") return "gpt-5.4-mini";
   if (provider === "anthropic") return "claude-sonnet-4-6";

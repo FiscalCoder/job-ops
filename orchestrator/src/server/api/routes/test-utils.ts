@@ -50,6 +50,8 @@ vi.mock("@server/pipeline/index", () => {
     })),
     isPipelineCancelRequested: vi.fn(() => false),
     getPendingChallenges: vi.fn(() => []),
+    beginPipelineChallengeSolve: vi.fn(() => null),
+    skipPipelineChallengeSearch: vi.fn(() => ({ status: "not_found" })),
     resolvePipelineChallenge: vi.fn(() => ({ resolved: false, remaining: 0 })),
     subscribeToProgress: vi.fn((listener: (data: unknown) => void) => {
       listener(progress);
@@ -91,10 +93,18 @@ vi.mock("@server/services/challenge-viewer", () => ({
     .fn()
     .mockResolvedValue({ available: false, reason: "not a container" }),
   createChallengeViewerSession: vi.fn(() => ({ token: "viewer-token" })),
+  revokeChallengeViewerSessions: vi.fn(),
   buildChallengeViewerUrl: vi.fn(
     () => "/challenge-viewer/session/viewer-token/vnc.html",
   ),
   proxyChallengeViewerRequest: vi.fn(),
+}));
+
+vi.mock("@server/services/hiring-cafe-browser", () => ({
+  closeHiringCafeBrowser: vi.fn(async () => undefined),
+  hasHiringCafeBrowserChallenge: vi.fn(() => false),
+  readHiringCafeBrowserPage: vi.fn(),
+  waitForHiringCafeBrowserChallenge: vi.fn(),
 }));
 
 vi.mock("@server/services/visa-sponsors/index", () => ({
@@ -147,6 +157,23 @@ const isolatedEnvKeys = [
   "UKVISAJOBS_PASSWORD",
   "ADZUNA_APP_ID",
   "ADZUNA_APP_KEY",
+  "SSO_GOOGLE_CLIENT_ID",
+  "SSO_GOOGLE_CLIENT_SECRET",
+  "SSO_GOOGLE_ALLOW_SIGNUP",
+  "SSO_GOOGLE_ALLOWED_EMAIL_DOMAINS",
+  "SSO_GITHUB_CLIENT_ID",
+  "SSO_GITHUB_CLIENT_SECRET",
+  "SSO_GITHUB_ALLOW_SIGNUP",
+  "SSO_GITHUB_ALLOWED_EMAIL_DOMAINS",
+  "SSO_OIDC_ISSUER_URL",
+  "SSO_OIDC_CLIENT_ID",
+  "SSO_OIDC_CLIENT_SECRET",
+  "SSO_OIDC_DISPLAY_NAME",
+  "SSO_OIDC_SCOPES",
+  "SSO_OIDC_ALLOW_SIGNUP",
+  "SSO_OIDC_ALLOWED_EMAIL_DOMAINS",
+  "SSO_OIDC_ALLOW_INSECURE_HTTP",
+  "SSO_REDIRECT_BASE_URL",
 ] as const;
 
 const nativeFetch = globalThis.fetch;

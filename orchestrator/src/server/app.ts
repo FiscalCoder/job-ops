@@ -65,7 +65,7 @@ const ALLOWED_UMAMI_PROXY_METHODS = new Map<string, string[]>([
 ]);
 const ANALYTICS_DISABLED_TRUTHY_VALUES = new Set(["1", "true", "yes", "on"]);
 const UMAMI_SCRIPT_PATTERN =
-  /\s*<script\s+defer\s+src="https:\/\/umami\.dakheera47\.com\/script\.js"\s+data-website-id="0dc42ed1-87c3-4ac0-9409-5a9b9588fe66"\s*><\/script>/;
+  /\s*<script\b[^>]*\ssrc\s*=\s*["']https:\/\/umami\.dakheera47\.com\/script\.js["'][^>]*>\s*<\/script>/gi;
 const OPENPANEL_SCRIPT_PATTERN =
   /\s*<script>\s*window\.op =[\s\S]*?window\.op\("init", \{[\s\S]*?\n\s*}\);\s*<\/script>\s*<script src="https:\/\/openpanel\.dev\/op1\.js" defer async><\/script>/;
 
@@ -238,6 +238,18 @@ export function createAuthGuard() {
     )
       return true;
     if (
+      normalizedMethod === "GET" &&
+      normalizedPath === "/api/auth/sso/providers"
+    )
+      return true;
+    if (
+      normalizedMethod === "POST" &&
+      /^\/api\/auth\/sso\/(google|github|oidc)\/(start|callback)$/.test(
+        normalizedPath,
+      )
+    )
+      return true;
+    if (
       ["GET", "HEAD"].includes(normalizedMethod) &&
       /^\/api\/design-resume\/assets\/[^/]+\/content$/.test(normalizedPath)
     )
@@ -255,6 +267,10 @@ export function createAuthGuard() {
     const normalizedPath = path.split("?")[0] || path;
 
     if (normalizedPath === "/api/auth/me") return true;
+    // Linking and listing connected accounts act on a real user, so they stay
+    // behind auth in demo mode. requiresAuth consults isPublicReadOnlyRoute
+    // first, which keeps the sign-in routes reachable.
+    if (normalizedPath.startsWith("/api/auth/sso/")) return true;
     if (normalizedPath.startsWith("/api/workspaces")) return true;
     if (normalizedPath === "/api/settings/codex-auth") return true;
     if (normalizedPath === "/api/settings/rx-resumes") return true;
@@ -464,6 +480,17 @@ export function createApp() {
   app.use("/api", apiRouter);
   app.use(notFoundApiHandler());
 
+  app.get("/challenge-viewer/solved", (_req, res) => {
+    res
+      .status(200)
+      .type("html")
+      .send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Challenge solved · Job Ops</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0a0a0a;color:#4ade80;font-family:system-ui,sans-serif;text-align:center}h1{font-size:2rem;font-weight:600;margin-bottom:.5rem}p{color:#a1a1aa;font-size:1.1rem}</style></head>
+<body><main><h1>Challenge solved</h1><p>This tab will close shortly. You can return to Job Ops.</p></main></body></html>`);
+  });
+
   app.use("/challenge-viewer/session", (req, res) => {
     void proxyChallengeViewerRequest(req, res);
   });
@@ -588,12 +615,12 @@ export function createApp() {
     }
 
     const clientDir = join(__dirname, "../../dist/client");
-    app.use(express.static(clientDir));
-
-    // SPA fallback
     const indexPath = join(clientDir, "index.html");
     let cachedIndexHtml: string | null = null;
-    app.get("*", async (req, res) => {
+    const serveClientHtml = async (
+      req: express.Request,
+      res: express.Response,
+    ) => {
       if (!req.accepts("html")) {
         res.status(404).end();
         return;
@@ -603,7 +630,12 @@ export function createApp() {
       }
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.send(renderHtmlWithAnalyticsConfig(cachedIndexHtml));
-    });
+    };
+
+    // Entry HTML must be rewritten before static middleware can serve it.
+    app.get(["/", "/index.html"], serveClientHtml);
+    app.use(express.static(clientDir, { index: false }));
+    app.get("*", serveClientHtml);
   }
 
   app.use(apiErrorHandler);

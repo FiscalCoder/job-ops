@@ -6,6 +6,12 @@ import {
 } from "./settings-registry";
 
 describe("settingsRegistry helpers", () => {
+  it("uses a bare API Route default and preserves explicit model choices", () => {
+    expect(getDefaultModelForProvider("api_route")).toBe("gpt-6.1-sol");
+    expect(getDefaultModelForProvider("api-route", "claude-haiku-4-5")).toBe(
+      "claude-haiku-4-5",
+    );
+  });
   describe("searchCities defaults", () => {
     it("defaults to empty when no location env is configured", () => {
       const previousSearchCities = process.env.SEARCH_CITIES;
@@ -381,6 +387,7 @@ describe("settingsRegistry helpers", () => {
       expect(getDefaultModelForProvider("claude_cli")).toBe("claude-sonnet-5");
       expect(getDefaultModelForProvider("codex")).toBe("gpt-5.4-mini");
       expect(getDefaultModelForProvider("ollama")).toBe("");
+      expect(getDefaultModelForProvider("litellm")).toBe("");
       expect(getDefaultModelForProvider("openrouter")).toBe(
         "google/gemini-3-flash-preview",
       );

@@ -10,7 +10,6 @@ import { ExpireSelectedButton } from "./ExpireJobsControls";
 import { FloatingJobActionsBar } from "./FloatingJobActionsBar";
 import { OrchestratorJobsWorkspace } from "./OrchestratorJobsWorkspace";
 import { OrchestratorMobileJobDrawer } from "./OrchestratorMobileJobDrawer";
-import type { RunMode } from "./run-mode";
 import { useFilteredJobs } from "./useFilteredJobs";
 import { useJobSelectionActions } from "./useJobSelectionActions";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
@@ -35,7 +34,7 @@ interface OrchestratorJobWorkspaceContainerProps {
   filters: ReturnType<typeof useOrchestratorFilters>;
   navigation: ReturnType<typeof useOrchestratorNavigation>;
   ui: ReturnType<typeof useOrchestratorUiState>;
-  openRunMode: (mode: RunMode) => void;
+  onFindJobs: () => void;
 }
 
 export const OrchestratorJobWorkspaceContainer: React.FC<
@@ -54,7 +53,7 @@ export const OrchestratorJobWorkspaceContainer: React.FC<
   filters,
   navigation,
   ui,
-  openRunMode,
+  onFindJobs,
 }) => {
   const jobListHandleRef = useRef<VirtualListHandle | null>(null);
   const activeJobs = useFilteredJobs(jobs, {
@@ -67,6 +66,8 @@ export const OrchestratorJobWorkspaceContainer: React.FC<
     postedWithinDays: filters.postedWithinDays,
     employmentTypes: filters.employmentTypes,
     location: filters.location,
+    includeKeywords: filters.includeKeywords,
+    excludeKeywords: filters.excludeKeywords,
     sort: filters.sort,
   });
   const counts = useMemo(() => getJobCounts(jobs), [jobs]);
@@ -190,24 +191,24 @@ export const OrchestratorJobWorkspaceContainer: React.FC<
       navigation.activeTab === "all"
     ) {
       return {
-        label: "Run search",
-        onClick: () => openRunMode("automatic"),
+        label: "Find jobs",
+        onClick: onFindJobs,
       };
     }
 
     return undefined;
-  }, [counts.discovered, handleTabChange, navigation.activeTab, openRunMode]);
+  }, [counts.discovered, handleTabChange, navigation.activeTab, onFindJobs]);
 
   const secondaryEmptyStateAction = useMemo(() => {
     if (navigation.activeTab === "ready") {
       return {
-        label: "Run search",
-        onClick: () => openRunMode("automatic"),
+        label: "Find jobs",
+        onClick: onFindJobs,
       };
     }
 
     return undefined;
-  }, [navigation.activeTab, openRunMode]);
+  }, [navigation.activeTab, onFindJobs]);
 
   const emptyStateMessage = useMemo(() => {
     if (filters.dateFilter.dimensions.length === 0) {
@@ -245,6 +246,8 @@ export const OrchestratorJobWorkspaceContainer: React.FC<
           postedWithinDays={filters.postedWithinDays}
           employmentTypes={filters.employmentTypes}
           locationFilter={filters.location}
+          includeKeywords={filters.includeKeywords}
+          excludeKeywords={filters.excludeKeywords}
           dateFilter={filters.dateFilter}
           sourcesWithJobs={sourcesWithJobs}
           sort={filters.sort}
@@ -265,6 +268,8 @@ export const OrchestratorJobWorkspaceContainer: React.FC<
           onPostedWithinChange={filters.setPostedWithinDays}
           onEmploymentTypesChange={filters.setEmploymentTypes}
           onLocationFilterChange={filters.setLocation}
+          onIncludeKeywordsChange={filters.setIncludeKeywords}
+          onExcludeKeywordsChange={filters.setExcludeKeywords}
           onDateFilterChange={filters.setDateFilter}
           onSortChange={filters.setSort}
           onResetFilters={filters.resetFilters}
