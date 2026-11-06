@@ -72,6 +72,21 @@ describe("AiSpendStrip", () => {
     expect(await screen.findByText("unavailable")).toBeTruthy();
   });
 
+  it("shows only the DeepSeek balance before any call is tracked", async () => {
+    getAiSpend.mockResolvedValue({
+      claude,
+      deepseek: {
+        ...deepseek,
+        trackedUsd: 0,
+        calls: 0,
+        since: null,
+        byFeature: [],
+      },
+    });
+    renderWithQueryClient(<AiSpendStrip />);
+    expect(await screen.findByText("$8.13 left")).toBeTruthy();
+  });
+
   it("flags a chip as running low under the threshold", async () => {
     getAiSpend.mockResolvedValue({
       claude: {

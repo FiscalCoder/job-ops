@@ -34,6 +34,12 @@ export function describeClaude(claude: ClaudeSpend | null): string {
 }
 
 export function describeDeepSeek(deepseek: DeepSeekSpend): string {
+  // Nothing tracked yet: "$0.00 spent" would read as all-time, so show only the balance.
+  if (deepseek.calls === 0) {
+    return deepseek.balance
+      ? `${usd(deepseek.balance.total)} left`
+      : "no calls tracked yet";
+  }
   const since = formatSince(deepseek.since);
   const spent = `${usd(deepseek.trackedUsd)} spent${since ? ` since ${since}` : ""}`;
   if (!deepseek.balance) return spent;
@@ -97,7 +103,9 @@ function DeepSeekDetails({ deepseek }: { deepseek: DeepSeekSpend }) {
       <p className="pt-1 text-muted-foreground">
         {deepseek.balanceError
           ? `Balance unavailable (${deepseek.balanceError}).`
-          : "Left is DeepSeek's own balance. Spend is counted from when tracking started."}
+          : deepseek.calls === 0
+            ? "Left is DeepSeek's own balance. Spend is counted from the next scoring run on."
+            : "Left is DeepSeek's own balance. Spend is counted from when tracking started."}
       </p>
     </div>
   );
@@ -109,7 +117,13 @@ const Chip: React.FC<{
   low: boolean;
   details: React.ReactNode;
 }> = ({ name, value, low, details }) => (
-  <Tip content={details} side="bottom" align="end" asChild>
+  <Tip
+    content={details}
+    side="bottom"
+    align="end"
+    asChild
+    contentClassName="w-72 border border-border/70 bg-popover px-3 py-2 text-popover-foreground shadow-lg"
+  >
     <button
       type="button"
       aria-label={`${name}: ${value}${low ? " (running low)" : ""}. Show details`}
