@@ -229,9 +229,15 @@ function answersYesNo(rule: FieldRule): boolean {
 }
 
 const HISTORY_NAME = /^history\.(experience|education)\.(\d+)\.(\w+)$/;
+/** "Address Line 2", "Address 3": its own line, never a copy of line 1. */
+const LATER_ADDRESS_LINE = /^(street )?address( line)? ?([2-9])\s*\*?$/;
 
 function ruleFor(field: FormField): FieldRule {
   if (field.type === "hidden") return { kind: "hidden" };
+  const laterLine = LATER_ADDRESS_LINE.exec(
+    field.label.toLowerCase().trim(),
+  )?.[3];
+  if (laterLine) return bank(`location.address_line${laterLine}`);
   const history = HISTORY_NAME.exec(field.canonical ?? "");
   if (history)
     return {

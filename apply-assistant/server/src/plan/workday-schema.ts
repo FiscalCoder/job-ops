@@ -217,8 +217,42 @@ const SECTION_IDS: readonly [RegExp, (resume: ResumeFacts) => number][] = [
   [/^work-experience-section$/i, (r) => r.experience.length],
   [/^education-section$/i, (r) => r.education.length],
 ];
+/**
+ * Fallback when a tenant renames the section ("Work History (Optional)" at Salesforce):
+ * matched on the heading's words, with "(Optional)" and similar dropped.
+ */
+const SECTION_WORDS: readonly [RegExp, (resume: ResumeFacts) => number][] = [
+  [
+    /^(work (experience|history)|employment( history)?|professional experience|experience)$/i,
+    (r) => r.experience.length,
+  ],
+  [/^education( history)?$/i, (r) => r.education.length],
+];
 /** Never add more than this many entries to one section. */
 const MAX_ADDED = 10;
+
+function headingWords(section: { id: string; label: string }): string[] {
+  const clean = (s: string) =>
+    s
+      .replace(/-section$/i, "")
+      .replace(/\([^)]*\)/g, " ")
+      .replace(/[-_]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  return [clean(section.label), clean(section.id)].filter(Boolean);
+}
+
+function wantedFor(
+  section: { id: string; label: string },
+  resume: ResumeFacts,
+): number | undefined {
+  const exact = SECTION_IDS.find(([id]) => id.test(section.id));
+  if (exact) return exact[1](resume);
+  const words = headingWords(section);
+  return SECTION_WORDS.find(([re]) => words.some((w) => re.test(w)))?.[1](
+    resume,
+  );
+}
 
 /** Entries to add (Add button clicks) so each section has one per entry on your resume. */
 export function entriesToAdd(
@@ -226,7 +260,7 @@ export function entriesToAdd(
   resume: ResumeFacts,
 ): { section: string; count: number }[] {
   return (page.sections ?? []).flatMap((section) => {
-    const wanted = SECTION_IDS.find(([id]) => id.test(section.id))?.[1](resume);
+    const wanted = wantedFor(section, resume);
     const count = Math.min((wanted ?? 0) - section.entries, MAX_ADDED);
     return count > 0 ? [{ section: section.id, count }] : [];
   });

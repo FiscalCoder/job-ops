@@ -68,6 +68,8 @@ export { learnable } from "./run-page";
 
 export interface RunView {
   readonly job: QueueItem;
+  /** The run on the server (its Claude spend is asked for by this id). */
+  readonly runId: string;
   readonly state: RunState;
   readonly action: NextAction;
   readonly busy: boolean;
@@ -131,6 +133,8 @@ const YOURS_TO_TYPE =
 const REDRAWN =
   /cannot find context|execution context was destroyed|detached frame|node is detached|target closed/i;
 const REDRAW_SETTLE_MS = 800;
+/** The field's ref matches nothing now (the page re-rendered it: Oracle's address after Country). */
+const NOT_FOUND = /field not found on the page/i;
 
 /** Workday swaps a page's content in place: give the new one a moment to finish. */
 const PAGE_SETTLE_MS = 1_500;
@@ -163,6 +167,8 @@ export class RunController {
   private readonly autopilot: boolean;
   /** Pages Claude has read closely (by step): once per page, by itself or when you ask. */
   private readonly readClosely = new Set<string>();
+  /** Pages read again by plain code (no Claude) after a field went missing: once per page. */
+  private readonly rereadPlain = new Set<string>();
   /** Claude's read of a generic form's page, started with it: its plan, once it's back. */
   private early: { readonly step: string; readonly entries: PlanEntry[] } | null = null;
   /** How often each step went to Claude by itself: at most MAX_CLAUDE_TRIES (no loops). */
@@ -422,6 +428,7 @@ export class RunController {
   view(): RunView {
     return {
       job: this.job,
+      runId: this.runId,
       state: this.state,
       action: nextAction(this.state),
       busy: this.busy,
@@ -983,6 +990,24 @@ export class RunController {
   }
 
   /**
+   * A field whose ref matches nothing now (the page drew it again, with new ids): once per
+   * page, plain code reads the page again and plans it from that field. Before Claude reads
+   * the page or works the field. False when done already on this page, or paused.
+   */
+  private rereadFrom(step: Step): boolean {
+    const page = this.pageStep;
+    if (!this.wizard || !page || this.rereadPlain.has(page) || this.state.paused)
+      return false;
+    this.rereadPlain.add(page);
+    this.trace.event(
+      "decision",
+      `"${step.entry.label}" isn't on the page any more (it was drawn again): the page is read again and planned from there, without Claude`,
+      { stepSeq: step.seq },
+    );
+    return true;
+  }
+
+  /**
    * A field still not filled after the site's driver, the generic one and saved steps: once per
    * page, Claude reads the whole form closely and the page is planned again from that field
    * (the fields before it stay). Before Claude works the field itself (escalate). False when
@@ -1275,6 +1300,7 @@ export class RunController {
       "html+screenshot",
       undefined,
       false,
+      true,
     ).catch((error: unknown) => {
       this.trace.event("error", `Claude's read of the page failed: ${errorText(error)}`);
       return null;
@@ -1384,6 +1410,8 @@ export class RunController {
     if (this.tabClosed) return;
     /** Stuck: the page is read closely and planned again from this field (not the next step). */
     let again: FillFrom | null = null;
+    /** How the page is read again: by plain code (false) or by Claude ("html"). */
+    let againCloselyBy: Closely = "html";
     /** You pressed Skip while it was being filled. */
     let skipped = false;
     // You moved on before this page was finished: work on the page you're on.
@@ -1482,8 +1510,20 @@ export class RunController {
             ? { type: "filled", result: outcome.result }
             : { type: "fill-failed", reason: outcome.reason },
         );
+      // The field's gone (the page re-rendered it): first, once per page, plain code reads the
+      // page again and plans it from here, with no Claude.
+      if (
+        !skipped &&
+        !outcome.ok &&
+        !step.operate &&
+        NOT_FOUND.test(outcome.reason) &&
+        this.rereadFrom(step)
+      ) {
+        again = this.fromStep(step);
+        againCloselyBy = false;
+      }
       // Not filled: once per page, Claude reads the whole page and it's planned again from here.
-      if (!skipped && !outcome.ok && !step.operate && this.readCloselyFrom(step))
+      else if (!skipped && !outcome.ok && !step.operate && this.readCloselyFrom(step))
         again = this.fromStep(step);
       // Then Claude tries it; after Claude's own try, once more with what that did (as your
       // "Let Claude do it" would: it settles a question it declined, a list it missed).
@@ -1501,7 +1541,7 @@ export class RunController {
       return this.nextPage(
         this.pageStep || "this page",
         { kind: "from", from: again },
-        "html",
+        againCloselyBy,
       );
     void this.loop();
   }

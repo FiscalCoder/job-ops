@@ -226,6 +226,7 @@ export function createPlanRoutes(plans: PlansService) {
             snapshot.success ? snapshot.data : undefined,
             screenshot.success ? screenshot.data : undefined,
             note.success ? note.data : undefined,
+            req.body?.reuse === true,
           ),
         );
       } catch (error) {

@@ -103,6 +103,8 @@ export async function planPagedPage(
   note?: string,
   /** False while the page is being filled: no "Add" clicks of its own (a read alongside). */
   mayAdd = true,
+  /** The run's own closer read: the server may use one it kept for this layout. */
+  reuse = false,
 ): Promise<PlanEntry[]> {
   if (driver.system === "workday" && FINAL_STEP.test(await driver.step()))
     return [];
@@ -121,6 +123,7 @@ export async function planPagedPage(
           snapshot,
           ...(screenshot ? { screenshot } : {}),
           ...(note ? { note } : {}),
+          ...(reuse && !note ? { reuse: true } : {}),
         }
       : page,
   )) as PagePlan;

@@ -185,6 +185,32 @@ describe("Claude's closer read (a field got stuck, or you asked)", () => {
     expect(create).toHaveBeenCalledTimes(2);
   });
 
+  it("the run's own closer read of a layout read closely before reuses it; yours and notes still ask", async () => {
+    const create = vi.fn<MessagesApi["create"]>(async () => answer(closer));
+    const kept = new Map<string, unknown>();
+    const store = {
+      get: (k: string) => kept.get(k),
+      set: (k: string, m: PageMap) => void kept.set(k, m),
+    };
+    const html = "<form><input></form>";
+    const first = createPageMapper({ messages: { create }, model: "h", deepModel: "s", store });
+    // Nothing kept yet: even the run's own read asks.
+    await first.map("u1", "", page, undefined, { snapshot: html, reuse: true });
+    expect(create).toHaveBeenCalledTimes(1);
+    // After a restart (store only): the run's own read is answered from what was kept.
+    const later = createPageMapper({ messages: { create }, model: "h", deepModel: "s", store });
+    const reused = await later.map("u1", "", page, undefined, { snapshot: html, reuse: true });
+    expect(reused?.fields.find((f) => f.ref === "#q7")?.meaning).toBe("phone");
+    expect(create).toHaveBeenCalledTimes(1);
+    // You asked (no reuse), or told it something: Claude reads again.
+    await later.map("u1", "", page, undefined, { snapshot: html });
+    await later.map("u1", "", page, undefined, { snapshot: html, reuse: true, note: "x" });
+    expect(create).toHaveBeenCalledTimes(3);
+    // Another user's layout isn't shared.
+    await later.map("u2", "", page, undefined, { snapshot: html, reuse: true });
+    expect(create).toHaveBeenCalledTimes(4);
+  });
+
   it("a multi-page form: Claude is told the pages before this one", () => {
     const prompt = pageMapPrompt(page, ["/apply · Personal details", "/apply · Experience"]);
     expect(prompt.split("\n")[0]).toBe(

@@ -321,6 +321,8 @@ export function createPlans(deps: PlansDeps) {
     screenshot?: string,
     /** What you told Claude about this page mid-fill. */
     note?: string,
+    /** The run's own closer read: one kept for this layout is used instead of asking. */
+    reuse?: boolean,
   ): Promise<WorkdayPage> {
     const mapper = deps.pageMapper;
     if (!mapper) return page;
@@ -330,6 +332,7 @@ export function createPlans(deps: PlansDeps) {
         ...(snapshot ? { snapshot } : {}),
         ...(snapshot && screenshot ? { screenshot } : {}),
         ...(note ? { note } : {}),
+        ...(snapshot && reuse ? { reuse } : {}),
       })
       .catch(() => null);
     if (!map) {
@@ -604,6 +607,8 @@ export function createPlans(deps: PlansDeps) {
       screenshot?: string,
       /** What you told Claude about this page ("the resume goes in the Resume box"). */
       note?: string,
+      /** The run's own closer read (alongside the fill): a kept one for this layout will do. */
+      reuse?: boolean,
     ): Promise<WorkdayPagePlan> {
       const { job, resume } = await jobAndResume(token, jobId);
       const generic = page.system === "generic";
@@ -616,6 +621,7 @@ export function createPlans(deps: PlansDeps) {
         snapshot,
         screenshot,
         note,
+        reuse,
       );
       // Jobs and degrees the page shows as cards already (read from your resume): used, so its
       // blocks take the others, and never added again.

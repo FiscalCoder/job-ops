@@ -288,6 +288,31 @@ describe("Workday page plans", () => {
     ]);
   });
 
+  it("My Experience with renamed sections (Salesforce: Work History (Optional)): still Adds", () => {
+    const page: WorkdayPage = {
+      step: "My Experience",
+      fields: [],
+      sections: [
+        {
+          id: "Work-History-(Optional)-section",
+          label: "Work History (Optional)",
+          entries: 0,
+        },
+        {
+          id: "Education-(Optional)-section",
+          label: "Education (Optional)",
+          entries: 0,
+        },
+        { id: "Websites-section", label: "Websites", entries: 0 },
+        { id: "Certifications-section", label: "Certifications", entries: 0 },
+      ],
+    };
+    expect(entriesToAdd(page, resumeFacts(fakeDesignResume))).toEqual([
+      { section: "Work-History-(Optional)-section", count: 2 },
+      { section: "Education-(Optional)-section", count: 2 },
+    ]);
+  });
+
   it("Voluntary Disclosures: the terms checkbox is consent; gender declines without an answer", () => {
     const plan = planOf({
       step: "Voluntary Disclosures",

@@ -409,10 +409,20 @@ export abstract class TrustedDriver implements FormDriver {
       () =>
         this.frame.evaluate((errorSelector) => {
         // Hidden messages don't count (iCIMS always carries a hidden "Please Enable Cookies").
+        // Status announcements in alert regions (Oracle: "You're all set, Bharghav!", "Saved",
+        // "The form Address form loaded", "apply-flow.a11y.dependency-fields-loading") aren't
+        // problems; anything with an error word still is.
+        const ERROR_WORDS =
+          /required|invalid|error|must|please|enter|select|missing|incorrect|failed|not valid|too (long|short)/i;
+        const NOT_A_PROBLEM =
+          /^[\w-]+(\.[\w-]+){2,}$|^(saved|loading\b.*|.*\bloaded|.*\bsuccessfully\b.*|you['’]?re all set\b.*|welcome\b.*|thank you\b.*)$/i;
         const errors = [...document.querySelectorAll(errorSelector)]
           .filter((el) => el.checkVisibility({ visibilityProperty: true }))
-          .map((el) => el.textContent?.trim() ?? "")
-          .filter(Boolean);
+          .map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim())
+          .filter(
+            (text) =>
+              text && !(NOT_A_PROBLEM.test(text) && !ERROR_WORDS.test(text)),
+          );
         // Only a visible challenge counts; forms often carry an invisible reCAPTCHA badge.
         const challenge = [
           ...document.querySelectorAll<HTMLIFrameElement>(
@@ -449,6 +459,19 @@ export abstract class TrustedDriver implements FormDriver {
             .replace(/[*\s]+/g, " ")
             .trim()
             .slice(0, 80);
+        // A search box whose picks show beside it (Workday's multiselect: pills plus
+        // "1 item selected, India (+91)" in its aria hint) is filled though its value is "".
+        const pickShown = (el: HTMLElement) =>
+          !!el
+            .closest("[data-automation-id='multiSelectContainer']")
+            ?.querySelector("[data-automation-id='selectedItem']") ||
+          (el.getAttribute("aria-describedby") ?? "")
+            .split(/\s+/)
+            .some((id) =>
+              /\b[1-9]\d* items? selected\b/i.test(
+                (id && document.getElementById(id)?.textContent) || "",
+              ),
+            );
         const radios = new Set<string>();
         const empty: string[] = [];
         for (const el of document.querySelectorAll<
@@ -462,7 +485,8 @@ export abstract class TrustedDriver implements FormDriver {
             ["hidden", "file", "submit", "button"].includes(input.type) ||
             el.getAttribute("role") === "combobox" ||
             el.hasAttribute("aria-autocomplete") ||
-            !shown(el)
+            !shown(el) ||
+            pickShown(el)
           )
             continue;
           if (input.type === "radio") {

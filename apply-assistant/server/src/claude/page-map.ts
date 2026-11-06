@@ -214,6 +214,11 @@ export interface MapRequest {
   readonly note?: string;
   /** With the closer read you asked for: what the page shows now (JPEG, base64). */
   readonly screenshot?: string;
+  /**
+   * The closer read the run starts by itself (alongside the fill): a closer read of this same
+   * layout kept from before is used instead of asking Claude again. Never with a note.
+   */
+  readonly reuse?: boolean;
 }
 
 /** The most of your instruction sent. */
@@ -270,6 +275,13 @@ export function createPageMapper(options: {
       const kept = known.get(key) ?? stored(key);
       const deep = Boolean(request.snapshot);
       if (kept && !deep && !request.note) return kept;
+      // A closer read of this layout made before: kept apart from the plain map, reused only
+      // by the run's own read (yours, or one for a stuck field, always asks again).
+      const deepKey = `${key} deep`;
+      if (deep && request.reuse && !request.note) {
+        const keptDeep = known.get(deepKey) ?? stored(deepKey);
+        if (keptDeep) return keptDeep;
+      }
       // Your instruction first: it overrides what the labels suggest.
       const told = request.note
         ? `The person filling this form told you (follow it; it overrides what the labels suggest): "${request.note.slice(0, MAX_NOTE)}"\n`
@@ -310,11 +322,15 @@ ${text}` },
       if (message.stop_reason !== "end_turn") return null;
       const parsed = reply.safeParse(JSON.parse(replyText(message)));
       if (!parsed.success) return null;
-      known.set(key, parsed.data);
-      try {
-        options.store?.set(key, parsed.data);
-      } catch {
-        // Not kept past a restart; this run still has it.
+      // A closer read with no note of yours is also kept as this layout's closer read.
+      const keys = deep && !request.note ? [key, deepKey] : [key];
+      for (const k of keys) {
+        known.set(k, parsed.data);
+        try {
+          options.store?.set(k, parsed.data);
+        } catch {
+          // Not kept past a restart; this run still has it.
+        }
       }
       return parsed.data;
     },

@@ -208,4 +208,23 @@ describe("address, postal code, covenants", () => {
       ]),
     ).toEqual(bank("history.restrictive_covenants"));
   });
+
+  it("Address Line 2/3 never take Line 1, even when Claude's map calls them street_address (Oracle)", () => {
+    const mapped = (label: string) =>
+      classifyField({
+        ref: "#addressLine2-27",
+        canonical: "street_address",
+        label,
+        type: "text",
+        required: false,
+        options: [],
+        section: "main",
+        description: null,
+      } as never).rule;
+    expect(mapped("Address Line 1")).toEqual(bank("location.address_line1"));
+    expect(mapped("Address Line 2")).toEqual(bank("location.address_line2"));
+    expect(mapped("Address Line 3")).toEqual(bank("location.address_line3"));
+    expect(mapped("Address 2")).toEqual(bank("location.address_line2"));
+    expect(ruleOf("Address Line 2")).toEqual(bank("location.address_line2"));
+  });
 });
