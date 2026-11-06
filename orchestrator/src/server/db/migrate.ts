@@ -1258,6 +1258,26 @@ const migrations = [
        ORDER BY se.occurred_at DESC, se.id DESC
        LIMIT 1
      ), 'applied') = 'closed'`,
+
+  `CREATE TABLE IF NOT EXISTS llm_usage (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'tenant_default',
+    user_id TEXT,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    host TEXT,
+    feature TEXT,
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_hit_tokens INTEGER,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL,
+    peak INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+  )`,
+
+  `CREATE INDEX IF NOT EXISTS idx_llm_usage_tenant_user_created
+    ON llm_usage(tenant_id, user_id, created_at)`,
 ];
 
 console.log("🔧 Running database migrations...");

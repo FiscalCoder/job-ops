@@ -340,6 +340,9 @@ export const MIGRATIONS: readonly string[] = [
      map_json text not null,
      created_at text not null default (datetime('now'))
    );`,
+  // Claude credit you loaded (an estimate: Anthropic has no API for what's left) and the date.
+  `alter table user_settings add column claude_credit_usd real;
+   alter table user_settings add column claude_credit_as_of text;`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

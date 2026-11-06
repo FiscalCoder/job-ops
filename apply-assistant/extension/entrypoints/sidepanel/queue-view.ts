@@ -144,12 +144,26 @@ export interface QueueFilters {
   readonly remote: boolean;
   /** Only jobs whose form plan is ready (Greenhouse, Ashby, Lever): one click fills them. */
   readonly ready: boolean;
+  /** Also jobs scoring under MIN_QUEUE_SCORE (shown only when you ask). */
+  readonly lowScores?: boolean;
 }
 export const NO_FILTERS: QueueFilters = {
   posted: "any",
   remote: false,
   ready: false,
+  lowScores: false,
 };
+
+/**
+ * Your saved search tailors only jobs scoring 70+, but a later rescore can drop a "ready" job
+ * below that (scoring prompt v5 did, 2026-11-02). Those stay out of the list unless you ask,
+ * and Autopilot never takes them.
+ */
+export const MIN_QUEUE_SCORE = 70;
+
+/** Scores at least MIN_QUEUE_SCORE, or isn't scored yet. */
+export const meetsMinScore = (item: QueueItem): boolean =>
+  item.score === null || item.score >= MIN_QUEUE_SCORE;
 
 /** One click fills it: its posting is found and its form planned. */
 export const isReadyToFill = (item: QueueItem): boolean =>
@@ -162,6 +176,7 @@ export function passesFilters(
   filters: QueueFilters,
   now = new Date(),
 ): boolean {
+  if (!filters.lowScores && !meetsMinScore(item)) return false;
   if (filters.ready && !isReadyToFill(item)) return false;
   if (filters.remote && !/\bremote\b/i.test(`${item.location ?? ""} ${item.title}`))
     return false;

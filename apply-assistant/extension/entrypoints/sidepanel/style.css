@@ -672,3 +672,22 @@ details.more[open] {
 #import-tab {
   justify-self: start;
 }
+
+/* Claude spend: two labelled fields side by side, Save aligned with the inputs. */
+.divider {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+  width: 100%;
+}
+
+.credit-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+#claude-spent.low {
+  color: var(--warn);
+}

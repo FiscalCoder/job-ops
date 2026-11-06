@@ -3,7 +3,7 @@ import { z } from "zod";
 import { type JobOpsApi, JobOpsError } from "../jobops/client.js";
 import { LOOKUP_STATUSES } from "../resolver/lookups.js";
 import type { AnswerBankRepo } from "../store/answer-bank-repo.js";
-import { RunConflictError, type RunsRepo } from "../store/runs-repo.js";
+import { type Run, RunConflictError, type RunsRepo } from "../store/runs-repo.js";
 import type { TraceRecord } from "../store/trace-store.js";
 import { type AuthedRequest, sendJobOpsFailure } from "./auth.js";
 import { sendError, sendOk } from "./envelope.js";
@@ -37,6 +37,8 @@ export interface RunRoutesDeps {
   readonly runs: RunsRepo;
   readonly answers: AnswerBankRepo;
   readonly trace?: TraceRecord;
+  /** A run just finished: store what Claude cost in it. Never fails the request. */
+  readonly onRunEnded?: (run: Run) => void;
 }
 
 export function createRunRoutes({
@@ -44,6 +46,7 @@ export function createRunRoutes({
   runs,
   answers,
   trace = () => {},
+  onRunEnded,
 }: RunRoutesDeps) {
   const router = Router();
   const tokenOf = (req: AuthedRequest) => req.jobOpsToken ?? "";
@@ -209,6 +212,16 @@ export function createRunRoutes({
         return;
       }
       const { run, actions } = finished;
+      try {
+        onRunEnded?.(run);
+      } catch (error) {
+        trace({
+          jobId: run.jobId,
+          runId: run.id,
+          kind: "error",
+          message: `Couldn't store the run's Claude cost: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
       trace({
         jobId: run.jobId,
         runId: run.id,

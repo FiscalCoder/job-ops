@@ -99,6 +99,13 @@ export function createRunsRepo(db: DatabaseSync) {
     "update runs set ended_at = datetime('now'), outcome = ?, interventions = ? where id = ? and ended_at is null",
   );
 
+  const setCost = db.prepare(
+    "update runs set model_cost = ? where user_id = ? and id = ?",
+  );
+  const endedUnpriced = db.prepare(
+    "select * from runs where user_id = ? and ended_at is not null and model_cost = 0 order by started_at",
+  );
+
   const get = (id: string): Run | null => {
     const row = getRun.get(currentUser(), id) as RunRow | undefined;
     return row ? toRun(row) : null;
@@ -127,6 +134,14 @@ export function createRunsRepo(db: DatabaseSync) {
     },
     get,
     actions,
+    /** Stores what Claude cost in a run (dollars). */
+    setModelCost(runId: string, cost: number): void {
+      setCost.run(cost, currentUser(), runId);
+    },
+    /** Finished runs whose cost was never stored (still 0). */
+    endedWithoutCost(): Run[] {
+      return (endedUnpriced.all(currentUser()) as unknown as RunRow[]).map(toRun);
+    },
     all(): Run[] {
       return (allRuns.all(currentUser()) as unknown as RunRow[]).map(toRun);
     },

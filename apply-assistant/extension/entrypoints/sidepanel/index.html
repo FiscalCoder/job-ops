@@ -125,13 +125,27 @@
       </details>
 
       <details class="card">
-        <summary><strong>Your Claude key</strong></summary>
+        <summary><strong>Claude key and spend</strong></summary>
         <p id="claude-status" class="muted"></p>
         <form id="claude-form" class="row">
           <input id="claude-key" type="password" autocomplete="off" placeholder="sk-ant-…" aria-label="Your Anthropic API key" />
           <button type="submit">Save</button>
         </form>
         <button type="button" id="claude-remove" class="link" hidden>Remove my key</button>
+        <hr class="divider" />
+        <strong>Spend</strong>
+        <p id="claude-spent" class="muted" aria-live="polite"></p>
+        <p class="muted">Anthropic doesn't share your remaining credit, so enter what you loaded and when. "Left" is that amount minus spend since then.</p>
+        <form id="claude-credit-form" class="credit-form">
+          <label>Credit loaded ($)
+            <input id="claude-credit" type="number" inputmode="decimal" min="0" max="100000" step="0.01" placeholder="e.g. 20" />
+          </label>
+          <label>On
+            <input id="claude-credit-date" type="date" />
+          </label>
+          <button type="submit">Save</button>
+        </form>
+        <button type="button" id="claude-credit-clear" class="link" hidden>Clear credit</button>
       </details>
 
       <div class="card">

@@ -543,7 +543,7 @@ try {
   // 5. A job matched to a Greenhouse posting whose page is the company's own form (Okta): no
   // Greenhouse form there, so the page's own form is read and filled (site driver → generic).
   later.push({
-    jobId: "okta", score: 60, title: "Engineer", employer: "okta", applicationLink: null,
+    jobId: "okta", score: 75, title: "Engineer", employer: "okta", applicationLink: null,
     jobUrl: "https://careers.okta.example:8443/opportunity/7",
     plan: { summary: { fill: 1 }, builtAt: "2026-10-31T00:00:00Z" },
     target: { status: "matched", ats: "greenhouse", postingUrl: "https://careers.okta.example:8443/opportunity/7" },
@@ -571,13 +571,13 @@ try {
   // can't set (a list that searches only on Enter), and a section its plan doesn't have
   // (Employment: a job added with Add another, both filled).
   later.push({
-    jobId: "ghsite", score: 55, title: "Engineer", employer: "ghsite", applicationLink: null,
+    jobId: "ghsite", score: 72, title: "Engineer", employer: "ghsite", applicationLink: null,
     jobUrl: "https://careers.ghsite.example:8443/apply/6",
     plan: { summary: { fill: 3 }, builtAt: "2026-10-31T00:00:00Z" },
     target: { status: "matched", ats: "greenhouse", postingUrl: "https://careers.ghsite.example:8443/apply/6" },
   });
   await panel.locator("#refresh").click();
-  await panel.locator("#queue li", { hasText: "AI 55" }).first().click();
+  await panel.locator("#queue li", { hasText: "AI 72" }).first().click();
   await panel.getByRole("button", { name: "Start supervised fill" }).click();
   const heardOf = async (kind) => {
     for (let i = 0; i < 160 && !trail.some((e) => e.kind === kind); i++)

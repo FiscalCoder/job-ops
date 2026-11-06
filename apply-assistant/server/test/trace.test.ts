@@ -133,6 +133,7 @@ describe("trace store", () => {
       });
     const ancient = shot("ancient");
     store.record({ jobId: "j1", kind: "plan", message: "old" });
+    store.record({ jobId: "j1", kind: "claude-usage", message: "old spend" });
     advance(61);
     const a = shot("a");
     advance(1);
@@ -149,6 +150,8 @@ describe("trace store", () => {
     expect(store.readSnapshot(ancient.id)).toBeNull();
     expect(store.readSnapshot(a.id)).toBeNull();
     expect(store.events("j1").some((e) => e.message === "old")).toBe(false);
+    // What Claude cost is kept: the all-time spend total is summed from it.
+    expect(store.events("j1").some((e) => e.message === "old spend")).toBe(true);
     }));
 });
 

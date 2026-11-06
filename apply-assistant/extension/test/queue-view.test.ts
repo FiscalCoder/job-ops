@@ -10,6 +10,7 @@ import {
   type QueueFilters,
   limitText,
   matchesSearch,
+  meetsMinScore,
   periodText,
   postedText,
   type QueueViewActions,
@@ -252,6 +253,31 @@ describe("filters, New, and where you apply", () => {
     expect(ids({ ...NO_FILTERS, posted: "7" })).toEqual(["today", "week"]);
     expect(ids({ ...NO_FILTERS, remote: true })).toEqual(["today", "ready"]);
     expect(ids({ ...NO_FILTERS, ready: true })).toEqual(["ready"]);
+  });
+
+  it("jobs a rescore pushed below 70 are hidden until you ask; unscored ones show", () => {
+    const scored = [
+      item({ jobId: "high", score: 82 }),
+      item({ jobId: "edge", score: 70 }),
+      item({ jobId: "low", score: 61 }),
+      item({ jobId: "capped", score: 25 }),
+      item({ jobId: "unscored", score: null }),
+    ];
+    const shown = (filters: QueueFilters) =>
+      scored.filter((j) => passesFilters(j, filters, now)).map((j) => j.jobId);
+    expect(shown(NO_FILTERS)).toEqual(["high", "edge", "unscored"]);
+    expect(shown({ ...NO_FILTERS, lowScores: true })).toEqual([
+      "high",
+      "edge",
+      "low",
+      "capped",
+      "unscored",
+    ]);
+    expect(scored.filter(meetsMinScore).map((j) => j.jobId)).toEqual([
+      "high",
+      "edge",
+      "unscored",
+    ]);
   });
 
   it("New: found since you last looked (nothing is new the first time)", () => {

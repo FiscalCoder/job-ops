@@ -3,6 +3,7 @@
  */
 
 import { Router } from "express";
+import { aiSpendRouter } from "./routes/ai-spend";
 import { appStatusRouter } from "./routes/app-status";
 import { authRouter } from "./routes/auth";
 import { authSsoRouter } from "./routes/auth-sso";
@@ -31,6 +32,7 @@ import { workspacesRouter } from "./routes/workspaces";
 export const apiRouter = Router();
 
 apiRouter.use("/app", appStatusRouter);
+apiRouter.use("/ai-spend", aiSpendRouter);
 apiRouter.use("/billing", billingRouter);
 apiRouter.use("/jobs", jobsRouter);
 apiRouter.use("/jobs/:id/chat", ghostwriterRouter);

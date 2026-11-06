@@ -1,4 +1,5 @@
 export * from "./admin";
+export * from "./ai-spend";
 export * from "./app-status";
 export * from "./auth";
 export * from "./auth-session";

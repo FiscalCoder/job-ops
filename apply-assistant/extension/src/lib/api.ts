@@ -72,6 +72,41 @@ export interface ClaudeKeyStatus {
   readonly hint: string | null;
 }
 
+/** What Claude cost in one run, in dollars. */
+export interface RunCost {
+  readonly runId: string;
+  readonly jobId: string;
+  readonly costUsd: number;
+  readonly calls: number;
+  readonly unpriced: number;
+  readonly byModel: readonly {
+    model: string;
+    costUsd: number;
+    calls: number;
+  }[];
+}
+
+export interface ClaudeSummary {
+  readonly totalUsd: number;
+  readonly monthUsd: number;
+  readonly todayUsd: number;
+  readonly calls: number;
+  readonly unpriced: number;
+  readonly byModel: readonly { model: string; usd: number; calls: number }[];
+  readonly since: string | null;
+  readonly credit: {
+    readonly amountUsd: number;
+    readonly asOf: string;
+    readonly spentSinceUsd: number;
+    readonly remainingUsd: number;
+  } | null;
+}
+
+export interface ClaudeCreditSetting {
+  readonly amountUsd: number | null;
+  readonly asOf: string | null;
+}
+
 export interface OperateShot {
   readonly data: string;
   readonly mediaType: "image/jpeg";
@@ -289,6 +324,29 @@ export class ApplyClient implements TraceApi {
 
   removeClaudeKey(): Promise<ClaudeKeyStatus> {
     return this.request("/settings/claude", undefined, "DELETE");
+  }
+
+  /** What Claude has cost in one run (the run card). */
+  runCost(runId: string): Promise<RunCost> {
+    return this.request(`/runs/${encodeURIComponent(runId)}/cost`);
+  }
+
+  /** Everything you've spent on Claude, with the credit estimate (Settings). */
+  claudeSummary(): Promise<ClaudeSummary> {
+    return this.request("/usage/claude/summary");
+  }
+
+  /** The Claude credit you loaded and when (an estimate: Anthropic has no API for what's left). */
+  claudeCredit(): Promise<ClaudeCreditSetting> {
+    return this.request("/settings/claude-credit");
+  }
+
+  saveClaudeCredit(amountUsd: number, asOf: string): Promise<ClaudeCreditSetting> {
+    return this.request("/settings/claude-credit", { amountUsd, asOf }, "PUT");
+  }
+
+  clearClaudeCredit(): Promise<ClaudeCreditSetting> {
+    return this.request("/settings/claude-credit", undefined, "DELETE");
   }
 
   /** Job Ops' model reads a job's details from its page's text (read in your browser). */

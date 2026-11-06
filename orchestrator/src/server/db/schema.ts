@@ -452,6 +452,35 @@ export const pipelineSearchPresets = sqliteTable(
   }),
 );
 
+export const llmUsage = sqliteTable(
+  "llm_usage",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .default("tenant_default")
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: text("user_id"),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    host: text("host"),
+    feature: text("feature"),
+    promptTokens: integer("prompt_tokens").notNull().default(0),
+    cacheHitTokens: integer("cache_hit_tokens"),
+    completionTokens: integer("completion_tokens").notNull().default(0),
+    costUsd: real("cost_usd"),
+    peak: integer("peak").notNull().default(0),
+    createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    tenantUserCreatedIndex: index("idx_llm_usage_tenant_user_created").on(
+      table.tenantId,
+      table.userId,
+      table.createdAt,
+    ),
+  }),
+);
+
 export const jobChatThreads = sqliteTable(
   "job_chat_threads",
   {
@@ -1120,6 +1149,8 @@ export type HostedUsageReservationRow =
   typeof hostedUsageReservations.$inferSelect;
 export type NewHostedUsageReservationRow =
   typeof hostedUsageReservations.$inferInsert;
+export type LlmUsageRow = typeof llmUsage.$inferSelect;
+export type NewLlmUsageRow = typeof llmUsage.$inferInsert;
 export type JobRow = typeof jobs.$inferSelect;
 export type NewJobRow = typeof jobs.$inferInsert;
 export type StageEventRow = typeof stageEvents.$inferSelect;

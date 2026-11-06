@@ -1,4 +1,5 @@
 import { logger } from "@infra/logger";
+import { recordLlmUsageSafely } from "@server/services/ai-spend/usage-recorder";
 import { getOriginalEnvValue } from "@server/services/envSettings";
 import { resolveLlmApiKey } from "@server/services/llm/credentials";
 import { mapGlmProviderAlias } from "@shared/settings-registry";
@@ -520,6 +521,18 @@ export class LlmService {
         }
 
         const data = await response.json();
+        if (
+          this.provider === "openai_compatible" ||
+          this.provider === "openai"
+        ) {
+          recordLlmUsageSafely({
+            provider: this.provider,
+            baseUrl: this.baseUrl,
+            model,
+            feature: jsonSchema.name || null,
+            response: data,
+          });
+        }
         const content = this.strategy.extractText(data);
 
         if (!content) {

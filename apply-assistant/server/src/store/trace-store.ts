@@ -112,6 +112,35 @@ const toEvent = (row: EventRow): TraceEvent => ({
   snapshotId: row.snapshot_id,
 });
 
+interface UsageRow {
+  job_id: string;
+  ts: string;
+  data_json: string | null;
+}
+
+/** A "claude-usage" event as the spend sums need it. */
+export interface ClaudeUsageEvent {
+  readonly jobId: string;
+  readonly ts: string;
+  readonly model: string;
+  readonly cost: number | null;
+}
+
+function toUsageEvent(row: UsageRow): ClaudeUsageEvent {
+  let data: { model?: unknown; cost?: unknown } = {};
+  try {
+    data = row.data_json ? JSON.parse(row.data_json) : {};
+  } catch {
+    // An unreadable payload still counts as a (unpriced) call.
+  }
+  return {
+    jobId: row.job_id,
+    ts: row.ts,
+    model: typeof data.model === "string" ? data.model : "unknown",
+    cost: typeof data.cost === "number" && Number.isFinite(data.cost) ? data.cost : null,
+  };
+}
+
 const toMeta = (row: SnapshotRow): SnapshotMeta => ({
   id: row.id,
   jobId: row.job_id,
@@ -161,6 +190,12 @@ export function createTraceStore(options: TraceStoreOptions) {
   );
   const ofKind = db.prepare(
     "select * from trace_events where user_id = ? and kind = ? order by id",
+  );
+  const usageOfJob = db.prepare(
+    "select job_id, ts, data_json from trace_events where user_id = ? and kind = 'claude-usage' and job_id = ? order by ts, id",
+  );
+  const usageAll = db.prepare(
+    "select job_id, ts, data_json from trace_events where user_id = ? and kind = 'claude-usage' order by ts, id",
   );
   const recent = db.prepare(
     `select job_id, max(ts) as last_ts, count(*) as events,
@@ -298,6 +333,15 @@ export function createTraceStore(options: TraceStoreOptions) {
       );
     },
 
+    /** The signed-in user's Claude calls (of one job when given), oldest first. */
+    claudeUsage(jobId?: string): ClaudeUsageEvent[] {
+      const user = currentUser();
+      const rows = (jobId === undefined
+        ? usageAll.all(user)
+        : usageOfJob.all(user, jobId)) as unknown as UsageRow[];
+      return rows.map(toUsageEvent);
+    },
+
     snapshots(jobId: string): SnapshotMeta[] {
       return (snapshotsOfJob.all(currentUser(), jobId) as unknown as SnapshotRow[]).map(
         toMeta,
@@ -348,8 +392,11 @@ export function createTraceStore(options: TraceStoreOptions) {
         dropSnapshot.run(row.id);
         removeSnapshotFile(row.file);
       }
+      // Claude's usage events stay: they are small, and the all-time spend is summed from them.
       const events = db
-        .prepare("delete from trace_events where ts < ?")
+        .prepare(
+          "delete from trace_events where ts < ? and kind <> 'claude-usage'",
+        )
         .run(cutoff).changes;
       return { events: Number(events), snapshots: doomed.length };
     },

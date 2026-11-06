@@ -21,6 +21,7 @@ import { isSupportedPosting, pagedFill } from "../../src/track/job-match";
 import { resolveTab } from "../../src/track/tabs";
 import { renderHere } from "./here-view";
 import { askClaude } from "./ask-claude";
+import { createRunSpend } from "./run-cost";
 import {
   askOnBar,
   autoExpireSetting,
@@ -35,6 +36,8 @@ import {
   isNew,
   isReadyToFill,
   matchesSearch,
+  meetsMinScore,
+  MIN_QUEUE_SCORE,
   NO_FILTERS,
   passesFilters,
   postedText,
@@ -142,6 +145,7 @@ async function startFill(
   const job = posting ?? item;
   const pagedHow = posting ? null : paged;
   const closeRun = () => {
+    spend.stop();
     void kit.close();
     activeRun = null;
     closeActiveRun = null;
@@ -165,7 +169,9 @@ async function startFill(
     title: job.title,
     employer: job.employer,
   });
-  box.replaceChildren(runPart, kit.element, askClaude(client, job.jobId));
+  // This run's Claude spend, refreshed while it is live.
+  const spend = createRunSpend((id) => (client as ApplyClient).runCost(id));
+  box.replaceChildren(runPart, spend.element, kit.element, askClaude(client, job.jobId));
   // Autopilot goes on to the next job a moment after this run ends (you see how it ended).
   let ended = false;
   const endFor = (end: RunEnd, after: number) => {
@@ -183,6 +189,7 @@ async function startFill(
       countdownSeconds: await countdownSetting(),
       ...(auto ? { autopilot: true } : {}),
       onChange: (view: RunView) => {
+        spend.track(view.runId, view.action.kind === "finished");
         if (view.action.kind === "finished")
           endFor(
             view.state.outcome === "submitted" ? "submitted" : "aborted",
@@ -261,7 +268,10 @@ async function startAutopilot() {
     client,
     queue: async () => {
       await loadQueue();
-      return queueItems.filter((item) => !hiddenCompanies.has(companyKey(item)));
+      // Never a job a rescore pushed under the 70 your search tailors at.
+      return queueItems.filter(
+        (item) => !hiddenCompanies.has(companyKey(item)) && meetsMinScore(item),
+      );
     },
     fill: async (item, tabId, paged) => {
       // A run still on screen (one you started, or finished and not closed) would refuse this
@@ -710,6 +720,7 @@ async function loadQueuePrefs() {
         : "any",
       remote: filters.remote === true,
       ready: filters.ready === true,
+      lowScores: filters.lowScores === true,
     };
   renderChips();
   const hidden = saved.hiddenCompanies;
@@ -786,6 +797,11 @@ const CHIPS: readonly {
     on: (f) => f.ready,
     toggle: (f) => ({ ...f, ready: !f.ready }),
   },
+  {
+    label: `Below ${MIN_QUEUE_SCORE} too`,
+    on: (f) => f.lowScores === true,
+    toggle: (f) => ({ ...f, lowScores: !f.lowScores }),
+  },
 ];
 
 function renderChips() {
@@ -824,12 +840,20 @@ function showQueue() {
       passesFilters(item, queueFilters) &&
       (showingHidden || !isHidden(item)),
   );
-  const visible = queueItems.length - (showingHidden ? 0 : hiddenJobs);
+  // Ready jobs a rescore pushed under 70: left out unless you ask, and said so.
+  const lowScored = queueFilters.lowScores
+    ? 0
+    : queueItems.filter(
+        (item) => !meetsMinScore(item) && (showingHidden || !isHidden(item)),
+      ).length;
+  const visible =
+    queueItems.length - (showingHidden ? 0 : hiddenJobs) - lowScored;
   const fresh = shown.filter((item) => isNew(item, newSince)).length;
   $("queue-count").textContent = [
     query || filtering()
       ? `${shown.length} of ${visible} jobs`
       : `${visible} job${visible === 1 ? "" : "s"}`,
+    lowScored ? `${lowScored} below ${MIN_QUEUE_SCORE} not shown` : "",
     fresh ? `${fresh} new since you last looked` : "",
   ]
     .filter(Boolean)

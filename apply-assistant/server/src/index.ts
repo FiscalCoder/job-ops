@@ -5,7 +5,10 @@ import { loadConfig } from "./config.js";
 import { createApp } from "./http/app.js";
 import { JobOpsClient } from "./jobops/client.js";
 import { openStore } from "./store/db.js";
+import { createRunsRepo } from "./store/runs-repo.js";
 import { createTraceStore } from "./store/trace-store.js";
+import { createUserSettingsRepo } from "./store/user-settings-repo.js";
+import { backfillRunCosts, createSpendService } from "./usage/spend-service.js";
 
 const config = loadConfig(process.env);
 mkdirSync(config.dataDir, { recursive: true });
@@ -29,6 +32,22 @@ const prune = () => {
   }
 };
 prune();
+// One-off, idempotent: store Claude's cost for finished runs that never had it.
+try {
+  const runsRepo = createRunsRepo(db);
+  const filled = backfillRunCosts(
+    db,
+    createSpendService({
+      runs: runsRepo,
+      trace,
+      settings: createUserSettingsRepo(db),
+    }),
+    runsRepo,
+  );
+  if (filled) log(`[usage] stored Claude's cost for ${filled} finished run(s)`);
+} catch (error) {
+  log(`[usage] cost backfill failed: ${String(error)}`);
+}
 setInterval(prune, PRUNE_EVERY_MS).unref();
 const app = createApp({
   jobOps: new JobOpsClient(config.jobOpsBaseUrl),

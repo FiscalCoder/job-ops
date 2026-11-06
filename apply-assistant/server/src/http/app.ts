@@ -52,6 +52,8 @@ import {
   securityHeaders,
 } from "./security.js";
 import { createTraceRoutes } from "./trace-routes.js";
+import { createUsageRoutes } from "./usage-routes.js";
+import { createSpendService } from "../usage/spend-service.js";
 
 /** The web page (answer bank + queue), served from the same origin as the API. */
 const PUBLIC_DIR = fileURLToPath(new URL("../../public", import.meta.url));
@@ -236,10 +238,18 @@ export function createApp({
     createNavigateRoutes({ navigator, answerer, jobOps, targets, trace: record }),
   );
   const runs = createRunsRepo(db);
+  const spend = createSpendService({ runs, trace, settings: userSettings });
   app.use(
     requireUser,
-    createRunRoutes({ jobOps, runs, answers, trace: record }),
+    createRunRoutes({
+      jobOps,
+      runs,
+      answers,
+      trace: record,
+      onRunEnded: (run) => spend.recordRunCost(run),
+    }),
   );
+  app.use(requireUser, createUsageRoutes({ runs, spend }));
   app.use(requireUser, createTraceRoutes({ jobOps, runs, trace }));
   app.use(requireUser, createProgressRoutes({ jobOps, runs, trace }));
   app.use(
