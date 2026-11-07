@@ -146,4 +146,14 @@ describe.sequential("llm usage recording", () => {
     // No request context in hosted mode -> scope throws; must be swallowed.
     expect(() => recordLlmUsageSafely(deepseekCall)).not.toThrow();
   });
+
+  it("records nothing for providers without OpenAI-style usage", async () => {
+    const { recordLlmUsageSafely } = await import("./usage-recorder");
+    await asUser("user-a", async () => {
+      recordLlmUsageSafely({ ...deepseekCall, provider: "anthropic" });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const { db, schema } = await import("@server/db");
+    expect(await db.select().from(schema.llmUsage)).toHaveLength(0);
+  });
 });

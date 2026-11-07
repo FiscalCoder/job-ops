@@ -249,7 +249,7 @@ export function createApp({
       onRunEnded: (run) => spend.recordRunCost(run),
     }),
   );
-  app.use(requireUser, createUsageRoutes({ runs, spend }));
+  app.use(requireUser, createUsageRoutes({ runs, spend, jobOps }));
   app.use(requireUser, createTraceRoutes({ jobOps, runs, trace }));
   app.use(requireUser, createProgressRoutes({ jobOps, runs, trace }));
   app.use(

@@ -51,7 +51,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-async function start() {
+async function start(api: JobOpsApi = jobOps) {
   const db = openStore(":memory:");
   const dir = mkdtempSync(path.join(tmpdir(), "usage-test-"));
   dirs.push(dir);
@@ -62,7 +62,7 @@ async function start() {
   const add = (user: string, ts: string, cost: number | null, model = "claude-sonnet-5-5") => {
     insertUsage.run(user, ts, JSON.stringify({ model, inputTokens: 1, outputTokens: 1, cost }));
   };
-  const server = createApp({ jobOps, db, authCacheSeconds: 60, trace }).listen(0);
+  const server = createApp({ jobOps: api, db, authCacheSeconds: 60, trace }).listen(0);
   await new Promise((r) => server.once("listening", r));
   close = () => server.close();
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -213,5 +213,43 @@ describe("GET /usage/claude/summary and the credit setting", () => {
     expect((await put({ amountUsd: 5, asOf: "2999-01-01" })).status).toBe(400);
     expect((await put({ amountUsd: 0, asOf: today })).status).toBe(200);
     expect((await put({ amountUsd: 100_000, asOf: today })).status).toBe(200);
+  });
+});
+
+describe("GET /usage/deepseek", () => {
+  const deepseek = {
+    trackedUsd: 0.42,
+    monthUsd: 0.42,
+    todayUsd: 0.1,
+    calls: 7,
+    since: "2026-11-06T08:00:00.000Z",
+    byFeature: [{ feature: "score_result", usd: 0.42, calls: 7 }],
+    balance: { currency: "USD", total: 4.74, granted: 0, toppedUp: 4.74, isAvailable: true },
+  };
+
+  it("passes Job Ops' DeepSeek spend through with your own token", async () => {
+    let seen = "";
+    const t = await start({
+      ...jobOps,
+      getAiSpend: async (token) => {
+        seen = token;
+        return { deepseek };
+      },
+    });
+    const res = await t.me("GET", "/usage/deepseek");
+    expect(res.body).toEqual({ ok: true, data: deepseek });
+    expect(seen).toBe("me");
+  });
+
+  it("is 501 when the Job Ops client can't ask, and passes Job Ops' errors on", async () => {
+    expect((await (await start()).me("GET", "/usage/deepseek")).status).toBe(501);
+    close?.();
+    const t = await start({
+      ...jobOps,
+      getAiSpend: async () => {
+        throw new JobOpsError(503, "UNAVAILABLE", "down");
+      },
+    });
+    expect((await t.me("GET", "/usage/deepseek")).status).toBe(502); // Job Ops 5xx is a bad gateway here
   });
 });

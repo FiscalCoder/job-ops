@@ -4,7 +4,6 @@ import type { Job } from "@shared/types.js";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trackProductEvent } from "@/lib/analytics";
-import { AiSpendStrip } from "./orchestrator/AiSpendStrip";
 import { OrchestratorHeader } from "./orchestrator/OrchestratorHeader";
 import { OrchestratorJobWorkspaceContainer } from "./orchestrator/OrchestratorJobWorkspaceContainer";
 import { OrchestratorSearchComposer } from "./orchestrator/OrchestratorSearchComposer";
@@ -150,7 +149,6 @@ export const OrchestratorPage: React.FC = () => {
             : "container mx-auto space-y-6 px-4 py-6 pb-12"
         }
       >
-        {isSearchComposerVisible ? null : <AiSpendStrip />}
         {isSearchComposerVisible ? (
           <OrchestratorSearchComposer
             settings={settings ?? null}

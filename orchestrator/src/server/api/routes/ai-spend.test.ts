@@ -32,7 +32,7 @@ describe.sequential("GET /api/ai-spend", () => {
     );
   }
 
-  it("returns nulls and empty DeepSeek totals when upstreams are down", async () => {
+  it("returns empty DeepSeek totals and no balance when DeepSeek is unreachable", async () => {
     stubUpstreams(() => Promise.reject(new Error("offline")));
 
     const res = await fetch(`${baseUrl}/api/ai-spend`, {
@@ -41,7 +41,7 @@ describe.sequential("GET /api/ai-spend", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
-    expect(body.data.claude).toBeNull();
+    expect(body.data).not.toHaveProperty("claude");
     expect(body.data.deepseek).toMatchObject({
       trackedUsd: 0,
       monthUsd: 0,
@@ -51,30 +51,5 @@ describe.sequential("GET /api/ai-spend", () => {
       byFeature: [],
       balance: null,
     });
-  });
-
-  it("passes the Claude summary through and forwards the auth header", async () => {
-    const data = {
-      totalUsd: 1,
-      monthUsd: 1,
-      todayUsd: 0,
-      calls: 2,
-      unpriced: 0,
-      byModel: [],
-      since: null,
-      credit: null,
-    };
-    let seenAuth: string | null = null;
-    stubUpstreams(async (_url, init) => {
-      seenAuth = new Headers(init?.headers).get("authorization");
-      return new Response(JSON.stringify({ ok: true, data }));
-    });
-
-    const res = await fetch(`${baseUrl}/api/ai-spend`, {
-      headers: { Authorization: "Bearer tok" },
-    });
-    const body = await res.json();
-    expect(body.data.claude).toEqual(data);
-    expect(seenAuth).toBe("Bearer tok");
   });
 });

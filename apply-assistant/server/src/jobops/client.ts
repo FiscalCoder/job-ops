@@ -135,7 +135,27 @@ export interface JobOpsApi {
     token: string,
     job: ImportJob,
   ): Promise<{ id: string; status: string }>;
+  /** Job Ops' own model spend (DeepSeek scoring) and DeepSeek's balance (absent in fakes). */
+  getAiSpend?(token: string): Promise<JobOpsAiSpend>;
 }
+
+const deepSeekSpend = z.object({
+  trackedUsd: z.number(),
+  monthUsd: z.number(),
+  todayUsd: z.number(),
+  calls: z.number(),
+  since: z.string().nullable(),
+  byFeature: z.array(
+    z.object({ feature: z.string().nullable(), usd: z.number(), calls: z.number() }),
+  ),
+  balance: z
+    .object({ currency: z.string(), total: z.number() })
+    .passthrough()
+    .nullable(),
+  balanceError: z.string().optional(),
+});
+const aiSpendData = z.object({ deepseek: deepSeekSpend });
+export type JobOpsAiSpend = z.infer<typeof aiSpendData>;
 
 const errorEnvelope = z.object({
   ok: z.literal(false),
@@ -360,6 +380,10 @@ export class JobOpsClient implements JobOpsApi {
       z.object({ id: z.string(), status: z.string() }),
       { method: "POST", token, body: { job } },
     );
+  }
+
+  async getAiSpend(token: string): Promise<JobOpsAiSpend> {
+    return this.request("/api/ai-spend", aiSpendData, { token });
   }
 
   private async request<T>(

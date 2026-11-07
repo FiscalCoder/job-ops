@@ -22,6 +22,7 @@ import { resolveTab } from "../../src/track/tabs";
 import { renderHere } from "./here-view";
 import { askClaude } from "./ask-claude";
 import { createRunSpend } from "./run-cost";
+import { createSpendCard } from "./spend-card";
 import {
   askOnBar,
   autoExpireSetting,
@@ -155,6 +156,8 @@ async function startFill(
     $("plan").hidden = true;
     $("plan").replaceChildren();
     backToQueue();
+    // The run just spent Claude credit: bring the totals up to date.
+    void spendCard.refresh();
   };
   closeActiveRun = closeRun;
   // The run re-renders its part; Ask Claude below it keeps what you typed.
@@ -497,6 +500,7 @@ async function showMain() {
     origins: [ALL_SITES],
   });
   void claudeSettings.refresh();
+  void spendCard.refresh();
   void loadBlocked();
   await loadQueuePrefs();
   await loadQueue();
@@ -557,10 +561,24 @@ function openSettings() {
 }
 
 function closeSettings() {
+  if ($("settings").hidden) return;
   $("settings").hidden = true;
   for (const box of underSettings) box.hidden = false;
   underSettings = [];
+  // The Claude credit may have changed there.
+  void spendCard.refresh();
 }
+
+/** "AI spend" above the queue; "Set your Claude credit" opens Settings at that field. */
+const spendCard = createSpendCard(
+  () => client,
+  () => {
+    openSettings();
+    ($("claude-card") as HTMLDetailsElement).open = true;
+    $("claude-credit").focus();
+  },
+);
+$("spend-mount").replaceWith(spendCard.element);
 
 $("settings-open").addEventListener("click", () =>
   $("settings").hidden ? openSettings() : closeSettings(),

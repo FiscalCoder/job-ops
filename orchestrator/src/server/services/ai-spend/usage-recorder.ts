@@ -94,7 +94,11 @@ export async function recordLlmUsage(
  * synchronously inside recordLlmUsage before its first await, so async
  * context is preserved; failures are logged and never thrown.
  */
+/** Providers whose responses carry OpenAI-style usage counts (DeepSeek is openai_compatible). */
+const RECORDED_PROVIDERS = new Set(["openai_compatible", "openai"]);
+
 export function recordLlmUsageSafely(call: RecordableCall): void {
+  if (!RECORDED_PROVIDERS.has(call.provider)) return;
   try {
     void recordLlmUsage(call).catch((error: unknown) => {
       logger.warn("Failed to record LLM usage", {

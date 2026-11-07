@@ -102,6 +102,18 @@ export interface ClaudeSummary {
   } | null;
 }
 
+/** Job Ops' DeepSeek spend (job scoring), counted from when tracking began, and its balance. */
+export interface DeepSeekSpend {
+  readonly trackedUsd: number;
+  readonly monthUsd: number;
+  readonly todayUsd: number;
+  readonly calls: number;
+  readonly since: string | null;
+  readonly byFeature: readonly { feature: string | null; usd: number; calls: number }[];
+  readonly balance: { readonly currency: string; readonly total: number } | null;
+  readonly balanceError?: string;
+}
+
 export interface ClaudeCreditSetting {
   readonly amountUsd: number | null;
   readonly asOf: string | null;
@@ -334,6 +346,11 @@ export class ApplyClient implements TraceApi {
   /** Everything you've spent on Claude, with the credit estimate (Settings). */
   claudeSummary(): Promise<ClaudeSummary> {
     return this.request("/usage/claude/summary");
+  }
+
+  /** DeepSeek's spend and balance, from Job Ops (it scores the jobs). */
+  deepseekSpend(): Promise<DeepSeekSpend> {
+    return this.request("/usage/deepseek");
   }
 
   /** The Claude credit you loaded and when (an estimate: Anthropic has no API for what's left). */

@@ -6,7 +6,7 @@ export const aiSpendRouter = Router();
 
 aiSpendRouter.get(
   "/",
-  asyncRoute(async (req: Request, res: Response) => {
-    ok(res, await getAiSpend(req.header("authorization")));
+  asyncRoute(async (_req: Request, res: Response) => {
+    ok(res, await getAiSpend());
   }),
 );

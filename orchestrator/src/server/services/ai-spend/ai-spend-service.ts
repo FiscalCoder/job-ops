@@ -1,15 +1,14 @@
 import { createHash } from "node:crypto";
 import { getPrivateDataScope } from "@server/tenancy/private-scope";
 import { resolveLlmRuntimeSettings } from "../modelSelection";
-import { type ClaudeSpendSummary, fetchClaudeSummary } from "./claude-summary";
 import { type DeepSeekBalance, getDeepSeekBalance } from "./deepseek-balance";
 import {
   type DeepSeekTrackedSpend,
   getDeepSeekTrackedSpend,
 } from "./usage-summary";
 
+/** Job Ops' own LLM spend (DeepSeek scoring and tailoring). Claude's is apply-assistant's. */
 export interface AiSpendResponse {
-  claude: ClaudeSpendSummary | null;
   deepseek: DeepSeekTrackedSpend & {
     balance: DeepSeekBalance | null;
     balanceError?: string;
@@ -45,16 +44,12 @@ async function loadBalance(): Promise<{
   }
 }
 
-export async function getAiSpend(
-  authorization: string | undefined,
-): Promise<AiSpendResponse> {
-  const [claude, tracked, balance] = await Promise.all([
-    fetchClaudeSummary(authorization),
+export async function getAiSpend(): Promise<AiSpendResponse> {
+  const [tracked, balance] = await Promise.all([
     getDeepSeekTrackedSpend(),
     loadBalance(),
   ]);
   return {
-    claude,
     deepseek: {
       ...tracked,
       balance: balance.balance,

@@ -53,6 +53,9 @@
         <div id="import-box"></div>
       </div>
 
+      <!-- AI spend: Claude (your runs) and DeepSeek (Job Ops' scoring), filled by spend-card.ts. -->
+      <div id="spend-mount"></div>
+
       <!-- What you work through: the queue, Autopilot over it, the job you picked. -->
       <div class="card">
         <div class="row">
@@ -124,7 +127,7 @@
         <ul id="blocked" class="list"></ul>
       </details>
 
-      <details class="card">
+      <details id="claude-card" class="card">
         <summary><strong>Claude key and spend</strong></summary>
         <p id="claude-status" class="muted"></p>
         <form id="claude-form" class="row">
