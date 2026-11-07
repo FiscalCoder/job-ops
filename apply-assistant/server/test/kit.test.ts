@@ -15,6 +15,7 @@ import { createAnswerBankRepo } from "../src/store/answer-bank-repo.js";
 import { openStore } from "../src/store/db.js";
 import { runAsUser } from "../src/store/owner.js";
 import { fakeDesignResume } from "./fixtures/fake-resume.js";
+import { promptText } from "./prompt-text.js";
 
 const entry = (patch: Partial<PlanEntry>): PlanEntry => ({
   ref: "q",
@@ -359,7 +360,7 @@ describe("kit routes", () => {
     });
     expect(status).toBe(200);
     expect(body.data.value).toBe(skills.join(", "));
-    const sent = String(create.mock.calls[0]?.[0].messages[0]?.content);
+    const sent = promptText(create.mock.calls[0]?.[0].messages[0]?.content);
     expect(sent).toContain(
       '<candidate_instruction ref="kit">\ncomma-separated skills only',
     );

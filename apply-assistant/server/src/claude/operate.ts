@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { MessagesApi, UsageListener } from "./answerer.js";
-import { usageOf } from "./pricing.js";
+import { usageOfMessage } from "./pricing.js";
 
 /**
  * "Let Claude do it": Claude works one field of the page like a person, through the computer
@@ -212,13 +212,7 @@ export function createOperator(options: {
       output_config: { effort: "medium" },
     });
     // Earlier turns (their screenshots) come from the cache: writes cost 1.25×, reads 0.1×.
-    const cacheWrite = message.usage.cache_creation_input_tokens ?? 0;
-    const cacheRead = message.usage.cache_read_input_tokens ?? 0;
-    const usage = usageOf(
-      message.model,
-      Math.round(message.usage.input_tokens + cacheWrite * 1.25 + cacheRead * 0.1),
-      message.usage.output_tokens,
-    );
+    const usage = usageOfMessage(message);
     onUsage(usage);
     session.cost += usage.cost ?? 0;
     session.turns += 1;

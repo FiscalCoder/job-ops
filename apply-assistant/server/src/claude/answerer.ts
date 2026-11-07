@@ -1,16 +1,16 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { ClaudeAnswersRepo } from "../store/claude-answers-repo.js";
-import { type ClaudeUsage, usageOf } from "./pricing.js";
+import { type ClaudeUsage, usageOfMessage } from "./pricing.js";
 import {
   type ClaudeAnswer,
   cacheKey,
   checkMapItem,
   DRAFT_SYSTEM,
-  draftPrompt,
+  draftPromptBlocks,
   MAP_SCHEMA,
   MAP_SYSTEM,
   MAX_DRAFT_CHARS,
-  mapPrompt,
+  mapPromptBlocks,
   parseMapReply,
   type Question,
   type QuestionContext,
@@ -115,13 +115,7 @@ export function createClaudeAnswerer(
     log(
       `[claude] ${what} ${message.model}: ${message.usage.input_tokens} in / ${message.usage.output_tokens} out`,
     );
-    onUsage(
-      usageOf(
-        message.model,
-        message.usage.input_tokens,
-        message.usage.output_tokens,
-      ),
-    );
+    onUsage(usageOfMessage(message));
   };
 
   async function map(
@@ -133,7 +127,7 @@ export function createClaudeAnswerer(
       model: mapModel,
       max_tokens: MAP_MAX_TOKENS,
       system: MAP_SYSTEM,
-      messages: [{ role: "user", content: mapPrompt(questions, context) }],
+      messages: [{ role: "user", content: mapPromptBlocks(questions, context) }],
       output_config: {
         effort: "low",
         format: { type: "json_schema", schema: MAP_SCHEMA },
@@ -174,7 +168,7 @@ export function createClaudeAnswerer(
       model: draftModel,
       max_tokens: DRAFT_MAX_TOKENS,
       system: DRAFT_SYSTEM,
-      messages: [{ role: "user", content: draftPrompt(question, context) }],
+      messages: [{ role: "user", content: draftPromptBlocks(question, context) }],
       output_config: { effort: "low" },
     });
     usage("drafted 1 answer", message, onUsage);

@@ -9,6 +9,7 @@ import { openStore } from "../src/store/db.js";
 import ashbyForm from "./fixtures/ashby-elevenlabs.json" with { type: "json" };
 import { fakeDesignResume } from "./fixtures/fake-resume.js";
 import newrelic from "./fixtures/gh-newrelic.json" with { type: "json" };
+import { promptText } from "./prompt-text.js";
 
 const JD =
   "We are looking for a senior backend engineer to design and build scalable services in Go and Kubernetes. " +
@@ -596,7 +597,7 @@ describe("lookups", () => {
       } as unknown as Anthropic.Message);
       const entry = await planWithClaude(create);
       expect(create).toHaveBeenCalledTimes(1);
-      const sent = String(create.mock.calls[0]?.[0].messages[0]?.content);
+      const sent = promptText(create.mock.calls[0]?.[0].messages[0]?.content);
       expect(sent.match(/<question ref=/g)).toHaveLength(2);
       expect(sent).toContain("scalable services in Go and Kubernetes");
       expect(entry("question_18992931008")).toMatchObject({

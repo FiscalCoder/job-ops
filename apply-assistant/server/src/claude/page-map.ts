@@ -3,7 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { WorkdayPage } from "../plan/workday-schema.js";
 import type { MessagesApi, UsageListener } from "./answerer.js";
-import { usageOf } from "./pricing.js";
+import { usageOfMessage } from "./pricing.js";
 
 /**
  * Before a company's page is filled, Claude reads all of it (every field with its label, kind,
@@ -295,7 +295,8 @@ export function createPageMapper(options: {
       const message = await options.messages.create({
         model: deep ? (options.deepModel ?? options.model) : options.model,
         max_tokens: MAX_TOKENS,
-        system: PAGE_MAP_SYSTEM,
+        // The instructions are the same on every page: cached (reads cost a tenth).
+        system: [{ type: "text", text: PAGE_MAP_SYSTEM, cache_control: { type: "ephemeral" } }],
         messages: [
           {
             role: "user",
@@ -317,7 +318,7 @@ ${text}` },
         },
       });
       onUsage(
-        usageOf(message.model, message.usage.input_tokens, message.usage.output_tokens),
+        usageOfMessage(message),
       );
       if (message.stop_reason !== "end_turn") return null;
       const parsed = reply.safeParse(JSON.parse(replyText(message)));

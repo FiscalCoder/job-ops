@@ -18,6 +18,7 @@ import {
 } from "../src/plan/workday-schema.js";
 import { openStore } from "../src/store/db.js";
 import { fakeDesignResume } from "./fixtures/fake-resume.js";
+import { promptText } from "./prompt-text.js";
 
 /**
  * Workday pages as the extension reads them (field sets from the LPL Financial application,
@@ -452,10 +453,10 @@ describe("POST /plans/:jobId/page", () => {
     // Workday pages are mapped too (Claude's map comes first; here it can't be read, so the
     // page is planned as read).
     const calls = create.mock.calls.map((c) => c[0]);
-    expect(calls[0]?.system).toBe(PAGE_MAP_SYSTEM);
+    expect(promptText(calls[0]?.system)).toBe(PAGE_MAP_SYSTEM);
     // Optional questions aren't sent to Claude.
-    const prompt = String(
-      calls.find((c) => c.system !== PAGE_MAP_SYSTEM)?.messages[0]?.content,
+    const prompt = promptText(
+      calls.find((c) => promptText(c.system) !== PAGE_MAP_SYSTEM)?.messages[0]?.content,
     );
     expect(prompt).toContain("working with Kafka");
     expect(prompt).not.toContain("FINRA");
@@ -538,7 +539,7 @@ describe("POST /plans/:jobId/choose", () => {
     const picked = await choose(ask);
     expect(picked.status).toBe(200);
     expect(picked.body.data.value).toBe("Information Systems");
-    const prompt = String(create.mock.calls[0]?.[0].messages[0]?.content);
+    const prompt = promptText(create.mock.calls[0]?.[0].messages[0]?.content);
     expect(prompt).toContain("Information System Management");
     expect(prompt).toContain("Computer Science");
 

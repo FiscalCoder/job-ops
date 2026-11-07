@@ -1,4 +1,5 @@
 import { bestCountryOption, showsCountry } from "./countries";
+import { bestEquivalentOption } from "./equivalents";
 
 /** Timing and option matching that every driver (and site help) shares. */
 
@@ -83,8 +84,13 @@ export function bestOption(
         a.rank - b.rank ||
         (labels[a.index]?.length ?? 0) - (labels[b.index]?.length ?? 0),
     );
-  // Nothing words it the same: the same country another way ("+91" or "IN +91" for "India").
-  return ranked[0]?.index ?? bestCountryOption(labels, wanted);
+  // Nothing words it the same: the same country another way ("+91" or "IN +91" for "India"),
+  // or the same degree, state or source as the list words it ("BS" for "Bachelor's Degree").
+  return (
+    ranked[0]?.index ??
+    bestCountryOption(labels, wanted) ??
+    bestEquivalentOption(labels, wanted)
+  );
 }
 
 /** Words that don't change what a choice means ("Bachelor of Science" = "Bachelors Science"). */

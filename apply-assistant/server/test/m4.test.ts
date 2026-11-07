@@ -17,6 +17,7 @@ import type { Run, RunAction } from "../src/store/runs-repo.js";
 import type { TraceEvent } from "../src/store/trace-store.js";
 import { fakeDesignResume } from "./fixtures/fake-resume.js";
 import newrelic from "./fixtures/gh-newrelic.json" with { type: "json" };
+import { promptText } from "./prompt-text.js";
 
 /** M4 support: Claude cost, remembered answers and the progress targets. */
 
@@ -198,7 +199,7 @@ describe("remembered answers", () => {
     // What Claude was asked about, across all its calls.
     const asked = () =>
       create.mock.calls
-        .map((c) => String(c[0].messages[0]?.content))
+        .map((c) => promptText(c[0].messages[0]?.content))
         .join("\n");
     await call("/learned", learnYes);
     await fetchForm();

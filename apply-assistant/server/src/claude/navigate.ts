@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { MessagesApi, UsageListener } from "./answerer.js";
-import { usageOf } from "./pricing.js";
+import { usageOfMessage } from "./pricing.js";
 
 /**
  * Autopilot's way from a job's link to its application form, when plain code can't tell what to
@@ -153,11 +153,7 @@ export function createNavigator(options: {
           format: { type: "json_schema", schema: NAVIGATE_SCHEMA },
         },
       });
-      const usage = usageOf(
-        message.model,
-        message.usage.input_tokens,
-        message.usage.output_tokens,
-      );
+      const usage = usageOfMessage(message);
       onUsage(usage);
       const cost = usage.cost ?? 0;
       spent.set(key, { cost: spentOn(key) + cost, at: now() });

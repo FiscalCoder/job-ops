@@ -2,6 +2,7 @@ import type {
   Frame,
   Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
+import { equivalentTerms } from "./equivalents";
 import { bestFound, searchWords } from "./options";
 import { deepFind, ensureLocator, entrySaves } from "./locate";
 import { pickOpenChoice, showsValue, visibleChoices } from "./site-help";
@@ -30,6 +31,9 @@ import {
   readGenericPage,
   shownValue,
 } from "./generic-page";
+
+/** How many other wordings of an answer a search list is tried with before asking Claude. */
+const MAX_EQUIVALENT_SEARCHES = 4;
 
 export {
   focusSearchBox,
@@ -785,6 +789,11 @@ export class GenericDriver extends TrustedDriver {
     };
     await collect(searchWords(wanted));
     let choice = bestFound([...found], wanted);
+    // The list may word it another way ("B.Tech" for "Bachelor's Degree"): search those first.
+    if (!choice) {
+      await collect(equivalentTerms(wanted).slice(0, MAX_EQUIVALENT_SEARCHES));
+      choice = bestFound([...found], wanted);
+    }
     let byClaude = false;
     if (!choice) {
       const broader = this.searchTerms
@@ -836,7 +845,11 @@ export class GenericDriver extends TrustedDriver {
     await handle.click();
     await sleep(250);
     if (await this.frame.evaluate(focusSearchBox, ref).catch(() => false)) {
-      for (const candidate of [wanted, ...(entry.alternatives ?? [])]) {
+      for (const candidate of [
+        wanted,
+        ...(entry.alternatives ?? []),
+        ...equivalentTerms(wanted).slice(0, MAX_EQUIVALENT_SEARCHES),
+      ]) {
         await this.retype(candidate);
         const found =
           (await pickOpenChoice(this.frame, candidate)) ??

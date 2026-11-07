@@ -57,6 +57,38 @@ export function trimmedForm(refs: readonly string[], max: number): string {
     "script, style, link, meta, noscript, template, svg, img, picture, video, canvas, iframe",
   ))
     gone.remove();
+  // Noise that doesn't help tell what a field is (it cost tokens on every closer read):
+  // long text (a job description inside the form) is cut, a long list keeps its first
+  // choices, hashed CSS class names go, and bare wrappers around one element are unwrapped.
+  const MAX_TEXT = 400;
+  const MAX_CHOICES = 20;
+  const walker = document.createTreeWalker(copy, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = (node.textContent ?? "").replace(/\s+/g, " ");
+    if (text.length > MAX_TEXT) node.textContent = `${text.slice(0, MAX_TEXT)}…`;
+  }
+  for (const list of copy.querySelectorAll("select, datalist, [role='listbox']")) {
+    const choices = [...list.children];
+    if (choices.length <= MAX_CHOICES) continue;
+    for (const extra of choices.slice(MAX_CHOICES)) extra.remove();
+    list.appendChild(document.createTextNode(`… ${choices.length - MAX_CHOICES} more choices`));
+  }
+  for (const el of copy.querySelectorAll("[class]")) {
+    const words = (el.getAttribute("class") ?? "")
+      .split(/\s+/)
+      .filter((w) => /^[a-z][a-z-]{1,30}$/i.test(w))
+      .slice(0, 4);
+    if (words.length) el.setAttribute("class", words.join(" "));
+    else el.removeAttribute("class");
+  }
+  for (const el of [...copy.querySelectorAll("div, span")].reverse()) {
+    const only = el.children.length === 1 ? el.firstElementChild : null;
+    const ownText = [...el.childNodes].some(
+      (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim() !== "",
+    );
+    // Only attribute-less wrappers: an id, role or class may be what a field's label points at.
+    if (only && !ownText && el.attributes.length === 0 && el !== copy) el.replaceWith(only);
+  }
   for (const el of [copy, ...copy.querySelectorAll("*")]) {
     const tag = el.tagName.toLowerCase();
     const choice =

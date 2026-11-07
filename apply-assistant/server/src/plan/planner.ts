@@ -272,7 +272,7 @@ function resolveLocatedIn(
   field: FormField,
   input: PlanInput,
   jobCountry: string | null,
-): Resolved {
+): Resolved | "skip" {
   return (
     locatedIn(place, input.bank) ?? resolveClaude(field, input, jobCountry)
   );
@@ -660,11 +660,25 @@ export const hasRememberedAnswer = (
   lookup: PlanInput["learned"],
 ): boolean => fromLearned(field, lookup) !== null;
 
+/** An end-date part of a job ("End date month", "To year", "End Date"). */
+const END_DATE_LABEL =
+  /^(end|to|until|finish)( date)?( (month|year|day))?\b|\bend date\b|^(month|year) (ended|to)\b/i;
+/** Claude's reason for not answering is that the job is the one you're in now. */
+const CURRENT_ROLE =
+  /\b(present|current(ly)?|ongoing|still (work|employed)|no end date)\b/i;
+
+/**
+ * An optional end date for the job you're still in: nothing to give, so it's left empty.
+ * Before, this went to Claude's takeover, which could only conclude the same thing.
+ */
+export const currentRoleEndDate = (field: FormField, why: string): boolean =>
+  !field.required && END_DATE_LABEL.test(field.label.trim()) && CURRENT_ROLE.test(why);
+
 function resolveClaude(
   field: FormField,
   input: PlanInput,
   jobCountry: string | null,
-): Resolved {
+): Resolved | "skip" {
   const remembered = fromLearned(field, input.learned);
   if (remembered) return remembered;
   const answer = input.claude?.get(field.ref);
@@ -676,6 +690,7 @@ function resolveClaude(
   const by = `claude:${shortModel(answer.model)}`;
   switch (answer.kind) {
     case "unknown":
+      if (currentRoleEndDate(field, answer.why)) return "skip";
       return missing(by, `Claude: ${answer.why}`);
     case "bank": {
       const resolved = resolveBank(

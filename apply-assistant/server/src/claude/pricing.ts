@@ -37,3 +37,33 @@ export function usageOf(
       : null,
   };
 }
+
+/** What a reply's usage says, cached prompt parts included. */
+interface MessageUsage {
+  readonly model: string;
+  readonly usage: {
+    readonly input_tokens: number;
+    readonly output_tokens: number;
+    readonly cache_creation_input_tokens?: number | null;
+    readonly cache_read_input_tokens?: number | null;
+  };
+}
+
+/** Cache writes cost 1.25x the input price, reads 0.1x (5-minute cache). */
+const CACHE_WRITE = 1.25;
+const CACHE_READ = 0.1;
+
+/**
+ * A reply's cost, cached parts of the prompt included: they're billed apart from input_tokens,
+ * so they're counted in as input-equivalent tokens (a write 1.25x, a read 0.1x).
+ */
+export function usageOfMessage(message: MessageUsage): ClaudeUsage {
+  const { usage } = message;
+  const write = usage.cache_creation_input_tokens ?? 0;
+  const read = usage.cache_read_input_tokens ?? 0;
+  return usageOf(
+    message.model,
+    Math.round(usage.input_tokens + write * CACHE_WRITE + read * CACHE_READ),
+    usage.output_tokens,
+  );
+}
