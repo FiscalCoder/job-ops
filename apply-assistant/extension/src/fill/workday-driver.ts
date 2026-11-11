@@ -294,12 +294,16 @@ export type SearchTerms = (
   wanted: string,
 ) => Promise<readonly string[]>;
 
+/** The list pick made before for a question and your answer, without Claude; null when none. */
+export type RememberedPick = (label: string, wanted: string) => Promise<string | null>;
+
 export class WorkdayDriver extends TrustedDriver {
   readonly system = "workday" as const;
   /** Set by the run: used when a search finds nothing worded like your answer. */
   chooser: Chooser | null = null;
   /** Set by the run: broader words to search for when your answer's own words find nothing. */
   searchTerms: SearchTerms | null = null;
+  rememberedPick: RememberedPick | null = null;
 
   protected readonly errorSelector =
     "[data-automation-id='errorMessage'], [data-automation-id='errorBanner'] li, [data-automation-id='inputAlert']";
@@ -714,6 +718,17 @@ export class WorkdayDriver extends TrustedDriver {
           if (!NOT_A_CHOICE.test(l)) found.add(l);
       }
     };
+    // Picked before for this question and answer (on any form): searched first, no Claude.
+    const remembered = await this.rememberedPick?.(label, wanted).catch(() => null);
+    if (remembered) {
+      await collect([remembered]);
+      const again = bestFound([...found], remembered);
+      if (again) {
+        const picked = await this.searchAndPick(ref, input, again, true);
+        if (picked)
+          return { picked, how: `picked "${picked}" as before for "${wanted}" (no Claude call)` };
+      }
+    }
     await collect(
       [
         ...new Set(

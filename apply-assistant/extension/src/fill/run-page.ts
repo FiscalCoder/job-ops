@@ -39,6 +39,8 @@ export function helpPicking(
   jobId: string,
 ): void {
   driver.chooser = chooserFor(client, jobId);
+  driver.rememberedPick = async (label, wanted) =>
+    (await client.rememberedPick(jobId, { label, wanted })).value ?? null;
   driver.searchTerms = async (label, wanted) =>
     (await client.searchTerms(jobId, { label, wanted })).terms ?? [];
 }

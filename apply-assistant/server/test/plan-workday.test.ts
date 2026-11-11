@@ -549,11 +549,27 @@ describe("POST /plans/:jobId/choose", () => {
       "never one based on a different part of my resume",
     );
     expect(prompt).not.toContain("fits me best");
-    reply = { answer: ["NO MATCH"], why: "Nothing like AI/ML" };
-    expect((await choose(ask)).status).toBe(422);
 
+    // Asked again (another form, another order): the earlier pick, with no Claude call.
+    const calls = create.mock.calls.length;
+    const again = await choose({ ...ask, options: ["Computer Science", "Information Systems"] });
+    expect(again.body.data).toMatchObject({ value: "Information Systems", model: "remembered" });
+    expect(create.mock.calls.length).toBe(calls);
+    const remembered = await fetch(`${base}/plans/job-1/choose/remembered`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer good" },
+      body: JSON.stringify({ label: "Field of Study", wanted: ask.wanted }),
+    });
+    expect(((await remembered.json()) as any).data.value).toBe("Information Systems");
+    // A list without that choice: Claude is asked as before.
+    reply = { answer: ["NO MATCH"], why: "Nothing like AI/ML" };
+    expect((await choose({ ...ask, options: ["Management", "Computer Science"] })).status).toBe(422);
+    expect(create.mock.calls.length).toBe(calls + 1);
+
+    const other = { ...ask, wanted: "Artificial Intelligence and Machine Learning" };
+    expect((await choose(other)).status).toBe(422);
     reply = { answer: ["Information Technology"], why: "Close" };
-    expect((await choose(ask)).status).toBe(422);
+    expect((await choose(other)).status).toBe(422);
     expect((await choose({ ...ask, options: [] })).status).toBe(400);
 
     // Its words found nothing that is it: broader words to search the list for.

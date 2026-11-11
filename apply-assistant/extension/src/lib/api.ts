@@ -403,6 +403,17 @@ export class ApplyClient implements TraceApi {
     return this.request(`/plans/${encodeURIComponent(jobId)}/choose`, ask);
   }
 
+  /** The list pick made before for this question and your answer (no Claude call); null when none. */
+  rememberedPick(
+    jobId: string,
+    ask: { label: string; wanted: string },
+  ): Promise<{ value: string | null }> {
+    return this.request(
+      `/plans/${encodeURIComponent(jobId)}/choose/remembered`,
+      ask,
+    );
+  }
+
   /** Workday: broader words to search a list for when your answer's own words found nothing. */
   searchTerms(
     jobId: string,

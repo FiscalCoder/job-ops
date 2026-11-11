@@ -38,6 +38,7 @@ import {
   usedEntries,
 } from "./history-blocks.js";
 import { normalizeQuestion } from "./question-norm.js";
+import { type ChoicePicksRepo, normChoiceText } from "../store/choice-picks-repo.js";
 import { type ResumeFacts, resumeFacts } from "./resume-facts.js";
 import { parseFormSchema } from "./schemas.js";
 import { tailoredFor } from "./tailored-resume.js";
@@ -90,6 +91,8 @@ export interface PlansDeps {
   readonly learned?: LearnedAnswersRepo;
   /** Claude's map of a company's page before it's planned (null without Claude). */
   readonly pageMapper?: PageMapper | null;
+  /** Claude's earlier picks from lists, reused instead of asking again (in memory without it). */
+  readonly choicePicks?: ChoicePicksRepo;
 }
 
 export interface RebuildResult {
@@ -399,22 +402,48 @@ export function createPlans(deps: PlansDeps) {
     return `${ask.wanted ? `My answer is "${ask.wanted}", but the form doesn't list it. Pick the choice that means the same or is closest to it. If my answer doesn't fit these choices at all (it may answer a different question), pick the choice that fits me best from my saved answers and resume.` : "I have no saved answer for this: pick the choice that fits me best from my saved answers and resume."} A school, college, university or company must be the same one: when it isn't listed, pick the "Other" choice if there is one, never a different institution.`;
   }
 
-  /** Claude's picks, per user, question, answer and choices: plans are rebuilt often. */
-  const picks = new Map<string, TellAnswer>();
+  /** Claude's picks per question and answer: stored when there's a store, else kept in memory. */
+  const memoryPicks = new Map<string, string>();
   const MAX_PICKS = 500;
+  const pickKey = (label: string, wanted: string) =>
+    JSON.stringify([currentUser(), normChoiceText(label), normChoiceText(wanted)]);
+  const rememberedPick = (label: string, wanted: string): string | null =>
+    deps.choicePicks?.get(label, wanted) ?? memoryPicks.get(pickKey(label, wanted)) ?? null;
+  const rememberPick = (label: string, wanted: string, choice: string) => {
+    if (deps.choicePicks) {
+      deps.choicePicks.save(label, wanted, choice);
+      return;
+    }
+    memoryPicks.set(pickKey(label, wanted), choice);
+    if (memoryPicks.size > MAX_PICKS) memoryPicks.delete(memoryPicks.keys().next().value ?? "");
+  };
 
+  /**
+   * Claude picks the closest of the list's choices. A pick made before for the same question
+   * and answer is reused, without asking, when this list has that same choice; a new pick is
+   * remembered. With no answer of yours there's nothing to remember it by.
+   */
   async function closest(
     claude: NonNullable<typeof answerer>,
     jobId: string,
     job: Awaited<ReturnType<JobOpsApi["getJob"]>>,
     resume: ResumeFacts,
     ask: { label: string; wanted: string; options: readonly string[] },
-    /** Reuse an earlier pick for the same question (plan rebuilds); the run's own asks don't. */
-    reuse = false,
   ): Promise<TellAnswer> {
-    const key = JSON.stringify([currentUser(), ask.label, ask.wanted, ask.options]);
-    const known = reuse ? picks.get(key) : undefined;
-    if (known) return known;
+    const known = ask.wanted.trim() ? rememberedPick(ask.label, ask.wanted) : null;
+    const listed = known
+      ? ask.options.find((o) => normChoiceText(o) === normChoiceText(known))
+      : undefined;
+    if (listed) {
+      deps.choicePicks?.used(ask.label, ask.wanted);
+      trace({
+        jobId,
+        kind: "choose",
+        message: `Reused the earlier pick "${listed.slice(0, 80)}" for "${ask.label.slice(0, 80)}" (your answer: "${ask.wanted.slice(0, 80)}"), no Claude call`,
+        data: { ...ask, options: ask.options.length, remembered: listed },
+      });
+      return { value: listed, why: "picked before for this question and answer", model: "remembered" };
+    }
     const answer = await claude.tell(
       { ref: "choose", label: ask.label, type: "select", options: ask.options },
       closestInstruction(ask),
@@ -435,8 +464,9 @@ export function createPlans(deps: PlansDeps) {
       message: `Claude picked "${String(answer.value).slice(0, 80)}" for "${ask.label.slice(0, 80)}" (your answer: "${ask.wanted.slice(0, 80)}")`,
       data: { ...ask, options: ask.options.length, answer },
     });
-    picks.set(key, answer);
-    if (picks.size > MAX_PICKS) picks.delete(picks.keys().next().value ?? "");
+    const picked = typeof answer.value === "string" ? answer.value : null;
+    if (picked && ask.wanted.trim() && ask.options.includes(picked))
+      rememberPick(ask.label, ask.wanted, picked);
     return answer;
   }
 
@@ -469,14 +499,11 @@ export function createPlans(deps: PlansDeps) {
           !field?.options.length
         )
           return entry;
-        const answer = await closest(
-          claude,
-          jobId,
-          job,
-          resume,
-          { label: field.label, wanted, options: field.options.map((o) => o.label) },
-          true,
-        ).catch(() => null);
+        const answer = await closest(claude, jobId, job, resume, {
+          label: field.label,
+          wanted,
+          options: field.options.map((o) => o.label),
+        }).catch(() => null);
         const option = field.options.find((o) => o.label === answer?.value);
         if (!option) return entry;
         return {
@@ -562,6 +589,14 @@ export function createPlans(deps: PlansDeps) {
      * Workday: a field whose choices differ by company (Field of Study, Degree) and none of
      * which matches your answer as such: Claude picks the closest of the choices found.
      */
+    /**
+     * The pick remembered for this question and answer, without asking Claude: searched for first
+     * on a list that only fills as you type. Null when there's none.
+     */
+    remembered(ask: { label: string; wanted: string }): { value: string | null } {
+      return { value: ask.wanted.trim() ? rememberedPick(ask.label, ask.wanted) : null };
+    },
+
     async choose(
       token: string,
       jobId: string,

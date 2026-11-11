@@ -368,6 +368,18 @@ export const MIGRATIONS: readonly string[] = [
    );
    create index ai_calls_user_job on ai_calls (user_id, job_id, created_at);
    create index ai_calls_created on ai_calls (created_at);`,
+  // Claude's pick from a list for a question and your answer (choice-picks-repo.ts): reused,
+  // without asking again, wherever that list has the same choice.
+  `create table choice_picks (
+     user_id text not null default '',
+     label_norm text not null,
+     wanted_norm text not null,
+     choice text not null,
+     uses integer not null default 0,
+     created_at text not null default (datetime('now')),
+     updated_at text not null default (datetime('now')),
+     primary key (user_id, label_norm, wanted_norm)
+   );`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

@@ -45,6 +45,12 @@ const chooseBody = z.object({
   options: z.array(z.string().trim().min(1).max(300)).min(1).max(300),
 });
 
+/** The pick remembered for a question and answer (no list yet, no Claude). */
+const rememberedBody = z.object({
+  label: z.string().trim().min(1).max(500),
+  wanted: z.string().trim().min(1).max(500),
+});
+
 const searchTermsBody = z.object({
   label: z.string().trim().min(1).max(500),
   wanted: z.string().trim().min(1).max(500),
@@ -63,6 +69,19 @@ export function createPlanRoutes(plans: PlansService) {
       sendJobOpsFailure(res, error);
     }
   });
+
+  /** A list's pick made before for this question and your answer; { value: null } when none. */
+  router.post(
+    "/plans/:jobId/choose/remembered",
+    (req: AuthedRequest, res: Response) => {
+      const body = rememberedBody.safeParse(req.body);
+      if (!body.success) {
+        sendError(res, 400, "INVALID_REQUEST", "The field and your answer are needed");
+        return;
+      }
+      sendOk(res, plans.remembered(body.data));
+    },
+  );
 
   /** Workday: Claude picks the closest of a field's choices to your answer. */
   router.post(

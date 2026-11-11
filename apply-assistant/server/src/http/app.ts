@@ -30,6 +30,7 @@ import { aiJobContext } from "../claude/ai-context.js";
 import { loggedMessages } from "../claude/logged-messages.js";
 import { type AiCallStore, createAiCallStore } from "../store/ai-call-store.js";
 import { createAppliedCleanup } from "../store/applied-cleanup.js";
+import { createChoicePicksRepo } from "../store/choice-picks-repo.js";
 import { claimUnowned, currentUser } from "../store/owner.js";
 import { createUserSettingsRepo } from "../store/user-settings-repo.js";
 import { createRunsRepo } from "../store/runs-repo.js";
@@ -216,6 +217,7 @@ export function createApp({
     ...(log ? { log } : {}),
     trace: record,
     learned,
+    choicePicks: createChoicePicksRepo(db),
   });
 
   // Per-job data (plan, posting, kit, trace) only for your own jobs.

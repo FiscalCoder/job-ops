@@ -19,7 +19,7 @@ import {
   TrustedDriver,
   within,
 } from "./trusted";
-import type { Chooser, EntriesToAdd, SearchTerms } from "./workday-driver";
+import type { Chooser, EntriesToAdd, RememberedPick, SearchTerms } from "./workday-driver";
 import {
   type DomKind,
   domKind,
@@ -107,6 +107,7 @@ export class GenericDriver extends TrustedDriver {
   chooser: Chooser | null = null;
   /** Set by the run: broader words to search a list for when your answer's own find nothing. */
   searchTerms: SearchTerms | null = null;
+  rememberedPick: RememberedPick | null = null;
 
   /** The form another driver (Greenhouse, Ashby…) is on: fields its plan doesn't cover. */
   static on(where: { readonly page: Page; readonly frame: Frame }): GenericDriver {
@@ -811,8 +812,18 @@ export class GenericDriver extends TrustedDriver {
             found.add(choice);
       }
     };
-    await collect(searchWords(wanted));
-    let choice = bestFound([...found], wanted);
+    // Picked before for this question and answer (on any form): searched first, no Claude.
+    const remembered = await this.rememberedPick?.(entry.label, wanted).catch(() => null);
+    let reused = false;
+    if (remembered) {
+      await collect([remembered]);
+      reused = bestFound([...found], remembered) !== null;
+    }
+    let choice = reused ? bestFound([...found], remembered ?? "") : null;
+    if (!choice) {
+      await collect(searchWords(wanted));
+      choice = bestFound([...found], wanted);
+    }
     // The list may word it another way ("B.Tech" for "Bachelor's Degree"): search those first.
     if (!choice) {
       await collect(equivalentTerms(wanted).slice(0, MAX_EQUIVALENT_SEARCHES));
@@ -846,7 +857,9 @@ export class GenericDriver extends TrustedDriver {
     return outcome.ok
       ? {
           ok: true,
-          result: `${byClaude ? "Claude picked" : "picked"} "${picked}" of ${found.size} choices seen across searches (your answer: "${wanted.slice(0, 60)}")`,
+          result: reused
+            ? `picked "${picked}" as before for this answer (no Claude call; your answer: "${wanted.slice(0, 60)}")`
+            : `${byClaude ? "Claude picked" : "picked"} "${picked}" of ${found.size} choices seen across searches (your answer: "${wanted.slice(0, 60)}")`,
         }
       : outcome;
   }
