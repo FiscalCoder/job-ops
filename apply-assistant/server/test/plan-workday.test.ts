@@ -561,10 +561,23 @@ describe("POST /plans/:jobId/choose", () => {
       body: JSON.stringify({ label: "Field of Study", wanted: ask.wanted }),
     });
     expect(((await remembered.json()) as any).data.value).toBe("Information Systems");
+    // You corrected it on a form: forgotten (by the choice), so the next list asks Claude again.
+    const post = (path: string, body: unknown) =>
+      fetch(`${base}/plans/job-1/${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer good" },
+        body: JSON.stringify(body),
+      }).then(async (r) => (await r.json()) as any);
+    expect((await post("choose/forget", { label: "Field of Study", value: "Information Systems" })).data).toEqual({ forgotten: 1 });
+    expect((await post("choose/remembered", { label: "Field of Study", wanted: ask.wanted })).data.value).toBeNull();
+    reply = { answer: ["Information Systems"], why: "Same field" };
+    expect((await choose(ask)).body.data.value).toBe("Information Systems");
+    expect(create.mock.calls.length).toBe(calls + 1);
+    const callsAfterRepick = create.mock.calls.length;
     // A list without that choice: Claude is asked as before.
     reply = { answer: ["NO MATCH"], why: "Nothing like AI/ML" };
     expect((await choose({ ...ask, options: ["Management", "Computer Science"] })).status).toBe(422);
-    expect(create.mock.calls.length).toBe(calls + 1);
+    expect(create.mock.calls.length).toBe(callsAfterRepick + 1);
 
     const other = { ...ask, wanted: "Artificial Intelligence and Machine Learning" };
     expect((await choose(other)).status).toBe(422);

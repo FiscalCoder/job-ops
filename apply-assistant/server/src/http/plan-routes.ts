@@ -51,6 +51,12 @@ const rememberedBody = z.object({
   wanted: z.string().trim().min(1).max(500),
 });
 
+/** A field you corrected: its label and what the pick had filled (your answer or the choice). */
+const forgetBody = z.object({
+  label: z.string().trim().min(1).max(500),
+  value: z.string().trim().min(1).max(500),
+});
+
 const searchTermsBody = z.object({
   label: z.string().trim().min(1).max(500),
   wanted: z.string().trim().min(1).max(500),
@@ -80,6 +86,19 @@ export function createPlanRoutes(plans: PlansService) {
         return;
       }
       sendOk(res, plans.remembered(body.data));
+    },
+  );
+
+  /** You corrected a field a list pick filled: the pick is forgotten, never reused. */
+  router.post(
+    "/plans/:jobId/choose/forget",
+    (req: AuthedRequest, res: Response) => {
+      const body = forgetBody.safeParse(req.body);
+      if (!body.success) {
+        sendError(res, 400, "INVALID_REQUEST", "The field and its value are needed");
+        return;
+      }
+      sendOk(res, plans.forgetPick(String(req.params.jobId), body.data));
     },
   );
 

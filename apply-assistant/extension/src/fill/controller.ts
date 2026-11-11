@@ -35,6 +35,7 @@ import {
 import { decisionEvent, pageCapture, watchPage } from "./run-trace";
 import { recipeHost, unlearn } from "./site-help";
 import { takeoverSkipped } from "./takeover-policy";
+import { isListPick, pickToForget } from "./pick-memory";
 import {
   changedSince,
   type FillFrom,
@@ -490,6 +491,11 @@ export class RunController {
           `You changed ${changed.length} field(s) while paused; kept as yours: ${labels.join(", ").slice(0, 300)}`,
           { data: { seqs: changed } },
         );
+        for (const step of this.state.steps)
+          if (changed.includes(step.seq) && isListPick(step)) {
+            const value = Array.isArray(step.value) ? step.value[0] : step.value;
+            if (typeof value === "string" && value.trim()) this.forgetPick(step, value);
+          }
         this.apply({ type: "changed-by-you", seqs: changed });
       }
     } finally {
@@ -526,12 +532,12 @@ export class RunController {
       event.type !== "submitted"
     )
       return;
-    const decision = decisionEvent(
-      event,
-      this.state.phase === "filling"
-        ? this.state.steps[this.state.cursor]
-        : undefined,
-    );
+    const current =
+      this.state.phase === "filling" ? this.state.steps[this.state.cursor] : undefined;
+    // You corrected what a list pick chose: it's forgotten, not reused on the next form.
+    const corrected = pickToForget(event, current);
+    if (current && corrected) this.forgetPick(current, corrected);
+    const decision = decisionEvent(event, current);
     if (decision)
       this.trace.event("decision", decision.message, {
         data: decision.data,
@@ -544,6 +550,21 @@ export class RunController {
       return;
     }
     void this.loop();
+  }
+
+  /** Forgets a list pick you corrected (never fails the run). */
+  private forgetPick(step: Step, value: string): void {
+    void this.client
+      .forgetPick(this.job.jobId, { label: step.entry.label, value })
+      .then(({ forgotten }) => {
+        if (forgotten)
+          this.trace.event(
+            "decision",
+            `Forgot the list pick "${value.slice(0, 80)}" for "${step.entry.label.slice(0, 80)}": you corrected it`,
+            { stepSeq: step.seq },
+          );
+      })
+      .catch(() => {});
   }
 
   /** You skipped this step while it was being filled: its result no longer counts. */

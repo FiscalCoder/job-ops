@@ -414,6 +414,17 @@ export class ApplyClient implements TraceApi {
     );
   }
 
+  /** You corrected a field a list pick filled: the pick is forgotten (never reused). */
+  forgetPick(
+    jobId: string,
+    ask: { label: string; value: string },
+  ): Promise<{ forgotten: number }> {
+    return this.request(
+      `/plans/${encodeURIComponent(jobId)}/choose/forget`,
+      ask,
+    );
+  }
+
   /** Workday: broader words to search a list for when your answer's own words found nothing. */
   searchTerms(
     jobId: string,

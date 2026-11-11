@@ -597,6 +597,31 @@ export function createPlans(deps: PlansDeps) {
       return { value: ask.wanted.trim() ? rememberedPick(ask.label, ask.wanted) : null };
     },
 
+    /** You corrected a field a list pick filled: the pick isn't reused again. */
+    forgetPick(jobId: string, ask: { label: string; value: string }): { forgotten: number } {
+      let forgotten = deps.choicePicks?.forgetFor(ask.label, ask.value) ?? 0;
+      const target = normChoiceText(ask.value);
+      for (const [key, choice] of memoryPicks) {
+        const [user, label, wanted] = JSON.parse(key) as [string, string, string];
+        if (
+          user === currentUser() &&
+          label === normChoiceText(ask.label) &&
+          (wanted === target || normChoiceText(choice) === target)
+        ) {
+          memoryPicks.delete(key);
+          forgotten++;
+        }
+      }
+      if (forgotten)
+        trace({
+          jobId,
+          kind: "choose",
+          message: `Forgot the list pick for "${ask.label.slice(0, 80)}" ("${ask.value.slice(0, 80)}"): you corrected it`,
+          data: { ...ask, forgotten },
+        });
+      return { forgotten };
+    },
+
     async choose(
       token: string,
       jobId: string,

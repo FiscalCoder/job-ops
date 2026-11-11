@@ -33,6 +33,9 @@ export function createChoicePicksRepo(db: DatabaseSync) {
   const forget = db.prepare(
     "delete from choice_picks where user_id = ? and label_norm = ? and wanted_norm = ?",
   );
+  const ofLabel = db.prepare(
+    "select wanted_norm, choice from choice_picks where user_id = ? and label_norm = ?",
+  );
   const key = (label: string, wanted: string) =>
     [currentUser(), normChoiceText(label), normChoiceText(wanted)] as const;
 
@@ -52,6 +55,26 @@ export function createChoicePicksRepo(db: DatabaseSync) {
     },
     forget(label: string, wanted: string): void {
       forget.run(...key(label, wanted));
+    },
+
+    /**
+     * You corrected a field a remembered (or new) pick filled: that pick is forgotten, matched
+     * by your answer or by the choice itself (a pick made when the plan was built shows only the
+     * choice). Returns how many were forgotten.
+     */
+    forgetFor(label: string, value: string): number {
+      const user = currentUser();
+      const labelNorm = normChoiceText(label);
+      const target = normChoiceText(value);
+      if (!labelNorm || !target) return 0;
+      const rows = ofLabel.all(user, labelNorm) as { wanted_norm: string; choice: string }[];
+      let forgotten = 0;
+      for (const row of rows)
+        if (row.wanted_norm === target || normChoiceText(row.choice) === target) {
+          forget.run(user, labelNorm, row.wanted_norm);
+          forgotten++;
+        }
+      return forgotten;
     },
   };
 }
