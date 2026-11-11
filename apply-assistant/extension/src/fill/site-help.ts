@@ -14,6 +14,7 @@ import {
   sleep,
 } from "./options";
 import { equivalentTerms } from "./equivalents";
+import { takeoverSkipped } from "./takeover-policy";
 import { deepChoices, deepFind } from "./locate";
 import type { PlanEntry } from "./supervisor";
 import type { FillOutcome } from "./trusted";
@@ -282,6 +283,10 @@ export async function rescueField(
     }
     tried = `${tried}; steps from this kind of field elsewhere (${describeSteps(shared.steps)}) didn't set it`;
   }
+  // Where Claude's steps rarely work (location fields: about 15% for these steps, 14% for a
+  // takeover; a field that isn't on the page), no Claude call: the field is yours.
+  const skipped = takeoverSkipped(entry.label, tried);
+  if (skipped) return { ok: false, reason: `${tried}; no Claude steps: ${skipped}` };
   const html = await target.frame
     .evaluate(fieldHtml, target.selector, MAX_HTML_CHARS)
     .catch(() => "");
