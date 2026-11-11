@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { ClaudeAnswersRepo } from "../store/claude-answers-repo.js";
+import { withAiPurpose } from "./ai-context.js";
 import { type ClaudeUsage, usageOfMessage } from "./pricing.js";
 import {
   type ClaudeAnswer,
@@ -123,16 +124,18 @@ export function createClaudeAnswerer(
     context: QuestionContext,
     onUsage: UsageListener,
   ): Promise<Map<string, Cached>> {
-    const message = await messages.create({
-      model: mapModel,
-      max_tokens: MAP_MAX_TOKENS,
-      system: MAP_SYSTEM,
-      messages: [{ role: "user", content: mapPromptBlocks(questions, context) }],
-      output_config: {
-        effort: "low",
-        format: { type: "json_schema", schema: MAP_SCHEMA },
-      },
-    });
+    const message = await withAiPurpose("map-questions", () =>
+      messages.create({
+        model: mapModel,
+        max_tokens: MAP_MAX_TOKENS,
+        system: MAP_SYSTEM,
+        messages: [{ role: "user", content: mapPromptBlocks(questions, context) }],
+        output_config: {
+          effort: "low",
+          format: { type: "json_schema", schema: MAP_SCHEMA },
+        },
+      }),
+    );
     usage(`mapped ${questions.length} question(s)`, message, onUsage);
     const declined = message.stop_reason === "refusal";
     const items = declined ? [] : parseMapReply(replyText(message));
@@ -164,13 +167,15 @@ export function createClaudeAnswerer(
     const key = cacheKey("draft", draftModel, question, context);
     const cached = cache.get(key) as ClaudeAnswer | null;
     if (cached) return cached;
-    const message = await messages.create({
-      model: draftModel,
-      max_tokens: DRAFT_MAX_TOKENS,
-      system: DRAFT_SYSTEM,
-      messages: [{ role: "user", content: draftPromptBlocks(question, context) }],
-      output_config: { effort: "low" },
-    });
+    const message = await withAiPurpose("draft-answer", () =>
+      messages.create({
+        model: draftModel,
+        max_tokens: DRAFT_MAX_TOKENS,
+        system: DRAFT_SYSTEM,
+        messages: [{ role: "user", content: draftPromptBlocks(question, context) }],
+        output_config: { effort: "low" },
+      }),
+    );
     usage("drafted 1 answer", message, onUsage);
     if (message.stop_reason === "refusal")
       return {
@@ -191,16 +196,18 @@ export function createClaudeAnswerer(
     unavailable: () => options.unavailable?.() ?? null,
     async act(request, onUsage = () => {}) {
       // Reading a widget's markup is harder than answering: the drafting model.
-      const message = await messages.create({
-        model: draftModel,
-        max_tokens: DRAFT_MAX_TOKENS,
-        system: ACT_SYSTEM,
-        messages: [{ role: "user", content: actPrompt(request) }],
-        output_config: {
-          effort: "low",
-          format: { type: "json_schema", schema: ACT_SCHEMA },
-        },
-      });
+      const message = await withAiPurpose("act-field", () =>
+        messages.create({
+          model: draftModel,
+          max_tokens: DRAFT_MAX_TOKENS,
+          system: ACT_SYSTEM,
+          messages: [{ role: "user", content: actPrompt(request) }],
+          output_config: {
+            effort: "low",
+            format: { type: "json_schema", schema: ACT_SCHEMA },
+          },
+        }),
+      );
       usage("worked out steps for 1 field", message, onUsage);
       if (message.stop_reason === "refusal")
         throw new TellRejectedError("Claude declined to operate this field");
@@ -210,21 +217,23 @@ export function createClaudeAnswerer(
     async tell(question, instruction, context, onUsage = () => {}) {
       // Long-answer fields get the drafting model; everything else the quick one.
       const model = question.type === "textarea" ? draftModel : mapModel;
-      const message = await messages.create({
-        model,
-        max_tokens: DRAFT_MAX_TOKENS,
-        system: TELL_SYSTEM,
-        messages: [
-          {
-            role: "user",
-            content: tellPrompt(question, instruction, context),
+      const message = await withAiPurpose("tell", () =>
+        messages.create({
+          model,
+          max_tokens: DRAFT_MAX_TOKENS,
+          system: TELL_SYSTEM,
+          messages: [
+            {
+              role: "user",
+              content: tellPrompt(question, instruction, context),
+            },
+          ],
+          output_config: {
+            effort: "low",
+            format: { type: "json_schema", schema: TELL_SCHEMA },
           },
-        ],
-        output_config: {
-          effort: "low",
-          format: { type: "json_schema", schema: TELL_SCHEMA },
-        },
-      });
+        }),
+      );
       usage("answered 1 field as told", message, onUsage);
       if (message.stop_reason === "refusal")
         throw new TellRejectedError("Claude declined to answer this");

@@ -5,6 +5,7 @@ import type {
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import {
   bestOption,
+  containsWords,
   digits,
   OPTION_WAIT_MS,
   POLL_MS,
@@ -12,6 +13,7 @@ import {
   selectionMatches,
   sleep,
 } from "./options";
+import { equivalentTerms } from "./equivalents";
 import { deepChoices, deepFind } from "./locate";
 import type { PlanEntry } from "./supervisor";
 import type { FillOutcome } from "./trusted";
@@ -236,7 +238,19 @@ export async function visibleChoices(
 /** Shows the value (a number may show formatted: "+91 98…" for "98…"). */
 export const showsValue = (shown: string, wanted: string): boolean =>
   selectionMatches(shown, wanted) ||
-  (digits(wanted).length > 5 && sameNumber(shown, wanted));
+  (digits(wanted).length > 5 && sameNumber(shown, wanted)) ||
+  // Your answer as the list words it ("BA" for "Bachelor's Degree", "TN" for "Tamil Nadu"):
+  // filled right, not a failure to hand to Claude. The field must show the whole wording.
+  showsEquivalent(shown, wanted);
+
+function showsEquivalent(shown: string, wanted: string): boolean {
+  const s = shown.trim().toLowerCase();
+  if (!s) return false;
+  return equivalentTerms(wanted).some((term) => {
+    const t = term.trim().toLowerCase();
+    return s === t || containsWords(s, t);
+  });
+}
 
 /** This site's saved steps for the question, else Claude's; null when neither sets it. */
 export async function rescueField(

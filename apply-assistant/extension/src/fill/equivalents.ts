@@ -37,7 +37,10 @@ const GROUPS: readonly (readonly string[])[] = [
   ["West Bengal", "WB", "IN-WB"],
   ["Gujarat", "GJ", "IN-GJ"],
   // "How did you hear about us?": your answer, then the category a list files it under.
-  ["LinkedIn", "Linked In", "LinkedIn Job Posting", "Job Board", "Online Job Board", "Social Media", "Internet"],
+  [
+    "LinkedIn", "Linked In", "LinkedIn Job Posting", "Job Board", "Online Job Board",
+    "Social Media", "Website/Social Media", "Social Media/Website", "Social Networking", "Internet",
+  ],
 ];
 
 const norm = (s: string) =>

@@ -26,6 +26,8 @@ export interface GenericField {
   readonly value?: string;
   /** Its placeholder, name and the heading above it: what Claude's page map reads. */
   readonly context?: string;
+  /** The most characters a text box takes (its maxlength): answers are written to fit. */
+  readonly maxLength?: number;
 }
 
 /** A dropdown's prompt, not a choice ("— Make a Selection —", "Select…"). */
@@ -456,6 +458,8 @@ export function readGenericPage(): GenericPage {
       /\*\s*$/.test(label);
     const block = blockOf(el);
     const value = valueOf(el, tag);
+    const maxLength =
+      tag === "input" || tag === "textarea" ? (el as HTMLInputElement).maxLength : -1;
     fields.push({
       ref,
       key: el.getAttribute("name") || el.id || ref,
@@ -466,6 +470,7 @@ export function readGenericPage(): GenericPage {
       ...(block ? { block } : {}),
       ...(value ? { value } : {}),
       ...(contextOf(el) ? { context: contextOf(el) } : {}),
+      ...(maxLength > 0 && maxLength < 100_000 ? { maxLength } : {}),
     });
   };
   for (const el of document.querySelectorAll<HTMLElement>(FIELD)) {

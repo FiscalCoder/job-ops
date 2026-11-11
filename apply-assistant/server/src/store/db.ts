@@ -343,6 +343,31 @@ export const MIGRATIONS: readonly string[] = [
   // Claude credit you loaded (an estimate: Anthropic has no API for what's left) and the date.
   `alter table user_settings add column claude_credit_usd real;
    alter table user_settings add column claude_credit_as_of text;`,
+  // Every Claude call end to end (ai-call-store.ts): what it was for, its numbers, and the file
+  // with what was sent and what came back (null once dropped).
+  `create table ai_calls (
+     id text primary key,
+     user_id text not null default '',
+     job_id text,
+     run_id text,
+     step_seq integer,
+     field_label text,
+     purpose text not null,
+     model text not null,
+     input_tokens integer,
+     output_tokens integer,
+     cache_read_tokens integer,
+     cache_write_tokens integer,
+     cost real,
+     duration_ms integer not null,
+     stop_reason text,
+     error text,
+     payload_file text,
+     image_files text,
+     created_at text not null
+   );
+   create index ai_calls_user_job on ai_calls (user_id, job_id, created_at);
+   create index ai_calls_created on ai_calls (created_at);`,
 ];
 
 export function openStore(target: string | DatabaseSync): DatabaseSync {

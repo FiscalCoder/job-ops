@@ -52,6 +52,7 @@ const OWNED_TABLES = [
   "form_schemas",
   "claude_answers",
   "site_recipes",
+  "ai_calls",
 ] as const;
 
 /**

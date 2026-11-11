@@ -111,7 +111,7 @@ export function createTimeline({ api, raw, el, go }) {
         el(
           "p",
           { class: "error" },
-          "This snapshot is gone (older than 60 days?).",
+          "This snapshot is gone (the job was applied, or it's older than 60 days).",
         ),
       );
       return;

@@ -164,3 +164,32 @@ describe("checking Claude's reply", () => {
     });
   });
 });
+
+describe("a field's character limit", () => {
+  it("reaches Claude as max_chars, and the drafting rules say to fit it", async () => {
+    const { toQuestion, questionForPrompt, DRAFT_SYSTEM } = await import(
+      "../src/claude/questions.js"
+    );
+    const question = toQuestion({
+      ref: "q1",
+      label: "Relevant Experience",
+      type: "textarea",
+      required: true,
+      options: [],
+      section: "main",
+      maxLength: 280,
+    });
+    expect(question.maxChars).toBe(280);
+    expect(questionForPrompt(question)).toContain('max_chars="280"');
+    expect(DRAFT_SYSTEM).toMatch(/max_chars/);
+    const unlimited = toQuestion({
+      ref: "q2",
+      label: "Notes",
+      type: "textarea",
+      required: false,
+      options: [],
+      section: "main",
+    });
+    expect(questionForPrompt(unlimited)).not.toContain("max_chars");
+  });
+});

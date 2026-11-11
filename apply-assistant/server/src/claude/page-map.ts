@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { WorkdayPage } from "../plan/workday-schema.js";
+import { withAiPurpose } from "./ai-context.js";
 import type { MessagesApi, UsageListener } from "./answerer.js";
 import { usageOfMessage } from "./pricing.js";
 
@@ -292,7 +293,7 @@ export function createPageMapper(options: {
         deep && request.screenshot && request.screenshot.length <= MAX_SCREENSHOT
           ? request.screenshot
           : null;
-      const message = await options.messages.create({
+      const message = await withAiPurpose(deep ? "deep-read" : "page-map", () => options.messages.create({
         model: deep ? (options.deepModel ?? options.model) : options.model,
         max_tokens: MAX_TOKENS,
         // The instructions are the same on every page: cached (reads cost a tenth).
@@ -316,7 +317,7 @@ ${text}` },
           effort: "low",
           format: { type: "json_schema", schema: PAGE_MAP_SCHEMA },
         },
-      });
+      }));
       onUsage(
         usageOfMessage(message),
       );

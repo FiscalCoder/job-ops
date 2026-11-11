@@ -36,6 +36,8 @@ export interface KitRoutesDeps {
   readonly planStore: FillPlansRepo;
   readonly answerer: QuestionAnswerer | null;
   readonly trace?: TraceRecord;
+  /** A job was marked applied: its snapshots can go (applied-cleanup.ts). */
+  readonly onApplied?: (jobId: string) => void;
 }
 
 /** A Claude reply as text to copy, or null when Claude had no answer. */
@@ -184,6 +186,17 @@ export function createKitRoutes(deps: KitRoutesDeps) {
               : "You skipped this job",
           data: { outcome, previousStatus: status },
         });
+        if (outcome === "applied") {
+          try {
+            deps.onApplied?.(jobId);
+          } catch (error) {
+            trace({
+              jobId,
+              kind: "error",
+              message: `Couldn't delete the applied job's snapshots: ${error instanceof Error ? error.message : String(error)}`,
+            });
+          }
+        }
         sendOk(res, { status: outcome });
       } catch (error) {
         failJobOps(res, error);

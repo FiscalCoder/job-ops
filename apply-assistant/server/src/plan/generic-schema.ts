@@ -175,6 +175,7 @@ export function parseGenericPage(
       section: canonical && DEMOGRAPHIC.has(canonical) ? "demographic" : "main",
       ...(f.block ? { group: f.block.heading } : {}),
       ...(f.widget ? { widget: f.widget } : {}),
+      ...(f.maxLength ? { maxLength: f.maxLength } : {}),
     };
   });
   return {

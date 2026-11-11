@@ -41,6 +41,8 @@ export interface FormField {
   readonly section: FieldSection;
   /** The page's own heading for the group it sits in ("Professional Experience (2)"). */
   readonly group?: string;
+  /** The most characters it takes (a text box's maxlength): Claude writes to fit. */
+  readonly maxLength?: number;
   /** What kind of input it really is, from Claude's page map (tags, a date picker…). */
   readonly widget?:
     | "tags"

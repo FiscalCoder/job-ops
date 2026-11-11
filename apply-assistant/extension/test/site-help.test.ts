@@ -28,6 +28,15 @@ describe("site help", () => {
     // A retyped number appended to the old one is not the number (Workday salary, J&J).
     expect(showsValue("4000004000000", "4000000 INR per year")).toBe(false);
   });
+
+  it("counts your answer as the list words it as filled (startup.jobs showed BA)", () => {
+    expect(showsValue("Degree*BA", "Bachelor's Degree")).toBe(true);
+    expect(showsValue("TN", "Tamil Nadu")).toBe(true);
+    expect(showsValue("Website/Social Media", "LinkedIn")).toBe(true);
+    // The whole wording must show: a word of it is not the choice.
+    expect(showsValue("Job", "LinkedIn")).toBe(false);
+    expect(showsValue("MA", "Bachelor's Degree")).toBe(false);
+  });
 });
 
 describe("numbers in fields", () => {

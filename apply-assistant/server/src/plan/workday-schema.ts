@@ -47,6 +47,8 @@ export const workdayPageSchema = z.object({
         value: z.string().max(300).optional(),
         /** Company pages: its placeholder, name and the heading above it (for Claude's map). */
         context: z.string().max(300).optional(),
+        /** Company pages: the most characters the text box takes (its maxlength). */
+        maxLength: z.number().int().positive().max(100_000).optional(),
         /** Set by Claude's page map: what it takes, when the label alone says nothing. */
         meaning: z.string().max(40).optional(),
         /** Set when Claude mapped the page with your instruction: its meaning comes first. */

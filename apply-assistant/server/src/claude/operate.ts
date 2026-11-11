@@ -1,6 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import { withAiPurpose } from "./ai-context.js";
 import type { MessagesApi, UsageListener } from "./answerer.js";
 import { usageOfMessage } from "./pricing.js";
 
@@ -70,7 +71,13 @@ export const OPERATE_TOOLS: Anthropic.ToolUnion[] = [
 
 const FINISH_ALONE = "Not done: call finish on its own, after you've seen these actions' results";
 
-export const MAX_TURNS = 8;
+/**
+ * Turns per field. Takeovers that finished mostly did so early; one still going after 4 rounds
+ * rarely got there (26% finished overall, 2026-10/11), so it stops and the field is yours.
+ */
+export const MAX_TURNS = 4;
+/** Rounds in a row where the page looked exactly the same after Claude's actions: it's stuck. */
+export const MAX_UNCHANGED_ROUNDS = 2;
 export const MAX_ACTIONS = 20;
 /** Dollars: one field, and one application (all its fields). */
 export const FIELD_COST_CAP = 0.15;
@@ -149,7 +156,12 @@ interface Session {
   actions: number;
   cost: number;
   at: number;
+  /** The last screenshot's hash, and how many rounds in a row it came back the same. */
+  lastShot: string | null;
+  unchanged: number;
 }
+
+const shotHash = (data: string) => createHash("sha256").update(data).digest("hex");
 
 const imageBlock = (shot: z.infer<typeof image>): Anthropic.ImageBlockParam => ({
   type: "image",
@@ -202,15 +214,17 @@ export function createOperator(options: {
     session: Session,
     onUsage: UsageListener,
   ): Promise<OperateTurn> {
-    const message = await options.messages.create({
-      model: options.model,
-      max_tokens: MAX_TOKENS,
-      system: OPERATE_SYSTEM,
-      tools: OPERATE_TOOLS,
-      messages: session.messages,
-      cache_control: { type: "ephemeral" },
-      output_config: { effort: "medium" },
-    });
+    const message = await withAiPurpose("operate", () =>
+      options.messages.create({
+        model: options.model,
+        max_tokens: MAX_TOKENS,
+        system: OPERATE_SYSTEM,
+        tools: OPERATE_TOOLS,
+        messages: session.messages,
+        cache_control: { type: "ephemeral" },
+        output_config: { effort: "medium" },
+      }),
+    );
     // Earlier turns (their screenshots) come from the cache: writes cost 1.25×, reads 0.1×.
     const usage = usageOfMessage(message);
     onUsage(usage);
@@ -294,6 +308,8 @@ export function createOperator(options: {
         actions: 0,
         cost: 0,
         at: now(),
+        lastShot: shotHash(request.screenshot.data),
+        unchanged: 0,
       };
       sessions.set(id, session);
       return turn(id, session, onUsage);
@@ -317,6 +333,26 @@ export function createOperator(options: {
           byId.set(call.id, { id: call.id, ok: false, text: FINISH_ALONE });
       if (session.pending.some((call) => !byId.has(call.id)))
         throw new OperateLimitError("Every action needs its result");
+      // The page after this round's actions; the same picture again and again means stuck, and
+      // asking Claude once more would only cost another round.
+      const shot = [...request.results].reverse().find((r) => r.screenshot)?.screenshot;
+      if (shot) {
+        const hash = shotHash(shot.data);
+        session.unchanged = hash === session.lastShot ? session.unchanged + 1 : 0;
+        session.lastShot = hash;
+      }
+      if (session.unchanged >= MAX_UNCHANGED_ROUNDS) {
+        sessions.delete(request.session);
+        return {
+          session: request.session,
+          label: session.label,
+          calls: [],
+          done: true,
+          why: `Stopped: the page didn't change for ${MAX_UNCHANGED_ROUNDS} rounds`,
+          value: null,
+          cost: session.cost,
+        };
+      }
       const content: Anthropic.ToolResultBlockParam[] = session.pending.map((call) => {
         const result = byId.get(call.id);
         const text = result?.text || (result?.ok ? "OK" : "Not done");

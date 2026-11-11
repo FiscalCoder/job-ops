@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import { withAiPurpose } from "./ai-context.js";
 import type { MessagesApi, UsageListener } from "./answerer.js";
 import { usageOfMessage } from "./pricing.js";
 
@@ -143,16 +144,18 @@ export function createNavigator(options: {
         throw new NavigateLimitError(
           `Claude has used this application's budget for finding the form ($${NAV_COST_CAP}); open it yourself`,
         );
-      const message = await options.messages.create({
-        model: options.model,
-        max_tokens: MAX_TOKENS,
-        system: NAVIGATE_SYSTEM,
-        messages: [{ role: "user", content: navigatePrompt(request) }],
-        output_config: {
-          effort: "low",
-          format: { type: "json_schema", schema: NAVIGATE_SCHEMA },
-        },
-      });
+      const message = await withAiPurpose("navigate", () =>
+        options.messages.create({
+          model: options.model,
+          max_tokens: MAX_TOKENS,
+          system: NAVIGATE_SYSTEM,
+          messages: [{ role: "user", content: navigatePrompt(request) }],
+          output_config: {
+            effort: "low",
+            format: { type: "json_schema", schema: NAVIGATE_SCHEMA },
+          },
+        }),
+      );
       const usage = usageOfMessage(message);
       onUsage(usage);
       const cost = usage.cost ?? 0;

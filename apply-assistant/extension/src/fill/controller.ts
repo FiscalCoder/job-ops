@@ -34,6 +34,7 @@ import {
 } from "./run-tab";
 import { decisionEvent, pageCapture, watchPage } from "./run-trace";
 import { recipeHost, unlearn } from "./site-help";
+import { takeoverSkipped } from "./takeover-policy";
 import {
   changedSince,
   type FillFrom,
@@ -1595,6 +1596,16 @@ export class RunController {
       this.state.paused
     )
       return false;
+    // Where a takeover almost never works (location fields, a field that isn't there): yours.
+    const skipped = takeoverSkipped(step.entry.label, why);
+    if (skipped) {
+      this.trace.event(
+        "decision",
+        `No Claude takeover for "${step.entry.label}": ${skipped}. It's yours to fill.`,
+        { stepSeq: step.seq, data: { takeover: "skipped", why: skipped } },
+      );
+      return false;
+    }
     const tries = (this.escalated.get(step.seq) ?? 0) + 1;
     this.escalated.set(step.seq, tries);
     this.trace.event(

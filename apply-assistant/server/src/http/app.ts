@@ -26,7 +26,11 @@ import { createNavigateRoutes } from "./navigate-routes.js";
 import { createOperateRoutes } from "./operate-routes.js";
 import { createLearnedAnswersRepo } from "../store/learned-answers-repo.js";
 import { createClaudeAccess } from "../claude/access.js";
-import { claimUnowned } from "../store/owner.js";
+import { aiJobContext } from "../claude/ai-context.js";
+import { loggedMessages } from "../claude/logged-messages.js";
+import { type AiCallStore, createAiCallStore } from "../store/ai-call-store.js";
+import { createAppliedCleanup } from "../store/applied-cleanup.js";
+import { claimUnowned, currentUser } from "../store/owner.js";
 import { createUserSettingsRepo } from "../store/user-settings-repo.js";
 import { createRunsRepo } from "../store/runs-repo.js";
 import { createTraceStore, type TraceStore } from "../store/trace-store.js";
@@ -76,6 +80,8 @@ export interface AppDeps {
   readonly log?: (line: string) => void;
   /** The run trace; tests leave it out and share one in the temp folder (made on first snapshot). */
   readonly trace?: TraceStore;
+  /** Every Claude call end to end; tests leave it out and share one in the temp folder. */
+  readonly aiCalls?: AiCallStore;
 }
 
 const loginBody = z.object({
@@ -92,19 +98,35 @@ export function createApp({
     db,
     dir: path.join(tmpdir(), "apply-assistant-test-trace"),
   }),
+  aiCalls = createAiCallStore({
+    db,
+    dir: path.join(tmpdir(), "apply-assistant-test-ai-calls"),
+  }),
 }: AppDeps) {
   const app = express();
   const record = trace.record;
   const answers = createAnswerBankRepo(db);
+  const cleanup = createAppliedCleanup({
+    db,
+    trace,
+    aiCalls,
+    jobOps,
+    ...(log ? { log } : {}),
+  });
   // Data from before apply-assistant had users was all one person's: Job Ops' admin.
   let claimed = false;
-  const requireUser = createAuthMiddleware(jobOps, authCacheSeconds, (user) => {
+  const requireUser = createAuthMiddleware(jobOps, authCacheSeconds, (user, token) => {
+    // Jobs Job Ops has as applied (however that happened) lose their snapshots; throttled.
+    void cleanup.sweep(user.id, token);
     if (claimed || !user.isSystemAdmin) return;
     claimed = true;
     const rows = claimUnowned(db, user.id);
     if (rows)
       log?.(`[users] ${rows} rows from before users given to ${user.username}`);
   });
+  const onApplied = (jobId: string) => {
+    cleanup.onApplied(currentUser(), jobId);
+  };
 
   app.disable("x-powered-by");
   // One hop: nginx (CloudPanel) is the only way in, so its X-Forwarded-For is the client.
@@ -151,10 +173,12 @@ export function createApp({
           }),
       })
     : null;
+  // Every call through the user's (or the server's) key is logged end to end.
+  const messages = access ? loggedMessages(access.messages, aiCalls) : null;
   const answerer =
-    claude && access
+    claude && access && messages
       ? createClaudeAnswerer({
-          messages: access.messages,
+          messages,
           unavailable: access.unavailable,
           mapModel: claude.mapModel,
           draftModel: claude.draftModel,
@@ -163,17 +187,17 @@ export function createApp({
         })
       : null;
   const operator =
-    claude && access
-      ? createOperator({ messages: access.messages, model: claude.draftModel })
+    claude && messages
+      ? createOperator({ messages, model: claude.draftModel })
       : null;
   const navigator =
-    claude && access
-      ? createNavigator({ messages: access.messages, model: claude.draftModel })
+    claude && messages
+      ? createNavigator({ messages, model: claude.draftModel })
       : null;
   const pageMapper =
-    claude && access
+    claude && messages
       ? createPageMapper({
-          messages: access.messages,
+          messages,
           model: claude.mapModel,
           deepModel: claude.draftModel,
           store: createPageMapsRepo(db),
@@ -200,6 +224,8 @@ export function createApp({
     ["/plans/:jobId", "/kit/:jobId", "/jobs/:jobId", "/trace/jobs/:jobId"],
     requireUser,
     ownership.guard,
+    // Claude calls made for the request are logged against this job, run and field.
+    aiJobContext,
   );
   app.use(requireUser, createAnswerBankRoutes(answers));
   app.use(
@@ -247,6 +273,7 @@ export function createApp({
       answers,
       trace: record,
       onRunEnded: (run) => spend.recordRunCost(run),
+      onApplied,
     }),
   );
   app.use(requireUser, createUsageRoutes({ runs, spend, jobOps }));
@@ -271,6 +298,7 @@ export function createApp({
       planStore,
       answerer,
       trace: record,
+      onApplied,
     }),
   );
   app.use(

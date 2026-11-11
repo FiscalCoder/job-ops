@@ -26,7 +26,7 @@ interface CacheEntry {
 export function createAuthMiddleware(
   jobOps: JobOpsApi,
   cacheSeconds: number,
-  onUser: (user: JobOpsUser) => void = () => {},
+  onUser: (user: JobOpsUser, token: string) => void = () => {},
 ) {
   const cache = new Map<string, CacheEntry>();
   const proceed = (
@@ -37,7 +37,7 @@ export function createAuthMiddleware(
   ) => {
     req.user = user;
     req.jobOpsToken = token;
-    onUser(user);
+    onUser(user, token);
     runAsUser(user, () => next());
   };
 

@@ -222,6 +222,34 @@ describe("Claude operating one field", () => {
         results: [{ id: "t", ok: true, text: "" }],
       });
     expect(turn).toMatchObject({ done: true, why: `Stopped after ${MAX_TURNS} turns` });
+    expect(MAX_TURNS).toBe(4);
+  });
+
+  it("stops without asking Claude again when the page hasn't changed for 2 rounds", async () => {
+    let asked = 0;
+    const operator = createOperator({
+      messages: {
+        create: async () => {
+          asked++;
+          return reply([click("t")]);
+        },
+      },
+      model: "claude-sonnet-5-5",
+    });
+    const same = { data: start.screenshot.data, mediaType: start.screenshot.mediaType };
+    let turn = await operator.start("u1", "job-1", start);
+    turn = await operator.next("u1", "job-1", {
+      session: turn.session,
+      results: [{ id: "t", ok: true, text: "", screenshot: same }],
+    });
+    expect(turn.done).toBe(false);
+    turn = await operator.next("u1", "job-1", {
+      session: turn.session,
+      results: [{ id: "t", ok: true, text: "", screenshot: same }],
+    });
+    expect(turn).toMatchObject({ done: true, calls: [], value: null });
+    expect(turn.why).toMatch(/didn't change for 2 rounds/);
+    expect(asked).toBe(2);
   });
 
   it("stops at the application's budget, and won't start again on that job", async () => {

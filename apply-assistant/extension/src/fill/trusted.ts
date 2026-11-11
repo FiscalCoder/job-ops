@@ -5,6 +5,7 @@ import type {
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import { captureDom, type DomCapture, MAX_DOM_CHARS } from "../trace/dom";
 import { MAX_SNAPSHOT, trimmedForm } from "./form-snapshot";
+import { fitToLength } from "./fit-length";
 import { checkControls } from "./locate";
 import { type OperateApi, operateField } from "./operate";
 import { keptNumber, sameNumber, sleep } from "./options";
@@ -320,12 +321,21 @@ export abstract class TrustedDriver implements FormDriver {
     ).catch(() => {});
   }
 
-  /** Clears the field and inserts the text in one event, then reads it back. */
+  /**
+   * Clears the field and inserts the text in one event, then reads it back. A text longer than
+   * the field takes (its maxlength) is first shortened at a sentence or word, not cut mid-word.
+   */
   protected async typeText(
     element: ElementHandle,
-    value: string,
+    text: string,
     compareDigits: boolean,
   ): Promise<FillOutcome> {
+    const max = compareDigits
+      ? -1
+      : await element
+          .evaluate((el) => (el as HTMLInputElement).maxLength ?? -1)
+          .catch(() => -1);
+    const value = typeof max === "number" && max > 0 ? fitToLength(text, max) : text;
     await element.click();
     await this.page.keyboard.down("Control");
     await this.page.keyboard.press("a");
@@ -342,6 +352,11 @@ export abstract class TrustedDriver implements FormDriver {
         result: `filled (the field takes numbers only: ${got})`,
       };
     const ok = compareDigits ? sameNumber(got, value) : got === value;
+    if (ok && value !== text)
+      return {
+        ok: true,
+        result: `filled, shortened to the field's ${max}-character limit (check it reads well)`,
+      };
     return ok
       ? { ok: true, result: "filled" }
       : {

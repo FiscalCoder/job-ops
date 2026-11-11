@@ -121,7 +121,38 @@ describe("trace store", () => {
     expect(store.readSnapshot("nope")).toBeNull();
     }));
 
-  it("prunes by age, then the oldest snapshots over the size cap", () =>
+  it("keeps events a year, lookups 60 days, and Claude's spend for good", () =>
+    runAsUser("u1", () => {
+    const { store, advance } = setup();
+    store.record({ jobId: "j1", kind: "plan", message: "old plan" });
+    store.record({ jobId: "j1", kind: "lookup", message: "old lookup" });
+    store.record({ jobId: "j1", kind: "claude-usage", message: "old spend" });
+    const messages = () => store.events("j1").map((e) => e.message).sort();
+
+    advance(61);
+    store.prune();
+    expect(messages()).toEqual(["old plan", "old spend"]);
+
+    advance(305);
+    store.prune();
+    expect(messages()).toEqual(["old spend"]);
+    }));
+
+  it("deletes one job's snapshots, files included", () =>
+    runAsUser("u1", () => {
+    const { store, dir } = setup();
+    const save = (jobId: string) =>
+      store.saveSnapshot({ jobId, kind: "screenshot", reason: "r", content: JPEG });
+    save("j1");
+    save("j1");
+    const other = save("j2");
+    expect(store.dropSnapshotsOfJob("u1", "j1")).toBe(2);
+    expect(store.snapshots("j1")).toEqual([]);
+    expect(readdirSync(dir)).toEqual([`${other.id}.jpg`]);
+    expect(store.dropSnapshotsOfJob("someone-else", "j2")).toBe(0);
+    }));
+
+  it("prunes snapshots by age, then the oldest over the size cap", () =>
     runAsUser("u1", () => {
     const { store, dir, advance } = setup(undefined, JPEG.length * 2);
     const shot = (reason: string) =>
@@ -149,8 +180,8 @@ describe("trace store", () => {
     );
     expect(store.readSnapshot(ancient.id)).toBeNull();
     expect(store.readSnapshot(a.id)).toBeNull();
-    expect(store.events("j1").some((e) => e.message === "old")).toBe(false);
-    // What Claude cost is kept: the all-time spend total is summed from it.
+    // Text events outlive snapshots: they're the history of what was filled and by whom.
+    expect(store.events("j1").some((e) => e.message === "old")).toBe(true);
     expect(store.events("j1").some((e) => e.message === "old spend")).toBe(true);
     }));
 });
@@ -318,7 +349,7 @@ describe("trace routes", () => {
     expect(image.headers.get("content-type")).toBe("image/jpeg");
   });
 
-  it("records the server's part of a run and exports the whole trail", async () => {
+  it("records the server's part of a run, exports the trail, and drops snapshots once applied", async () => {
     const { json } = await start();
     const run = (await json("/runs", { jobId: job.id })).body.data;
     await json(`/runs/${run.id}/actions`, {
@@ -353,6 +384,7 @@ describe("trace routes", () => {
       "marked-applied",
       "run-refused",
     ]);
-    expect(bundle.snapshots[0].html).toBe("<p>Thank you for applying</p>");
+    // Submitted and marked applied: the page snapshots have done their job and are gone.
+    expect(bundle.snapshots).toEqual([]);
   });
 });

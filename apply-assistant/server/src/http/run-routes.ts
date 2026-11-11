@@ -39,6 +39,8 @@ export interface RunRoutesDeps {
   readonly trace?: TraceRecord;
   /** A run just finished: store what Claude cost in it. Never fails the request. */
   readonly onRunEnded?: (run: Run) => void;
+  /** A job was marked applied: its snapshots can go (applied-cleanup.ts). Never fails the request. */
+  readonly onApplied?: (jobId: string) => void;
 }
 
 export function createRunRoutes({
@@ -47,6 +49,7 @@ export function createRunRoutes({
   answers,
   trace = () => {},
   onRunEnded,
+  onApplied = () => {},
 }: RunRoutesDeps) {
   const router = Router();
   const tokenOf = (req: AuthedRequest) => req.jobOpsToken ?? "";
@@ -241,6 +244,16 @@ export function createRunRoutes({
             kind: "marked-applied",
             message: "Marked Applied in Job Ops",
           });
+          try {
+            onApplied(run.jobId);
+          } catch (error) {
+            trace({
+              jobId: run.jobId,
+              runId: run.id,
+              kind: "error",
+              message: `Couldn't delete the applied job's snapshots: ${error instanceof Error ? error.message : String(error)}`,
+            });
+          }
         } catch (error) {
           trace({
             jobId: run.jobId,

@@ -5,6 +5,8 @@ import { loadConfig } from "./config.js";
 import { createApp } from "./http/app.js";
 import { JobOpsClient } from "./jobops/client.js";
 import { openStore } from "./store/db.js";
+import { createAiCallStore } from "./store/ai-call-store.js";
+import { createAppliedCleanup } from "./store/applied-cleanup.js";
 import { createRunsRepo } from "./store/runs-repo.js";
 import { createTraceStore } from "./store/trace-store.js";
 import { createUserSettingsRepo } from "./store/user-settings-repo.js";
@@ -19,6 +21,11 @@ const trace = createTraceStore({
   dir: path.join(config.dataDir, "traces"),
   log,
 });
+const aiCalls = createAiCallStore({
+  db,
+  dir: path.join(config.dataDir, "ai-calls"),
+  log,
+});
 const PRUNE_EVERY_MS = 6 * 60 * 60 * 1000;
 const prune = () => {
   try {
@@ -30,8 +37,24 @@ const prune = () => {
   } catch (error) {
     log(`[trace] prune failed: ${String(error)}`);
   }
+  try {
+    const dropped = aiCalls.prune();
+    if (dropped.payloads || dropped.rows)
+      log(
+        `[ai-calls] pruned ${dropped.payloads} payloads, ${dropped.rows} rows`,
+      );
+  } catch (error) {
+    log(`[ai-calls] prune failed: ${String(error)}`);
+  }
 };
 prune();
+// Idempotent: jobs this server already knows are applied lose their snapshots.
+try {
+  const jobs = createAppliedCleanup({ db, trace, aiCalls, log }).backfill();
+  if (jobs) log(`[cleanup] deleted snapshots of ${jobs} applied job(s)`);
+} catch (error) {
+  log(`[cleanup] applied backfill failed: ${String(error)}`);
+}
 // One-off, idempotent: store Claude's cost for finished runs that never had it.
 try {
   const runsRepo = createRunsRepo(db);
@@ -63,6 +86,7 @@ const app = createApp({
   },
   log,
   trace,
+  aiCalls,
 });
 
 const server = app.listen(config.port, () => {

@@ -7,15 +7,21 @@ import { currentUser, currentUserOrNull } from "./owner.js";
 
 /**
  * Run trace: every event the server, the extension and the page reported for a job, plus DOM
- * and screenshot snapshots (files under <dir>, rows in trace_snapshots). Kept RETAIN_DAYS, with
- * snapshots capped at MAX_SNAPSHOT_BYTES in total (oldest go first).
+ * and screenshot snapshots (files under <dir>, rows in trace_snapshots).
+ *
+ * Kept: events EVENT_RETAIN_DAYS (they're small, and they're the history of what was filled,
+ * by whom, and what you changed), company-board lookups LOOKUP_RETAIN_DAYS (many, and only
+ * useful while fresh), snapshots SNAPSHOT_RETAIN_DAYS capped at MAX_SNAPSHOT_BYTES in total
+ * (oldest go first). A job's snapshots also go once it's applied (applied-cleanup.ts).
  */
 
 export const TRACE_SOURCES = ["server", "extension", "page"] as const;
 export type TraceSource = (typeof TRACE_SOURCES)[number];
 export type SnapshotKind = "dom" | "screenshot";
 
-export const RETAIN_DAYS = 60;
+export const EVENT_RETAIN_DAYS = 365;
+export const LOOKUP_RETAIN_DAYS = 60;
+export const SNAPSHOT_RETAIN_DAYS = 60;
 export const MAX_SNAPSHOT_BYTES = 1024 ** 3;
 
 export interface TraceEventInput {
@@ -366,11 +372,27 @@ export function createTraceStore(options: TraceStoreOptions) {
       }));
     },
 
-    /** Drops events and snapshots older than RETAIN_DAYS, then the oldest snapshots over the cap. */
+    /** Deletes a user's snapshots of one job (rows and files); returns how many. */
+    dropSnapshotsOfJob(userId: string, jobId: string): number {
+      const rows = db
+        .prepare("select * from trace_snapshots where user_id = ? and job_id = ?")
+        .all(userId, jobId) as unknown as SnapshotRow[];
+      const drop = db.prepare("delete from trace_snapshots where id = ?");
+      for (const row of rows) {
+        drop.run(row.id);
+        removeSnapshotFile(row.file);
+      }
+      return rows.length;
+    },
+
+    /**
+     * Drops snapshots older than SNAPSHOT_RETAIN_DAYS then the oldest over the cap, lookups older
+     * than LOOKUP_RETAIN_DAYS, and other events older than EVENT_RETAIN_DAYS.
+     */
     prune(): { events: number; snapshots: number } {
-      const cutoff = new Date(
-        now().getTime() - RETAIN_DAYS * 86_400_000,
-      ).toISOString();
+      const daysAgo = (days: number) =>
+        new Date(now().getTime() - days * 86_400_000).toISOString();
+      const cutoff = daysAgo(SNAPSHOT_RETAIN_DAYS);
       const old = db
         .prepare("select * from trace_snapshots where created_at < ?")
         .all(cutoff) as unknown as SnapshotRow[];
@@ -393,12 +415,15 @@ export function createTraceStore(options: TraceStoreOptions) {
         removeSnapshotFile(row.file);
       }
       // Claude's usage events stay: they are small, and the all-time spend is summed from them.
+      const lookups = db
+        .prepare("delete from trace_events where ts < ? and kind = 'lookup'")
+        .run(daysAgo(LOOKUP_RETAIN_DAYS)).changes;
       const events = db
         .prepare(
           "delete from trace_events where ts < ? and kind <> 'claude-usage'",
         )
-        .run(cutoff).changes;
-      return { events: Number(events), snapshots: doomed.length };
+        .run(daysAgo(EVENT_RETAIN_DAYS)).changes;
+      return { events: Number(lookups) + Number(events), snapshots: doomed.length };
     },
   };
 }
