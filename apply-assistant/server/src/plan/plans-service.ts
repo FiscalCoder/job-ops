@@ -39,6 +39,7 @@ import {
 } from "./history-blocks.js";
 import { normalizeQuestion } from "./question-norm.js";
 import { type ChoicePicksRepo, normChoiceText } from "../store/choice-picks-repo.js";
+import { withAiJob } from "../claude/ai-context.js";
 import { type ResumeFacts, resumeFacts } from "./resume-facts.js";
 import { parseFormSchema } from "./schemas.js";
 import { tailoredFor } from "./tailored-resume.js";
@@ -785,7 +786,8 @@ export function createPlans(deps: PlansDeps) {
       const bank = bankMap();
       const outcomes = await Promise.all(
         jobIds.map((jobId) =>
-          buildWith(token, jobId, resume, bank).then(
+          // Each job's Claude calls are logged against it (this route has no job of its own).
+          withAiJob({ jobId }, () => buildWith(token, jobId, resume, bank)).then(
             () => null,
             (error: unknown) => ({
               jobId,

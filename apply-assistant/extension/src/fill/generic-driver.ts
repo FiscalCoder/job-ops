@@ -109,6 +109,33 @@ export class GenericDriver extends TrustedDriver {
   searchTerms: SearchTerms | null = null;
   rememberedPick: RememberedPick | null = null;
 
+  /**
+   * "Add" clicks and resume attachments done in this run, per page (its URL path): never done
+   * again there. PeopleStrong (L&T) looped on both: its "Add Earlier Education" opens a form
+   * that never reads as a new block, so the page was planned and "Add" clicked every few
+   * seconds; and it re-draws the form after parsing an uploaded resume (an empty upload box,
+   * the title changing), so the resume was attached again and again.
+   */
+  private readonly doneOnPage = new Set<string>();
+
+  private pageKey(what: string): string {
+    let path = "";
+    try {
+      path = new URL(this.page.url()).pathname;
+    } catch {
+      // No URL to tell pages apart: the run's whole form counts as one page.
+    }
+    return `${path}|${what.toLowerCase().replace(/\s+/g, " ").trim()}`;
+  }
+
+  /** True the first time on this page (and marks it done); false after. */
+  private onceOnPage(what: string): boolean {
+    const key = this.pageKey(what);
+    if (this.doneOnPage.has(key)) return false;
+    this.doneOnPage.add(key);
+    return true;
+  }
+
   /** The form another driver (Greenhouse, Ashby…) is on: fields its plan doesn't cover. */
   static on(where: { readonly page: Page; readonly frame: Frame }): GenericDriver {
     return new GenericDriver(where.page, where.frame);
@@ -249,7 +276,10 @@ export class GenericDriver extends TrustedDriver {
    * form is found again in its new frame.
    */
   async addEntries(add: readonly EntriesToAdd[]): Promise<void> {
-    for (const { section, count } of add)
+    for (const { section, count } of add) {
+      // Once per section and page: a site whose Add never shows as a new block isn't clicked
+      // again on every re-plan (what's missing is then yours to add).
+      if (!this.onceOnPage(`add ${section}`)) continue;
       for (let i = 0; i < count; i++) {
         const before = await this.blockCount(section);
         const button = await this.addButton(section);
@@ -264,6 +294,7 @@ export class GenericDriver extends TrustedDriver {
         }
         if (!added) break;
       }
+    }
   }
 
   /** The section's blocks as the page reads them, each block's fields in page order. */
@@ -373,7 +404,17 @@ export class GenericDriver extends TrustedDriver {
         // The page asked again (its heading changed): attaching twice adds a second copy.
         if (await this.hasFile(entry.ref, resume.name))
           return { ok: true, result: "already attached" };
-        return await this.attachFile(entry.ref, resume);
+        // Attached to this field on this page earlier in the run, and the site re-drew the form
+        // (PeopleStrong parses the resume, then shows an empty box): not attached again.
+        const fileKey = this.pageKey(`file ${entry.label.replace(/^done/i, "")}`);
+        if (this.doneOnPage.has(fileKey))
+          return {
+            ok: true,
+            result: "attached earlier in this run (the page re-draws after an upload; not attached again)",
+          };
+        const attached = await this.attachFile(entry.ref, resume);
+        if (attached.ok) this.doneOnPage.add(fileKey);
+        return attached;
       }
       return await this.fillKind(entry, kind, wanted);
     } catch (error) {
