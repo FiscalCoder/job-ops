@@ -30,7 +30,11 @@ describe("site help", () => {
   });
 
   it("counts your answer as the list words it as filled (startup.jobs showed BA)", () => {
-    expect(showsValue("Degree*BA", "Bachelor's Degree")).toBe(true);
+    expect(showsValue("Degree*BS", "B.Tech")).toBe(true);
+    expect(showsValue("Degree*BA", "Bachelor of Arts")).toBe(true);
+    expect(showsValue("BCom", "B.Com")).toBe(true);
+    // The level alone isn't a subject: "BA" for "Bachelor's Degree" is a guess, not your answer.
+    expect(showsValue("Degree*BA", "Bachelor's Degree")).toBe(false);
     expect(showsValue("TN", "Tamil Nadu")).toBe(true);
     expect(showsValue("Website/Social Media", "LinkedIn")).toBe(true);
     // The whole wording must show: a word of it is not the choice.

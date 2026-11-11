@@ -3,7 +3,7 @@ import type {
   Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import type { PlanEntry } from "./supervisor";
-import { bestFound } from "./options";
+import { bestFound, bestOptionAmong } from "./options";
 import {
   bestOption,
   type FillOutcome,
@@ -421,12 +421,15 @@ export class WorkdayDriver extends TrustedDriver {
     return (await this.openChoices())?.labels ?? [];
   }
 
-  /** Clicks the choice that best matches, among the open listbox's. */
-  private async pickOpen(wanted: string): Promise<string | null> {
+  /** Clicks the choice that best matches (your answer, then the plan's alternatives). */
+  private async pickOpen(
+    wanted: string,
+    alternatives: readonly string[] = [],
+  ): Promise<string | null> {
     const open = await this.openChoices();
     if (!open) return null;
     const usable = open.labels.map((l) => (PLACEHOLDER.test(l) ? "" : l));
-    const index = bestOption(usable, wanted);
+    const index = bestOptionAmong(usable, [wanted, ...alternatives]);
     if (index === null) return null;
     await open.handles[index]?.click();
     await sleep(300);
@@ -455,7 +458,7 @@ export class WorkdayDriver extends TrustedDriver {
             ? await this.upload(entry.ref, resume)
             : { ok: false, reason: "Tailored PDF not loaded" };
         case "dropdown":
-          return await this.dropdown(entry.ref, first, entry.label);
+          return await this.dropdown(entry.ref, first, entry.label, entry.alternatives);
         case "search":
           return await this.search(entry.ref, wanted, entry.label);
         case "radio":
@@ -485,6 +488,7 @@ export class WorkdayDriver extends TrustedDriver {
     ref: string,
     wanted: string,
     label: string,
+    alternatives: readonly string[] = [],
   ): Promise<FillOutcome> {
     const button = await this.frame.$(
       `:is(${boxOf(ref)}) button[aria-haspopup='listbox']`,
@@ -497,7 +501,7 @@ export class WorkdayDriver extends TrustedDriver {
     // The list didn't open, or showed nothing in time (a second Degree low on the page): once
     // more, scrolled into view, then from the keyboard.
     if (!(await this.openChoices())) await this.reopen(button);
-    let picked = await this.pickOpen(wanted);
+    let picked = await this.pickOpen(wanted, alternatives);
     let note = "";
     // The list words it differently ("Fluent" vs "Fluent / Native Speaker"): Claude picks
     // among the list's own choices, or none when nothing there is your answer.

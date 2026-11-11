@@ -2,18 +2,36 @@
 import { describe, expect, it } from "vitest";
 import { bestEquivalentOption, equivalentTerms } from "../src/fill/equivalents";
 import { trimmedForm } from "../src/fill/form-snapshot";
-import { bestFound, bestOption } from "../src/fill/options";
+import { bestFound, bestOption, bestOptionAmong } from "../src/fill/options";
 
 describe("the same answer worded another way", () => {
   it("finds a degree a list abbreviates (the misses that went to Claude's takeover)", () => {
     const short = ["GED", "HS", "AA", "BA", "BS", "MA", "MS", "PhD"];
-    expect(short[bestOption(short, "Bachelor's Degree") ?? -1]).toBe("BS");
-    expect(short[bestOption(short, "Master's Degree") ?? -1]).toBe("MS");
+    // The level alone never guesses a subject: your resume's degree decides it.
+    expect(bestOption(short, "Bachelor's Degree")).toBeNull();
+    expect(short[bestOptionAmong(short, ["Bachelor's Degree", "B.Tech", "Bachelors"]) ?? -1]).toBe("BS");
+    expect(short[bestOptionAmong(short, ["Master's Degree", "M.Tech", "Masters"]) ?? -1]).toBe("MS");
     expect(short[bestOption(short, "Doctorate") ?? -1]).toBe("PhD");
     const pg = ["Diploma", "Post-Graduate Diploma", "Bachelor's"];
     expect(pg[bestOption(pg, "PG Diploma") ?? -1]).toBe("Post-Graduate Diploma");
     const btech = ["High School", "Bachelor of Technology (B.Tech)", "Master of Technology"];
-    expect(btech[bestOption(btech, "Bachelor's Degree") ?? -1]).toBe("Bachelor of Technology (B.Tech)");
+    expect(btech[bestOptionAmong(btech, ["Bachelor's Degree", "B.Tech"]) ?? -1]).toBe(
+      "Bachelor of Technology (B.Tech)",
+    );
+  });
+
+  it("matches a marketing or business graduate's own degree, not an engineer's", () => {
+    const short = ["BA", "BS", "BCom", "BBA", "MBA", "MS"];
+    expect(short[bestOptionAmong(short, ["Bachelor's Degree", "B.Com", "Bachelors"]) ?? -1]).toBe("BCom");
+    expect(short[bestOptionAmong(short, ["Bachelor's Degree", "Bachelor of Business Administration"]) ?? -1]).toBe("BBA");
+    expect(short[bestOptionAmong(short, ["Bachelor's Degree", "Bachelor of Arts"]) ?? -1]).toBe("BA");
+    expect(short[bestOptionAmong(short, ["Master's Degree", "PGDM"]) ?? -1]).toBe("MBA");
+    expect(short[bestOptionAmong(short, ["Bachelor's Degree", "BSc"]) ?? -1]).toBe("BS");
+    // A list without your degree in any wording we know: nothing here (Claude picks next).
+    expect(bestOptionAmong(["BA", "BS"], ["Bachelor's Degree", "BBA"])).toBeNull();
+    // A list that has the level itself keeps it.
+    expect(bestOptionAmong(["Bachelor's Degree", "BS", "BCom"], ["Bachelor's Degree", "B.Com"])).toBe(0);
+    expect(bestOptionAmong(["Bachelors", "Masters"], ["Bachelor's Degree", "B.Com"])).toBe(0);
   });
 
   it("finds an Indian state or a source as a list words it", () => {
@@ -30,7 +48,11 @@ describe("the same answer worded another way", () => {
     expect(bestEquivalentOption(["BS in Physics, Other", "Associate"], "Bachelor's Degree")).toBeNull();
     expect(bestEquivalentOption(["TNT Express"], "Tamil Nadu")).toBeNull();
     expect(equivalentTerms("Something else entirely")).toEqual([]);
-    expect(equivalentTerms("bachelors")).toContain("B.Tech");
+    expect(equivalentTerms("bachelors")).toContain("Bachelor's Degree");
+    expect(equivalentTerms("bachelors")).not.toContain("BS");
+    // A wording in two groups belongs to its own: BSc is a science degree, not engineering.
+    expect(equivalentTerms("Bachelor of Science")[0]).toBe("BS");
+    expect(equivalentTerms("BE")[0]).toBe("B.E.");
   });
 });
 

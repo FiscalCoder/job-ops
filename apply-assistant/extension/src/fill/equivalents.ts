@@ -1,23 +1,52 @@
 /**
- * Other ways a dropdown words the same answer: a degree ("Bachelor's Degree" listed as "BS" or
- * "B.Tech"), an Indian state ("TN"), where you heard of the job ("LinkedIn" as "Linked In").
- * Used only after the answer itself matched nothing, so no list that words it your way is
- * affected; before this, those misses went to Claude (a screenshot-driven takeover).
+ * Other ways a dropdown words the same answer: a degree ("B.Tech" listed as "BS", "B.Com" as
+ * "Bachelor of Commerce"), an Indian state ("TN"), where you heard of the job ("LinkedIn" as
+ * "Linked In"). Used only after the answer itself matched nothing, so no list that words it your
+ * way is affected; what's still unmatched goes to Claude, who picks from the list's choices.
+ *
+ * Degrees: a level ("Bachelor's Degree") only matches the level's own wordings, never a subject
+ * degree. Which subject (BS, BA, B.Com, BBA…) is your degree's call: the plan passes your
+ * resume's degree along ("B.Com"), and its own group below finds it. Before, "Bachelor's
+ * Degree" picked BS for everyone, which was right for an engineer only.
  */
 
 /** Each group: one answer's ways, the likelier ones first (the first that a list has wins). */
 const GROUPS: readonly (readonly string[])[] = [
-  // Degrees. An engineering bachelor's ranks BS above BA when a list has only the short forms.
+  // Degree levels: wordings of the level itself.
+  ["Bachelor's Degree", "Bachelor's", "Bachelors", "Bachelor", "Bachelor Degree", "Undergraduate Degree", "Undergraduate"],
+  ["Master's Degree", "Master's", "Masters", "Master", "Master Degree", "Postgraduate Degree", "Post Graduate Degree", "Postgraduate"],
+  // Bachelor's subjects. Engineering is a science degree where a list has only BS / BA.
   [
-    "Bachelor's Degree", "Bachelor's", "Bachelors", "Bachelor", "Bachelor of Technology", "B.Tech",
-    "BTech", "Bachelor of Engineering", "B.E.", "BE", "Bachelor of Science", "BS", "B.S.", "BSc",
-    "B.Sc", "Undergraduate Degree", "Undergraduate", "BA", "B.A.",
+    "B.Tech", "BTech", "B Tech", "Bachelor of Technology", "B.E.", "BE", "Bachelor of Engineering",
+    "Bachelor of Science", "BS", "B.S.", "BSc", "B.Sc",
   ],
+  ["B.E.", "BE", "Bachelor of Engineering", "B.Tech", "BTech", "Bachelor of Technology", "Bachelor of Science", "BS", "B.S.", "BSc"],
+  ["Bachelor of Science", "BS", "B.S.", "BSc", "B.Sc", "B Sc"],
+  ["Bachelor of Arts", "BA", "B.A.", "B A"],
+  ["Bachelor of Commerce", "B.Com", "BCom", "B Com", "B.Com.", "Bachelor of Commerce (B.Com)"],
   [
-    "Master's Degree", "Master's", "Masters", "Master", "Master of Technology", "M.Tech", "MTech",
-    "Master of Science", "MS", "M.S.", "MSc", "M.Sc", "Master of Engineering", "M.E.", "MA", "M.A.",
-    "Postgraduate Degree", "Post Graduate Degree",
+    "Bachelor of Business Administration", "BBA", "B.B.A.", "BBM", "Bachelor of Business Management",
+    "Bachelor of Management Studies", "BMS", "Bachelor of Business",
   ],
+  ["Bachelor of Computer Applications", "BCA", "B.C.A."],
+  ["Bachelor of Fine Arts", "BFA", "B.F.A."],
+  ["Bachelor of Design", "B.Des", "BDes"],
+  ["Bachelor of Mass Media", "BMM", "Bachelor of Journalism and Mass Communication", "BJMC", "Bachelor of Arts"],
+  // Master's subjects.
+  [
+    "M.Tech", "MTech", "M Tech", "Master of Technology", "M.E.", "ME", "Master of Engineering",
+    "Master of Science", "MS", "M.S.", "MSc", "M.Sc",
+  ],
+  ["Master of Science", "MS", "M.S.", "MSc", "M.Sc", "M Sc"],
+  ["Master of Arts", "MA", "M.A."],
+  ["Master of Commerce", "M.Com", "MCom", "M Com"],
+  ["Master of Business Administration", "MBA", "M.B.A.", "PGDM", "Post Graduate Diploma in Management"],
+  [
+    "PGDM", "Post Graduate Diploma in Management", "Postgraduate Diploma in Management", "PGDBA",
+    "Master of Business Administration", "MBA",
+  ],
+  ["Master of Computer Applications", "MCA", "M.C.A."],
+  ["Master of Fine Arts", "MFA", "M.F.A."],
   [
     "PG Diploma", "Post Graduate Diploma", "Post-Graduate Diploma", "Postgraduate Diploma",
     "Post Graduation Diploma", "PGD", "Graduate Diploma",
@@ -50,11 +79,20 @@ const norm = (s: string) =>
     .replace(/[^\p{L}\p{N}+']+/gu, " ")
     .trim();
 
-/** The group an answer belongs to: by its whole wording, not a word in it. */
+/**
+ * The group an answer belongs to, by its whole wording (not a word in it). A wording in several
+ * groups ("Bachelor of Science" is also engineering's fallback) belongs to the one where it comes
+ * earliest: its own.
+ */
 const groupOf = (wanted: string): readonly string[] | null => {
   const w = norm(wanted);
   if (!w) return null;
-  return GROUPS.find((g) => g.some((term) => norm(term) === w)) ?? null;
+  let best: { group: readonly string[]; at: number } | null = null;
+  for (const group of GROUPS) {
+    const at = group.findIndex((term) => norm(term) === w);
+    if (at >= 0 && (best === null || at < best.at)) best = { group, at };
+  }
+  return best?.group ?? null;
 };
 
 /** The other wordings of your answer, likelier first (none for an answer not in the table). */

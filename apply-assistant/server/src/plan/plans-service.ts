@@ -102,6 +102,8 @@ const FACTUAL_FIELD =
   /\b(school|college|universit|institut|degree|field of study|major|discipline|speciali[sz]ation|qualification|company|employer)/i;
 /** What Claude replies when a fact has no matching choice (the field then waits for you). */
 const NO_MATCH = "NO MATCH";
+/** The planner's reason when a saved answer is none of a dropdown's choices. */
+const NO_CHOICE_MATCH = /matches none of the form's choices/i;
 /** Broader searches Claude may suggest for one answer. */
 const MAX_SEARCH_TERMS = 4;
 /** Applications whose form pages are remembered (multi-page forms), and pages per form. */
@@ -247,13 +249,16 @@ export function createPlans(deps: PlansDeps) {
     const job = await jobOps.getJob(token, jobId);
     const resume = tailoredFor(baseResume, job);
     const schema = parseFormSchema(target.ats, stored.payload);
-    const { plan, fromClaude } = await planSchema(
+    const { plan: planned, fromClaude } = await planSchema(
       jobId,
       schema,
       job,
       resume,
       bank,
     );
+    // A saved answer none of the dropdown's choices words: Claude picks among them (remembered,
+    // so rebuilding the plan on every view asks only once).
+    const plan = await withClosestChoices(jobId, schema, planned, job, resume);
     const previous = plans.get(jobId)?.plan;
     plans.save(jobId, plan);
     // Plans are rebuilt on every view and answer-bank save: trace only real changes.
@@ -394,13 +399,22 @@ export function createPlans(deps: PlansDeps) {
     return `${ask.wanted ? `My answer is "${ask.wanted}", but the form doesn't list it. Pick the choice that means the same or is closest to it. If my answer doesn't fit these choices at all (it may answer a different question), pick the choice that fits me best from my saved answers and resume.` : "I have no saved answer for this: pick the choice that fits me best from my saved answers and resume."} A school, college, university or company must be the same one: when it isn't listed, pick the "Other" choice if there is one, never a different institution.`;
   }
 
+  /** Claude's picks, per user, question, answer and choices: plans are rebuilt often. */
+  const picks = new Map<string, TellAnswer>();
+  const MAX_PICKS = 500;
+
   async function closest(
     claude: NonNullable<typeof answerer>,
     jobId: string,
     job: Awaited<ReturnType<JobOpsApi["getJob"]>>,
     resume: ResumeFacts,
     ask: { label: string; wanted: string; options: readonly string[] },
+    /** Reuse an earlier pick for the same question (plan rebuilds); the run's own asks don't. */
+    reuse = false,
   ): Promise<TellAnswer> {
+    const key = JSON.stringify([currentUser(), ask.label, ask.wanted, ask.options]);
+    const known = reuse ? picks.get(key) : undefined;
+    if (known) return known;
     const answer = await claude.tell(
       { ref: "choose", label: ask.label, type: "select", options: ask.options },
       closestInstruction(ask),
@@ -421,12 +435,16 @@ export function createPlans(deps: PlansDeps) {
       message: `Claude picked "${String(answer.value).slice(0, 80)}" for "${ask.label.slice(0, 80)}" (your answer: "${ask.wanted.slice(0, 80)}")`,
       data: { ...ask, options: ask.options.length, answer },
     });
+    picks.set(key, answer);
+    if (picks.size > MAX_PICKS) picks.delete(picks.keys().next().value ?? "");
     return answer;
   }
 
   /**
-   * Workday: a dropdown answered from your resume (Degree) whose choices word it differently
-   * ("B.com" vs "Bachelors of Commerce"): Claude picks the closest choice, for you to confirm.
+   * A dropdown answered from your resume (Degree) or your saved answers whose choices word it
+   * differently ("B.com" vs "Bachelors of Commerce", "Immediately" vs "0-15 days"): Claude picks
+   * the closest of the form's own choices (a fact only ever as itself or its broader category).
+   * Not for Claude's own answers: those were picked from the choices already.
    */
   async function withClosestChoices(
     jobId: string,
@@ -444,16 +462,21 @@ export function createPlans(deps: PlansDeps) {
         const wanted = entry.value;
         if (
           entry.status !== "needs-you" ||
-          !entry.source.startsWith("resume:") ||
+          entry.source.startsWith("claude:") ||
+          !(entry.source.startsWith("resume:") || NO_CHOICE_MATCH.test(entry.reason ?? "")) ||
           typeof wanted !== "string" ||
+          !wanted.trim() ||
           !field?.options.length
         )
           return entry;
-        const answer = await closest(claude, jobId, job, resume, {
-          label: field.label,
-          wanted,
-          options: field.options.map((o) => o.label),
-        }).catch(() => null);
+        const answer = await closest(
+          claude,
+          jobId,
+          job,
+          resume,
+          { label: field.label, wanted, options: field.options.map((o) => o.label) },
+          true,
+        ).catch(() => null);
         const option = field.options.find((o) => o.label === answer?.value);
         if (!option) return entry;
         return {

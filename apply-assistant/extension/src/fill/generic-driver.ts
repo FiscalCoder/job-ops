@@ -3,7 +3,7 @@ import type {
   Page,
 } from "puppeteer-core/lib/puppeteer/puppeteer-core-browser.js";
 import { equivalentTerms } from "./equivalents";
-import { bestFound, searchWords } from "./options";
+import { bestFound, bestOptionAmong, searchWords } from "./options";
 import { deepFind, ensureLocator, entrySaves } from "./locate";
 import { pickOpenChoice, showsValue, visibleChoices } from "./site-help";
 import type { PlanEntry } from "./supervisor";
@@ -388,7 +388,7 @@ export class GenericDriver extends TrustedDriver {
     const first = wanted[0] ?? "";
     switch (kind) {
       case "select": {
-        const picked = await this.select(entry.ref, first, entry.alternatives);
+        const picked = await this.select(entry.ref, first, entry.alternatives, entry.label);
         if (picked.ok) return picked;
         // Hidden, it stands in for the page's own dropdown, whose list fills only as you use it
         // (iCIMS's State, listed once the country is picked there): that dropdown, as you would.
@@ -401,7 +401,7 @@ export class GenericDriver extends TrustedDriver {
       }
       case "radio":
       case "checkbox":
-        return this.choose(entry.ref, wanted);
+        return this.choose(entry.ref, wanted, entry.label);
       case "date":
         return this.datePicker(entry.ref, first);
       case "combobox":
@@ -647,6 +647,7 @@ export class GenericDriver extends TrustedDriver {
     ref: string,
     wanted: string,
     alternatives: readonly string[] = [],
+    label = "",
   ): Promise<FillOutcome> {
     const handle = await this.frame.$(deep(ref));
     if (!handle) return { ok: false, reason: "Dropdown not found" };
@@ -657,19 +658,33 @@ export class GenericDriver extends TrustedDriver {
       })),
     );
     const labels = options.map((o) => (o.value === "" ? "" : o.text));
-    const index = [wanted, ...alternatives]
-      .map((w) => bestOption(labels, w))
-      .find((i): i is number => i !== null);
-    const option = index === undefined ? undefined : options[index];
+    const index = bestOptionAmong(labels, [wanted, ...alternatives]);
+    let option = index === null ? undefined : options[index];
+    let byClaude = false;
+    // Nothing in the list is your answer worded any way we know: Claude picks from the list's
+    // own choices (with your resume), or none when nothing there is your answer.
+    if (!option && this.chooser) {
+      const choices = labels.filter((l) => l && !PLACEHOLDER.test(l));
+      const choice = choices.length
+        ? await this.chooser(label, wanted, choices.slice(0, 300)).catch(() => null)
+        : null;
+      const picked = choice === null ? null : bestOption(labels, choice);
+      option = picked === null ? undefined : options[picked];
+      byClaude = option !== undefined;
+    }
     if (!option) return { ok: false, reason: `No choice matching "${wanted}"` };
     await handle.select(option.value);
-    return this.verify(ref, option.text);
+    const outcome = await this.verify(ref, option.text);
+    return outcome.ok && byClaude
+      ? { ok: true, result: `Claude picked "${option.text}" from the list (your answer: "${wanted.slice(0, 60)}")` }
+      : outcome;
   }
 
   /** Radios and checkboxes: clicks the matching ones (a lone checkbox: ticks it). */
   private async choose(
     ref: string,
     wanted: readonly string[],
+    label = "",
   ): Promise<FillOutcome> {
     const inputs = await this.frame.$$(deep(ref));
     const labels = await Promise.all(
@@ -687,13 +702,22 @@ export class GenericDriver extends TrustedDriver {
         }),
       ),
     );
-    const targets =
+    let targets =
       inputs.length === 1
         ? [0]
         : wanted.flatMap((w) => {
             const i = bestOption(labels, w);
             return i === null ? [] : [i];
           });
+    // One answer, worded nothing like the buttons ("Immediate joiner" vs "0-15 days"): Claude
+    // picks one of the buttons (with your resume and saved answers), or none.
+    if (!targets.length && wanted.length === 1 && labels.length > 1 && this.chooser) {
+      const choice = await this.chooser(label, wanted[0] ?? "", labels.filter(Boolean)).catch(
+        () => null,
+      );
+      const picked = choice === null ? null : bestOption(labels, choice);
+      if (picked !== null) targets = [picked];
+    }
     if (!targets.length)
       return { ok: false, reason: `No choice matching "${wanted.join(", ")}"` };
     for (const index of targets) {

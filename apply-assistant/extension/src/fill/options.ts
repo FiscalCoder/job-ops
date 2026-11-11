@@ -85,12 +85,42 @@ export function bestOption(
         (labels[a.index]?.length ?? 0) - (labels[b.index]?.length ?? 0),
     );
   // Nothing words it the same: the same country another way ("+91" or "IN +91" for "India"),
-  // or the same degree, state or source as the list words it ("BS" for "Bachelor's Degree").
+  // or the same degree, state or source as the list words it ("BS" for "B.Tech").
   return (
     ranked[0]?.index ??
     bestCountryOption(labels, wanted) ??
     bestEquivalentOption(labels, wanted)
   );
+}
+
+/**
+ * The best option for your answer and the plan's alternatives together ("Bachelor's Degree",
+ * then your resume's "B.Com"): any of them as the list words it comes first, in their order,
+ * and only then one of them worded another way. So the level never wins a subject guess over
+ * your own degree, which the list may well have.
+ */
+export function bestOptionAmong(
+  labels: readonly string[],
+  candidates: readonly string[],
+): number | null {
+  const tried = candidates.filter((c) => c.trim());
+  for (const candidate of tried) {
+    const direct = labels
+      .map((label, index) => ({ index, rank: rankOption(label, candidate) }))
+      .filter((r) => r.rank < 9)
+      .sort(
+        (a, b) =>
+          a.rank - b.rank ||
+          (labels[a.index]?.length ?? 0) - (labels[b.index]?.length ?? 0),
+      )[0];
+    if (direct) return direct.index;
+  }
+  for (const candidate of tried) {
+    const other =
+      bestCountryOption(labels, candidate) ?? bestEquivalentOption(labels, candidate);
+    if (other !== null) return other;
+  }
+  return null;
 }
 
 /** Words that don't change what a choice means ("Bachelor of Science" = "Bachelors Science"). */

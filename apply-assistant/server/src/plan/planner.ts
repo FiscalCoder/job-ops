@@ -297,7 +297,10 @@ function resolveEducation(
     ? {
         value,
         source: `resume:education.${part}`,
-        alternatives: educationFallbacks(part, value),
+        alternatives:
+          part === "degree" && top.level && top.degree
+            ? [top.degree, ...DEGREE_WORDS[top.level]]
+            : educationFallbacks(part, value),
       }
     : missing("resume:education", `No ${part} on your resume`);
 }
@@ -490,7 +493,9 @@ function resolveHistory(
       return degree.level
         ? {
             value: DEGREE_LABEL[degree.level],
-            alternatives: [...DEGREE_WORDS[degree.level], degree.degree],
+            // Your own degree right after the level: which subject (BS, BA, B.Com, BBA…) a list
+            // means is your degree's call, not a guess from the level.
+            alternatives: [degree.degree, ...DEGREE_WORDS[degree.level]],
             source,
           }
         : answer(degree.degree);
