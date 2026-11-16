@@ -1,6 +1,7 @@
 import { requestTimeout } from "@infra/errors";
 import { normalizeWhitespace } from "@shared/utils/string";
 import { convert } from "html-to-text";
+import { googleReasonSuffix, withGmailRetry } from "./gmail-retry";
 
 export const GMAIL_HTTP_TIMEOUT_MS = 15_000;
 
@@ -109,7 +110,9 @@ export async function resolveGmailAccessToken(
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(`Gmail token refresh failed with HTTP ${response.status}.`);
+    throw new Error(
+      `Gmail token refresh failed with HTTP ${response.status}.${googleReasonSuffix(data)}`,
+    );
   }
 
   const accessToken = asString(data?.access_token);
@@ -131,20 +134,24 @@ export async function resolveGmailAccessToken(
 }
 
 export async function gmailApi<T>(token: string, url: string): Promise<T> {
-  const response = await fetchWithTimeout(url, {
-    timeoutMs: GMAIL_HTTP_TIMEOUT_MS,
-    init: {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+  // Retried when Gmail limits the request rate (fork: gmail-retry.ts).
+  const { response, data } = await withGmailRetry(async () => {
+    const response = await fetchWithTimeout(url, {
+      timeoutMs: GMAIL_HTTP_TIMEOUT_MS,
+      init: {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
       },
-    },
+    });
+    return { response, data: await response.json().catch(() => null) };
   });
-
-  const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(`Gmail API request failed (${response.status}).`);
+    throw new Error(
+      `Gmail API request failed (${response.status}).${googleReasonSuffix(data)}`,
+    );
   }
   return data as T;
 }
@@ -248,7 +255,8 @@ export function buildGmailQuery(searchDays: number): string {
     .map((term) => `-subject:${quoteTerm(term)}`)
     .join(" ");
 
-  return `newer_than:${searchDays}d ((${subjectBlock}) OR (${fromBlock}) OR (${fullTextBlock})) ${excludeClauses}`.trim();
+  // -from:me (fork): your own replies to employers aren't news about your applications.
+  return `newer_than:${searchDays}d ((${subjectBlock}) OR (${fromBlock}) OR (${fullTextBlock})) ${excludeClauses} -from:me`.trim();
 }
 
 export async function listMessageIds(

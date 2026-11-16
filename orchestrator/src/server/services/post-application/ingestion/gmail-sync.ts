@@ -27,6 +27,7 @@ import {
   listMessageIds,
   resolveGmailAccessToken,
 } from "./gmail-api";
+import { guardRouterResult, jobsForEmail } from "./match-guard";
 
 const DEFAULT_SEARCH_DAYS = 90;
 const DEFAULT_MAX_MESSAGES = 100;
@@ -328,10 +329,15 @@ export async function runGmailIngestionSync(args: {
           date,
           body,
         });
-        const routerResult = await classifyWithSmartRouter({
-          emailText,
-          activeJobs: activeJobMinified,
-        });
+        // Fork (match-guard.ts): only jobs applied by then, requisition numbers, unfinished applications.
+        const candidates = jobsForEmail(activeJobs, receivedAt);
+        const routerResult = guardRouterResult(
+          await classifyWithSmartRouter({
+            emailText,
+            activeJobs: minifyActiveJobs(candidates),
+          }),
+          { emailText, jobs: candidates },
+        );
 
         const matchedJobId =
           routerResult.bestMatchId && activeJobIds.has(routerResult.bestMatchId)
