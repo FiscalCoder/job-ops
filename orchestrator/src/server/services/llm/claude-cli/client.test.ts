@@ -5,6 +5,7 @@ import type { JsonSchemaDefinition } from "../types";
 import {
   CLAUDE_CLI_ISOLATION_FLAGS,
   CLAUDE_CLI_SUGGESTED_MODELS,
+  CLAUDE_CLI_SYSTEM_PROMPT,
   ClaudeCliClient,
   type ClaudeCliClientOptions,
 } from "./client";
@@ -142,7 +143,9 @@ describe("ClaudeCliClient", () => {
     expect(args).toContain("--json-schema");
     expect(args[args.indexOf("--effort") + 1]).toBe("high");
     expect(args).not.toContain("--bare");
-    expect(args).not.toContain("--system-prompt");
+    expect(args[args.indexOf("--system-prompt") + 1]).toBe(
+      CLAUDE_CLI_SYSTEM_PROMPT,
+    );
     for (const flag of CLAUDE_CLI_ISOLATION_FLAGS) {
       expect(args).toContain(flag);
     }

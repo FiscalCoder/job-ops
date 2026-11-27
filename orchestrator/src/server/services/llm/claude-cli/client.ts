@@ -46,8 +46,12 @@ export const CLAUDE_CLI_SUGGESTED_MODELS: string[] = [
  * Structured-output calls need no tools, MCP servers, user settings, slash
  * commands or session history; skipping them keeps each call lean and keeps
  * the per-user config dir from influencing results. (`--bare` is not used:
- * it ignores subscription OAuth tokens.)
+ * it ignores subscription OAuth tokens.) The one-line system prompt replaces
+ * Claude Code's coding-assistant prompt, about 3k tokens per call (measured
+ * 5.6k -> 2.6k prompt tokens on 2026-11-27).
  */
+export const CLAUDE_CLI_SYSTEM_PROMPT =
+  "You return structured JSON for JobOps, using only the information in the user's message.";
 export const CLAUDE_CLI_ISOLATION_FLAGS: readonly string[] = [
   "--setting-sources",
   "project",
@@ -320,6 +324,7 @@ async function runClaudeCliOnce(args: {
   }
   procArgs.push("--json-schema", JSON.stringify(args.jsonSchema.schema));
   procArgs.push("--effort", args.effort, ...CLAUDE_CLI_ISOLATION_FLAGS);
+  procArgs.push("--system-prompt", CLAUDE_CLI_SYSTEM_PROMPT);
 
   const shell = shouldSpawnClaudeViaWindowsShell(bin);
 
