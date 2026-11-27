@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { logger } from "@infra/logger";
 import {
   extractClaudeOauthToken,
+  extractCliErrorMessage,
   extractSignInUrl,
   extractTokenLifetimeMs,
   hasCodePrompt,
@@ -72,6 +73,10 @@ const MAX_CODE_LENGTH = 512;
 const TOO_MANY_SESSIONS_MESSAGE =
   "Too many sign-ins in progress, try again shortly";
 const PROMPT_GRACE_MS = 1_500;
+/** Pause between typing the code and pressing Enter. */
+const ENTER_DELAY_MS = 250;
+/** `claude setup-token` announces a "long-lived (1-year)" token up front. */
+const SETUP_TOKEN_LIFETIME_MS = 365 * 86_400_000;
 const DEFAULT_REJECT_GRACE_MS = 3_000;
 const DEFAULT_TERMINAL_TTL_MS = 300_000;
 const DEFAULT_MAX_SESSIONS = 5;
@@ -191,6 +196,8 @@ function attachProcess(key: string, session: Session): void {
   };
   proc.stdout.on("data", onData);
   proc.stderr.on("data", onData);
+  // Writing to a CLI that just exited raises EPIPE; the exit handler covers it.
+  proc.stdin.on("error", () => undefined);
   proc.once("error", () => {
     session.events.emit("exit");
   });
@@ -236,6 +243,7 @@ async function waitForSignInUrl(
   startMs: number,
 ): Promise<ClaudeLoginSnapshot> {
   let urlSeenAt: number | null = null;
+  let graceTimer: NodeJS.Timeout | null = null;
   const fail = () =>
     new ClaudeLoginError(
       "Claude CLI did not show a sign-in link. Check that the Claude CLI is installed, or paste a token from `claude setup-token` instead.",
@@ -246,7 +254,16 @@ async function waitForSignInUrl(
     (exited) => {
       const output = session.output.all();
       const found = extractSignInUrl(output);
-      if (found && urlSeenAt === null) urlSeenAt = Date.now();
+      if (found && urlSeenAt === null) {
+        urlSeenAt = Date.now();
+        // The CLI goes quiet after the prompt, so re-check once the grace
+        // has passed instead of waiting for output that never comes.
+        graceTimer = setTimeout(
+          () => session.events.emit("output"),
+          PROMPT_GRACE_MS + 50,
+        );
+        graceTimer.unref?.();
+      }
       const graceOver =
         urlSeenAt !== null && Date.now() - urlSeenAt > PROMPT_GRACE_MS;
       if (exited) return { done: true, value: fail() };
@@ -256,7 +273,9 @@ async function waitForSignInUrl(
       return { done: false };
     },
     () => extractSignInUrl(session.output.all()) ?? fail(),
-  );
+  ).finally(() => {
+    if (graceTimer) clearTimeout(graceTimer);
+  });
   if (url instanceof Error) throw url;
   const next = updateSession(key, {
     status: "awaiting_code",
@@ -337,6 +356,29 @@ export function validateLoginCode(raw: string): string {
   return code;
 }
 
+/** Rejection text for the UI, with the CLI's own reason when it gave one. */
+function rejectionMessage(cliReason: string | null): string {
+  return cliReason
+    ? `${CODE_REJECTED_MESSAGE} Claude said: ${cliReason} Use the code from the newest sign-in link only.`
+    : CODE_REJECTED_MESSAGE;
+}
+
+/**
+ * Type the code like a person would: the characters first, then Enter as its
+ * own keystroke, so the CLI's input box reads Enter as "submit" rather than as
+ * part of a pasted string. Skips Enter when the process has already ended.
+ */
+async function typeCode(
+  proc: ChildProcessWithoutNullStreams,
+  code: string,
+): Promise<void> {
+  proc.stdin.write(code);
+  await new Promise((resolve) => setTimeout(resolve, ENTER_DELAY_MS));
+  if (proc.exitCode == null && !proc.killed && proc.stdin.writable) {
+    proc.stdin.write("\r");
+  }
+}
+
 /**
  * Wait for the token after a code was typed. Rejected only when the process
  * exits without a token, or when a known rejection phrase appears and no
@@ -347,7 +389,10 @@ async function waitForToken(
   session: Session,
   timeouts: Required<ClaudeLoginTimeouts>,
 ): Promise<string> {
-  const rejected = () => new ClaudeLoginError(CODE_REJECTED_MESSAGE);
+  const rejected = () =>
+    new ClaudeLoginError(
+      rejectionMessage(extractCliErrorMessage(session.output.sinceMark())),
+    );
   let rejectionSeenAt: number | null = null;
   let graceTimer: NodeJS.Timeout | null = null;
   const startGrace = () => {
@@ -403,13 +448,19 @@ export async function submitClaudeLoginCode(
   if (!submitting) throw new ClaudeLoginError(NO_SESSION_MESSAGE);
 
   submitting.output.mark();
-  submitting.proc?.stdin.write(`${code}\r`);
+  const tokenPromise = waitForToken(submitting, timeouts);
+  // Handled by the await below; this only stops an early rejection (the CLI
+  // exiting while the code is being typed) from counting as unhandled.
+  tokenPromise.catch(() => undefined);
+  if (submitting.proc) await typeCode(submitting.proc, code);
   try {
-    const token = await waitForToken(submitting, timeouts);
-    const lifetimeMs = extractTokenLifetimeMs(submitting.output.sinceMark());
+    const token = await tokenPromise;
+    const lifetimeMs =
+      extractTokenLifetimeMs(submitting.output.sinceMark()) ??
+      SETUP_TOKEN_LIFETIME_MS;
     const metadata = await saveClaudeToken(scope, token, {
       source: "setup-token",
-      expiresAt: lifetimeMs ? new Date(Date.now() + lifetimeMs) : null,
+      expiresAt: new Date(Date.now() + lifetimeMs),
     });
     stopProcess(submitting);
     sessions.delete(key);
@@ -421,7 +472,11 @@ export async function submitClaudeLoginCode(
     const message =
       error instanceof ClaudeLoginError ? error.message : CODE_REJECTED_MESSAGE;
     updateSession(key, terminalPatch(current, "failed", message));
-    logger.warn("Claude subscription code submission failed");
+    // The CLI's reason is redacted of code/token-like runs; safe to log.
+    logger.warn("Claude subscription code submission failed", {
+      cliReason: extractCliErrorMessage(current.output.sinceMark()),
+      sawTokenPrefix: current.output.sinceMark().includes("sk-ant-oat"),
+    });
     throw new ClaudeLoginError(message);
   }
 }

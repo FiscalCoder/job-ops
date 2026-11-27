@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractClaudeOauthToken,
+  extractCliErrorMessage,
   extractSignInUrl,
   extractTokenLifetimeMs,
   hasCodePrompt,
@@ -41,6 +42,84 @@ const TOKEN_CAPTURE = [
   "Store this token securely. You won't be able to see it again.\r\n\r\n",
   "Use this token by setting: export CLAUDE_CODE_OAUTH_TOKEN=<token>\r\n",
 ].join("");
+
+/** CLI 2.1.332 lays out words with cursor-column moves instead of spaces. */
+function columns(words: string[]): string {
+  let column = 2;
+  return words
+    .map((word) => {
+      const placed = `${ESC}[${column}G${word}`;
+      column += word.length + 1;
+      return placed;
+    })
+    .join("");
+}
+
+const SHORT_URL =
+  "https://claude.ai/oauth/authorize?IvdRs7RdHwTx0GP1relVe74W29w14UMW5hr2EAO1mBIA";
+
+/** Shaped like the 2026-11-27 capture from CLI 2.1.332 on the server. */
+const CLI_2_1_332_PROMPT = [
+  `${ESC}[1A${columns(["Browser", "didn't", "open?", "Use", "the", "URL", "below", "to", "sign", "in", "(c", "to", "copy)"])}\r\r\n\r\r\n`,
+  `${ESC}]8;id=18rhe18;${SHORT_URL}${BEL}${SHORT_URL}${ESC}]8;;${BEL}\r\r\n\r\r\n`,
+  `${columns(["Paste", "code", "here", "if", "prompted"])}\r\r\n`,
+].join("");
+
+const CLI_2_1_332_REJECTION = [
+  `${columns(["✻", "Finishing", "sign-i", "…"])}\r\r\n`,
+  `${columns(["✘", "OAuth", "error:", "That", "code", "wasn't", "accepted.", "It", "may", "be", "incomplete,", "expired,", "already", "used,", "or", "from", "an", "earlier", "sign-in", "attempt.", "Sign", "in", "again", "to", "get", "a", "new", "code."])}\r\r\n`,
+  `${columns(["Press", "Enter", "to", "retry"])}\r\r\n`,
+].join("");
+
+describe("CLI 2.1.332 column-positioned output", () => {
+  it("keeps word gaps that the CLI draws with cursor moves", () => {
+    expect(stripTerminalSequences(columns(["Paste", "code", "here"]))).toBe(
+      " Paste code here",
+    );
+  });
+
+  it("detects the paste prompt", () => {
+    expect(hasCodePrompt(CLI_2_1_332_PROMPT)).toBe(true);
+  });
+
+  it("returns the short sign-in link", () => {
+    expect(extractSignInUrl(CLI_2_1_332_PROMPT)).toBe(SHORT_URL);
+  });
+
+  it("flags the rejection", () => {
+    expect(hasCodeRejection(CLI_2_1_332_REJECTION)).toBe(true);
+  });
+
+  it("extracts the CLI's own error sentence", () => {
+    expect(extractCliErrorMessage(CLI_2_1_332_REJECTION)).toBe(
+      "That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. Sign in again to get a new code.",
+    );
+  });
+
+  it("reads a column-positioned lifetime", () => {
+    expect(
+      extractTokenLifetimeMs(
+        columns(["Your", "OAuth", "token", "(valid", "for", "1", "year):"]),
+      ),
+    ).toBe(365 * 86_400_000);
+  });
+
+  it("still finds a token printed after a column move", () => {
+    expect(extractClaudeOauthToken(`${ESC}[2G${TOKEN}\r\r\n`)).toBe(TOKEN);
+  });
+});
+
+describe("extractCliErrorMessage", () => {
+  it("returns null without an error line", () => {
+    expect(extractCliErrorMessage(TOKEN_CAPTURE)).toBeNull();
+  });
+
+  it("never echoes token- or code-like runs", () => {
+    expect(
+      extractCliErrorMessage(`✘ OAuth error: bad ${TOKEN} value\r\n`),
+    ).toBe("bad [redacted] value");
+  });
+});
 
 describe("stripTerminalSequences", () => {
   it("removes CSI, OSC and charset sequences and normalises line breaks", () => {

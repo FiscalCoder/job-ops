@@ -19,6 +19,7 @@ import { loadClaudeToken } from "./claude-token-store";
 import { getCliAuthScope } from "./scope";
 
 const ESC = "\u001b";
+const BEL = "\u0007";
 const AUTH_URL =
   "https://claude.com/cai/oauth/authorize?code=true&client_id=abc&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&code_challenge=xyz&state=s1";
 const TOKEN = `sk-ant-oat01-${"Zz9_-".repeat(20)}`;
@@ -264,6 +265,117 @@ describe("claude setup-token login", () => {
       submitClaudeLoginCode(scope, "abc", graceDeps),
     ).rejects.toThrow(/Code rejected or expired/);
     expect(Date.now() - startedAt).toBeLessThan(2_000);
+  });
+
+  describe("CLI 2.1.332 output (words placed with cursor moves)", () => {
+    const col = (words: string[]) =>
+      words.map((word, index) => `${ESC}[${2 + index * 9}G${word}`).join("");
+    const SHORT_URL = "https://claude.ai/oauth/authorize?IvdRs7RdHwTx0GP1relV";
+
+    function cliDeps(onCode?: (proc: MockProc) => void): ClaudeLoginDeps {
+      return {
+        ...deps,
+        spawnFn: vi.fn(() => {
+          const proc = createMockProc();
+          procs.push(proc);
+          setImmediate(() => {
+            (proc.stdout as PassThrough).write(
+              `${ESC}]8;id=1;${SHORT_URL}${BEL}${SHORT_URL}${ESC}]8;;${BEL}\r\r\n\r\r\n${col(["Paste", "code", "here", "if", "prompted"])}\r\r\n`,
+            );
+          });
+          if (onCode) proc.stdin.once("data", () => onCode(proc));
+          return proc;
+        }) as unknown as ClaudeLoginDeps["spawnFn"],
+        timeouts: {
+          startMs: 10_000,
+          codeMs: 10_000,
+          idleMs: 60_000,
+          rejectGraceMs: 50,
+        },
+      };
+    }
+
+    it("returns the link as soon as the prompt shows, not at the start timeout", async () => {
+      const startedAt = Date.now();
+      const snapshot = await startClaudeLogin(scopeFor("user-1"), cliDeps());
+      expect(snapshot.signInUrl).toBe(SHORT_URL);
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+    });
+
+    it("returns shortly after the link even when no prompt is recognised", async () => {
+      const quiet: ClaudeLoginDeps = {
+        ...deps,
+        spawnFn: vi.fn(() => {
+          const proc = createMockProc();
+          setImmediate(() =>
+            (proc.stdout as PassThrough).write(
+              `${ESC}]8;id=1;${SHORT_URL}${BEL}${SHORT_URL}${ESC}]8;;${BEL}\r\n`,
+            ),
+          );
+          return proc;
+        }) as unknown as ClaudeLoginDeps["spawnFn"],
+        timeouts: { startMs: 10_000, codeMs: 10_000, idleMs: 60_000 },
+      };
+      const startedAt = Date.now();
+      const snapshot = await startClaudeLogin(scopeFor("user-1"), quiet);
+      expect(snapshot.signInUrl).toBe(SHORT_URL);
+      expect(Date.now() - startedAt).toBeLessThan(3_000);
+    });
+
+    it("types the code, then presses Enter as a separate keystroke", async () => {
+      const scope = scopeFor("user-1");
+      const withToken = cliDeps((proc) => {
+        setTimeout(
+          () => (proc.stdout as PassThrough).write(`\r\n${TOKEN}\r\n`),
+          400,
+        );
+      });
+      await startClaudeLogin(scope, withToken);
+      await submitClaudeLoginCode(scope, "the-code#state", withToken);
+      expect(firstProc(procs).stdinWrites).toEqual(["the-code#state", "\r"]);
+    });
+
+    it("fails fast with Claude's own reason when the code is refused", async () => {
+      const scope = scopeFor("user-1");
+      const refusing = cliDeps((proc) => {
+        setTimeout(
+          () =>
+            (proc.stdout as PassThrough).write(
+              `${col(["✘", "OAuth", "error:", "That", "code", "wasn't", "accepted."])}\r\r\n${col(["Press", "Enter", "to", "retry"])}\r\r\n`,
+            ),
+          200,
+        );
+      });
+      await startClaudeLogin(scope, refusing);
+      const startedAt = Date.now();
+      await expect(
+        submitClaudeLoginCode(scope, "old-code#state", refusing),
+      ).rejects.toThrow(/That code wasn't accepted\./);
+      expect(Date.now() - startedAt).toBeLessThan(3_000);
+      expect(getClaudeLoginSnapshot(scope)?.message).toMatch(
+        /That code wasn't accepted\./,
+      );
+    });
+
+    it("records a one-year expiry for a setup-token login", async () => {
+      const scope = scopeFor("user-1");
+      const withToken = cliDeps((proc) => {
+        setTimeout(
+          () => (proc.stdout as PassThrough).write(`\r\n${TOKEN}\r\n`),
+          400,
+        );
+      });
+      await startClaudeLogin(scope, withToken);
+      const { metadata } = await submitClaudeLoginCode(
+        scope,
+        "the-code#state",
+        withToken,
+      );
+      const days =
+        (Date.parse(metadata.expiresAt ?? "") - Date.now()) / 86_400_000;
+      expect(days).toBeGreaterThan(364);
+      expect(days).toBeLessThan(366);
+    });
   });
 
   it("caps concurrent sign-ins across users", async () => {

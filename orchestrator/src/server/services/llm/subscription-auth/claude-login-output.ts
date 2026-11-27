@@ -10,6 +10,13 @@ const OSC_SEQUENCE = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
 const OSC8_TARGET =
   // biome-ignore lint/suspicious/noControlCharactersInRegex: matching terminal escape bytes is the point
   /\u001b\]8;[^;\u0007\u001b]*;([^\u0007\u001b]+)(?:\u0007|\u001b\\)/g;
+/**
+ * Cursor moves to a column (`ESC[nG`) or forward (`ESC[nC`). CLI 2.1.332
+ * draws the gap between words with these instead of spaces, so they become a
+ * space; dropping them would glue "Paste code here" into "Pastecodehere".
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching terminal escape bytes is the point
+const CURSOR_GAP_SEQUENCE = /\u001b\[\d*[GC]/g;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching terminal escape bytes is the point
 const CSI_SEQUENCE = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching terminal escape bytes is the point
@@ -27,7 +34,12 @@ const MAX_TOKEN_CHARS = 400;
 /** A lone word ("Store", "done") is CLI prose, never a wrapped value. */
 const PLAIN_WORD_LINE = /^[A-Za-z][a-z]*$/;
 const CODE_REJECTION_PATTERN =
-  /invalid (authorization )?code|code (is )?(invalid|expired)|OAuth error|authorization failed/i;
+  /invalid (authorization )?code|code (is )?(invalid|expired)|OAuth error|authorization failed|code was(n't| not) accepted/i;
+/** "✘ OAuth error: <reason>" or "OAuth error: <reason>" as the CLI prints it. */
+const CLI_ERROR_LINE = /(?:✘\s*)?(?:OAuth error|Error):\s*(.+)$/i;
+/** Runs this long look like codes or tokens; never echo them back. */
+const SECRET_LIKE_RUN = /[A-Za-z0-9_\-#]{32,}/g;
+const MAX_ERROR_MESSAGE_CHARS = 300;
 
 const SIGN_IN_HOSTS = ["claude.com", "claude.ai", "anthropic.com"];
 const DAY_MS = 86_400_000;
@@ -41,6 +53,7 @@ const LIFETIME_UNIT_MS: Record<string, number> = {
 export function stripTerminalSequences(raw: string): string {
   return raw
     .replace(OSC_SEQUENCE, "")
+    .replace(CURSOR_GAP_SEQUENCE, " ")
     .replace(CSI_SEQUENCE, "")
     .replace(CHARSET_SEQUENCE, "")
     .replace(SHORT_ESCAPE, "")
@@ -155,4 +168,25 @@ export function extractTokenLifetimeMs(raw: string): number | null {
  */
 export function hasCodeRejection(raw: string): boolean {
   return CODE_REJECTION_PATTERN.test(stripTerminalSequences(raw));
+}
+
+/**
+ * The CLI's own explanation of a failed sign-in ("That code wasn't accepted.
+ * It may be …"), safe to show and log: code- or token-like runs are redacted.
+ * The last matching line wins, since spinner redraws repeat earlier text.
+ */
+export function extractCliErrorMessage(raw: string): string | null {
+  const lines = stripTerminalSequences(raw)
+    .split("\n")
+    .map((line) => line.trim().replace(/\s+/g, " "))
+    .filter(Boolean);
+  for (const line of [...lines].reverse()) {
+    const reason = line.match(CLI_ERROR_LINE)?.[1]?.trim();
+    if (reason) {
+      return reason
+        .replace(SECRET_LIKE_RUN, "[redacted]")
+        .slice(0, MAX_ERROR_MESSAGE_CHARS);
+    }
+  }
+  return null;
 }
