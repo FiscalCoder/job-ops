@@ -26,6 +26,7 @@ export const EXTRACTOR_SOURCE_IDS = [
   "unstop",
   "foundit",
   "eurojobs",
+  "hackernews",
   "manual",
 ] as const;
 
@@ -106,6 +107,7 @@ export const EXTRACTOR_SOURCE_METADATA: Record<
   foundit: { label: "Foundit (internships)", order: 134, category: "pipeline" },
   manual: { label: "Manual", order: 140, category: "manual" },
   eurojobs: { label: "EuroJobs", order: 117, category: "pipeline" },
+  hackernews: { label: "Hacker News (Who is hiring)", order: 136, category: "pipeline" },
 };
 
 export const PIPELINE_EXTRACTOR_SOURCE_IDS = EXTRACTOR_SOURCE_IDS.filter(

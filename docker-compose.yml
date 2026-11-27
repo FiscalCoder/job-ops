@@ -107,6 +107,9 @@ services:
         - path: ./extractors/arbeitnow/src
           target: /app/extractors/arbeitnow/src
           action: sync+restart
+        - path: ./extractors/hackernews/src
+          target: /app/extractors/hackernews/src
+          action: sync+restart
         - path: ./extractors/internshala/src
           target: /app/extractors/internshala/src
           action: sync+restart

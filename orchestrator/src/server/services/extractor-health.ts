@@ -155,6 +155,13 @@ const HEALTH_PROBE_CONFIG_BY_SOURCE: Record<
       jobspyResultsWanted: "1",
     },
   },
+  hackernews: {
+    searchTerm: DEFAULT_HEALTH_SEARCH_TERM,
+    selectedCountry: DEFAULT_HEALTH_SELECTED_COUNTRY,
+    settings: {
+      jobspyResultsWanted: "1",
+    },
+  },
   himalayas: {
     searchTerm: DEFAULT_HEALTH_SEARCH_TERM,
     selectedCountry: DEFAULT_HEALTH_SELECTED_COUNTRY,

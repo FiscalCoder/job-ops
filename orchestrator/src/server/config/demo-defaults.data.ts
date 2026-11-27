@@ -270,6 +270,7 @@ export const DEMO_SOURCE_BASE_URLS: Record<JobSource, string> = {
   remoteok: "https://remoteok.com",
   jobicy: "https://jobicy.com",
   arbeitnow: "https://arbeitnow.com",
+  hackernews: "https://news.ycombinator.com",
   internshala: "https://internshala.com",
   unstop: "https://unstop.com",
   foundit: "https://www.foundit.in",
