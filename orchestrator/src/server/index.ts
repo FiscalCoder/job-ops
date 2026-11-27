@@ -21,6 +21,7 @@ import { applyStoredEnvOverrides } from "./services/envSettings";
 import { initializeHistoricalServerEventReplaySafely } from "./services/historical-product-analytics";
 import { initializeDailySearch } from "./services/daily-search/scheduler";
 import { initializeJobLiveness } from "./services/job-liveness/scheduler";
+import { initializeGmailAutoSync } from "./services/post-application/ingestion/gmail-auto-sync";
 import { initialize as initializeVisaSponsors } from "./services/visa-sponsors/index";
 
 const AUTH_SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
@@ -159,6 +160,14 @@ async function startServer() {
       initializeDailySearch();
     } catch (error) {
       logger.warn("Failed to initialize the daily search", {
+        error: sanitizeUnknown(error),
+      });
+    }
+
+    try {
+      initializeGmailAutoSync();
+    } catch (error) {
+      logger.warn("Failed to initialize scheduled Gmail sync", {
         error: sanitizeUnknown(error),
       });
     }
