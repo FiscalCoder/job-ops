@@ -37,10 +37,15 @@ export function extractTokenUsage(response: unknown): TokenUsage | null {
     asCount(usage.completion_tokens) ?? asCount(usage.output_tokens);
   if (prompt === null && completion === null) return null;
   const details = asRecord(usage.prompt_tokens_details);
+  // Anthropic (Claude CLI) reports cache reads/writes outside input_tokens.
+  const cacheRead = asCount(usage.cache_read_input_tokens);
+  const cacheWrite = asCount(usage.cache_creation_input_tokens) ?? 0;
   const cacheHit =
-    asCount(usage.prompt_cache_hit_tokens) ?? asCount(details?.cached_tokens);
+    asCount(usage.prompt_cache_hit_tokens) ??
+    asCount(details?.cached_tokens) ??
+    cacheRead;
   return {
-    promptTokens: prompt ?? 0,
+    promptTokens: (prompt ?? 0) + (cacheRead ?? 0) + cacheWrite,
     cacheHitTokens: cacheHit,
     completionTokens: completion ?? 0,
   };
@@ -94,8 +99,12 @@ export async function recordLlmUsage(
  * synchronously inside recordLlmUsage before its first await, so async
  * context is preserved; failures are logged and never thrown.
  */
-/** Providers whose responses carry OpenAI-style usage counts (DeepSeek is openai_compatible). */
-const RECORDED_PROVIDERS = new Set(["openai_compatible", "openai"]);
+/** Providers whose responses carry readable usage counts (DeepSeek is openai_compatible). */
+const RECORDED_PROVIDERS = new Set([
+  "openai_compatible",
+  "openai",
+  "claude_cli",
+]);
 
 export function recordLlmUsageSafely(call: RecordableCall): void {
   if (!RECORDED_PROVIDERS.has(call.provider)) return;

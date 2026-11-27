@@ -434,6 +434,14 @@ export class LlmService {
           ...options,
           signal,
         });
+        // Fork: subscription calls cost no money but count toward plan limits.
+        recordLlmUsageSafely({
+          provider: this.provider,
+          baseUrl: "",
+          model: options.model?.trim() || "claude-cli-default",
+          feature: options.jsonSchema?.name || null,
+          response: { usage: result.usage },
+        });
         const parsed = parseJsonContent<T>(result.text, jobId);
         return { success: true, data: parsed };
       } catch (error) {

@@ -200,6 +200,7 @@ type ClaudeCliResultEnvelope = {
   is_error?: boolean;
   result?: string;
   structured_output?: unknown;
+  usage?: unknown;
 };
 
 function tryParseEnvelope(text: string): ClaudeCliResultEnvelope | null {
@@ -259,7 +260,10 @@ function collectCliErrorText(stdout: string, stderr: string): string {
   return [stderr, ...fromStdout].filter(Boolean).join(" | ");
 }
 
-function parseCliJsonOutput(stdout: string): { response: string } {
+function parseCliJsonOutput(stdout: string): {
+  response: string;
+  usage: unknown;
+} {
   const parsed = findResultEnvelope(stdout);
   if (!parsed) {
     throw new Error(
@@ -270,7 +274,10 @@ function parseCliJsonOutput(stdout: string): { response: string } {
     throw claudeCliErrorFromCli(envelopeErrorText(parsed));
   }
   if (parsed.structured_output !== undefined) {
-    return { response: JSON.stringify(parsed.structured_output) };
+    return {
+      response: JSON.stringify(parsed.structured_output),
+      usage: parsed.usage,
+    };
   }
   const response = toNonEmptyString(parsed.result);
   if (!response) {
@@ -278,7 +285,7 @@ function parseCliJsonOutput(stdout: string): { response: string } {
       "Claude CLI JSON output did not include a `result` or `structured_output` field.",
     );
   }
-  return { response };
+  return { response, usage: parsed.usage };
 }
 
 async function runClaudeCliOnce(args: {
@@ -502,7 +509,7 @@ export class ClaudeCliClient {
 
   async callJson(
     options: LlmRequestOptions<unknown>,
-  ): Promise<{ text: string }> {
+  ): Promise<{ text: string; usage: unknown }> {
     const timeoutMs =
       this.requestTimeoutMs ??
       getPositiveIntEnv(
@@ -526,8 +533,8 @@ export class ClaudeCliClient {
         timeoutMs,
         signal: options.signal,
       });
-      const { response } = parseCliJsonOutput(stdout);
-      return { text: response };
+      const { response, usage } = parseCliJsonOutput(stdout);
+      return { text: response, usage };
     } catch (error) {
       throw toClaudeCliError(error);
     }

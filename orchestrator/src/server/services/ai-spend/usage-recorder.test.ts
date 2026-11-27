@@ -70,6 +70,21 @@ describe.sequential("llm usage recording", () => {
     expect(
       extractTokenUsage({ usage: { input_tokens: 5, output_tokens: 7 } }),
     ).toEqual({ promptTokens: 5, cacheHitTokens: null, completionTokens: 7 });
+    // Claude CLI: cache reads/writes sit outside input_tokens.
+    expect(
+      extractTokenUsage({
+        usage: {
+          input_tokens: 10,
+          cache_read_input_tokens: 3000,
+          cache_creation_input_tokens: 500,
+          output_tokens: 80,
+        },
+      }),
+    ).toEqual({
+      promptTokens: 3510,
+      cacheHitTokens: 3000,
+      completionTokens: 80,
+    });
     expect(extractTokenUsage({ choices: [] })).toBeNull();
     expect(extractTokenUsage(null)).toBeNull();
   });
@@ -155,5 +170,27 @@ describe.sequential("llm usage recording", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     const { db, schema } = await import("@server/db");
     expect(await db.select().from(schema.llmUsage)).toHaveLength(0);
+  });
+
+  it("records Claude CLI subscription calls with tokens and no cost", async () => {
+    const { recordLlmUsage } = await import("./usage-recorder");
+    await asUser("user-a", () =>
+      recordLlmUsage({
+        provider: "claude_cli",
+        baseUrl: "",
+        model: "claude-haiku-5-5",
+        feature: "job_score",
+        response: { usage: { input_tokens: 900, output_tokens: 60 } },
+      }),
+    );
+    const { db, schema } = await import("@server/db");
+    const [row] = await db.select().from(schema.llmUsage);
+    expect(row).toMatchObject({
+      provider: "claude_cli",
+      host: null,
+      promptTokens: 900,
+      completionTokens: 60,
+      costUsd: null,
+    });
   });
 });
