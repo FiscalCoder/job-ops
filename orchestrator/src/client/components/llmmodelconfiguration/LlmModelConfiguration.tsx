@@ -19,6 +19,7 @@ import type {
   LlmPurposeApiKeyHints,
   LlmPurposeOverrides,
 } from "@shared/types";
+import { RefreshCw } from "lucide-react";
 import type React from "react";
 import { useDeferredValue, useEffect, useState } from "react";
 import {
@@ -27,6 +28,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -120,6 +122,7 @@ export function LlmModelConfiguration({
   validationSlot,
   onCodexAuthStatusChange,
 }: LlmModelConfigurationProps) {
+  const [modelRefreshVersion, setModelRefreshVersion] = useState(0);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -155,6 +158,7 @@ export function LlmModelConfiguration({
     }
   }, [baseUrl, showBaseUrl]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: The refresh version deliberately retriggers discovery without changing connection fields.
   useEffect(() => {
     if (!supportsModelSuggestions) {
       setAvailableModels([]);
@@ -201,6 +205,7 @@ export function LlmModelConfiguration({
       cancelled = true;
     };
   }, [
+    modelRefreshVersion,
     deferredApiKey,
     deferredBaseUrl,
     deferredProvider,
@@ -408,6 +413,34 @@ export function LlmModelConfiguration({
       </div>
 
       <Separator />
+
+      {supportsModelSuggestions ? (
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={
+              disabled ||
+              isLoadingModels ||
+              !hasAvailableApiKey ||
+              deferredProvider !== selectedProvider ||
+              (showBaseUrl && deferredBaseUrl !== baseUrl.value) ||
+              (showApiKey && deferredApiKey !== apiKey.value)
+            }
+            onClick={() => {
+              setIsLoadingModels(true);
+              setModelRefreshVersion((version) => version + 1);
+            }}
+          >
+            <RefreshCw
+              aria-hidden="true"
+              className={isLoadingModels ? "animate-spin" : undefined}
+            />
+            {isLoadingModels ? "Refreshing models..." : "Refresh models"}
+          </Button>
+        </div>
+      ) : null}
 
       <ModelField
         id="model"
