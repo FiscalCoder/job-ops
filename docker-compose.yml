@@ -107,6 +107,15 @@ services:
         - path: ./extractors/arbeitnow/src
           target: /app/extractors/arbeitnow/src
           action: sync+restart
+        - path: ./extractors/internshala/src
+          target: /app/extractors/internshala/src
+          action: sync+restart
+        - path: ./extractors/unstop/src
+          target: /app/extractors/unstop/src
+          action: sync+restart
+        - path: ./extractors/foundit/src
+          target: /app/extractors/foundit/src
+          action: sync+restart
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/health"]

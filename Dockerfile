@@ -100,6 +100,9 @@ COPY extractors/himalayas/package*.json ./extractors/himalayas/
 COPY extractors/remoteok/package*.json ./extractors/remoteok/
 COPY extractors/jobicy/package*.json ./extractors/jobicy/
 COPY extractors/arbeitnow/package*.json ./extractors/arbeitnow/
+COPY extractors/internshala/package*.json ./extractors/internshala/
+COPY extractors/unstop/package*.json ./extractors/unstop/
+COPY extractors/foundit/package*.json ./extractors/foundit/
 COPY extractors/browser-utils/package*.json ./extractors/browser-utils/
 
 # Install build-time Node dependencies on the native builder platform. The
@@ -135,6 +138,9 @@ COPY extractors/himalayas ./extractors/himalayas
 COPY extractors/remoteok ./extractors/remoteok
 COPY extractors/jobicy ./extractors/jobicy
 COPY extractors/arbeitnow ./extractors/arbeitnow
+COPY extractors/internshala ./extractors/internshala
+COPY extractors/unstop ./extractors/unstop
+COPY extractors/foundit ./extractors/foundit
 COPY extractors/browser-utils ./extractors/browser-utils
 
 # ============================================================================
@@ -188,6 +194,9 @@ COPY extractors/himalayas/package*.json ./extractors/himalayas/
 COPY extractors/remoteok/package*.json ./extractors/remoteok/
 COPY extractors/jobicy/package*.json ./extractors/jobicy/
 COPY extractors/arbeitnow/package*.json ./extractors/arbeitnow/
+COPY extractors/internshala/package*.json ./extractors/internshala/
+COPY extractors/unstop/package*.json ./extractors/unstop/
+COPY extractors/foundit/package*.json ./extractors/foundit/
 COPY extractors/browser-utils/package*.json ./extractors/browser-utils/
 
 # Install production Node dependencies only.
@@ -288,6 +297,9 @@ COPY extractors/himalayas ./extractors/himalayas
 COPY extractors/remoteok ./extractors/remoteok
 COPY extractors/jobicy ./extractors/jobicy
 COPY extractors/arbeitnow ./extractors/arbeitnow
+COPY extractors/internshala ./extractors/internshala
+COPY extractors/unstop ./extractors/unstop
+COPY extractors/foundit ./extractors/foundit
 COPY extractors/browser-utils ./extractors/browser-utils
 
 # Create runtime directories.

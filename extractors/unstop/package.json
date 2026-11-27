@@ -1,0 +1,13 @@
+{
+  "name": "unstop-extractor",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Unstop extractor backed by its public internship search API",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.0"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit"
+  }
+}

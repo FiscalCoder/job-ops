@@ -22,6 +22,9 @@ export const EXTRACTOR_SOURCE_IDS = [
   "remoteok",
   "jobicy",
   "arbeitnow",
+  "internshala",
+  "unstop",
+  "foundit",
   "manual",
 ] as const;
 
@@ -97,7 +100,10 @@ export const EXTRACTOR_SOURCE_METADATA: Record<
   remoteok: { label: "RemoteOK", order: 124, category: "pipeline" },
   jobicy: { label: "Jobicy", order: 126, category: "pipeline" },
   arbeitnow: { label: "Arbeitnow", order: 128, category: "pipeline" },
-  manual: { label: "Manual", order: 130, category: "manual" },
+  internshala: { label: "Internshala", order: 130, category: "pipeline" },
+  unstop: { label: "Unstop", order: 132, category: "pipeline" },
+  foundit: { label: "Foundit (internships)", order: 134, category: "pipeline" },
+  manual: { label: "Manual", order: 140, category: "manual" },
 };
 
 export const PIPELINE_EXTRACTOR_SOURCE_IDS = EXTRACTOR_SOURCE_IDS.filter(

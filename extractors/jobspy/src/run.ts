@@ -410,7 +410,7 @@ export async function runJobSpy(
 
         const raw = await readFile(outputJson, "utf-8");
         const parsed = JSON.parse(raw) as Array<Record<string, unknown>>;
-        const filtered = mapJobSpyRows(parsed, countryIndeed);
+        const filtered = mapJobSpyRows(parsed, countryIndeed, location);
 
         for (const job of filtered) {
           if (seenJobUrls.has(job.jobUrl)) continue;
@@ -492,9 +492,36 @@ function slugForFilename(input: string): string {
   return slug || "term";
 }
 
+/** "MH, India": a state code and a country, with no city. */
+const STATE_ONLY_LOCATION = /^[A-Z]{2,3},\s*[^,]+$/;
+
+/**
+ * Indeed India labels many postings with only their state ("MH, India"), which a
+ * city filter then drops. Indeed searched within its radius of `searchedCity`, so
+ * that city is recorded as the posting's city. Labels that name a city are left as they are.
+ */
+function withSearchedCity(
+  evidence: JobLocationEvidence | undefined,
+  source: JobSource,
+  searchedCity: string | null,
+): JobLocationEvidence | undefined {
+  if (!evidence || source !== "indeed" || !searchedCity?.trim()) {
+    return evidence;
+  }
+  if (!STATE_ONLY_LOCATION.test(evidence.location ?? "")) return evidence;
+  return {
+    ...evidence,
+    city: searchedCity.trim(),
+    sourceNotes: [
+      `Indeed gave only the state; searched near ${searchedCity.trim()}.`,
+    ],
+  };
+}
+
 export function mapJobSpyRows(
   parsed: Array<Record<string, unknown>>,
   countryIndeed: string | null = null,
+  searchedCity: string | null = null,
 ): CreateJobInput[] {
   const jobs: CreateJobInput[] = [];
 
@@ -524,11 +551,15 @@ export function mapJobSpyRows(
       jobUrl,
       applicationLink: jobUrlDirect ?? jobUrl,
       location: toStringOrNull(row.location) ?? undefined,
-      locationEvidence: buildLocationEvidence(
-        toStringOrNull(row.location) ?? null,
-        // LinkedIn's native query includes this country, but its result labels
-        // often omit it. Explicit returned country evidence takes precedence.
-        source === "linkedin" ? countryIndeed : null,
+      locationEvidence: withSearchedCity(
+        buildLocationEvidence(
+          toStringOrNull(row.location) ?? null,
+          // LinkedIn's native query includes this country, but its result labels
+          // often omit it. Explicit returned country evidence takes precedence.
+          source === "linkedin" ? countryIndeed : null,
+        ),
+        source,
+        searchedCity,
       ),
       jobDescription: toStringOrNull(row.description) ?? undefined,
       salary: salary ?? undefined,

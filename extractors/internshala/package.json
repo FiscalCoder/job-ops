@@ -1,0 +1,16 @@
+{
+  "name": "internshala-extractor",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Internshala extractor backed by its public internship search and detail pages",
+  "dependencies": {
+    "cheerio": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.0"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit"
+  }
+}

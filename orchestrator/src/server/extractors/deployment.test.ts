@@ -66,6 +66,27 @@ describe("extractor deployment config", () => {
     );
   });
 
+  it("ships the India internship board extractors in Docker and compose", async () => {
+    const dockerfile = await readFile(resolve(process.cwd(), "../Dockerfile"), {
+      encoding: "utf8",
+    });
+    const composeFile = await readFile(
+      resolve(process.cwd(), "../docker-compose.yml"),
+      { encoding: "utf8" },
+    );
+
+    for (const extractor of ["internshala", "unstop", "foundit"]) {
+      const packageCopy = `COPY extractors/${extractor}/package*.json ./extractors/${extractor}/`;
+      const sourceCopy = `COPY extractors/${extractor} ./extractors/${extractor}
+`;
+      // Builder and runtime stages each copy the package files and the sources.
+      expect(dockerfile.split(packageCopy)).toHaveLength(3);
+      expect(dockerfile.split(sourceCopy)).toHaveLength(3);
+      expect(composeFile).toContain(`path: ./extractors/${extractor}/src`);
+      expect(composeFile).toContain(`target: /app/extractors/${extractor}/src`);
+    }
+  });
+
   it("ships the remote-native board extractors in Docker runtime images", async () => {
     const dockerfile = await readFile(resolve(process.cwd(), "../Dockerfile"), {
       encoding: "utf8",

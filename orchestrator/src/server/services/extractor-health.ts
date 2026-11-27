@@ -183,6 +183,27 @@ const HEALTH_PROBE_CONFIG_BY_SOURCE: Record<
       jobspyResultsWanted: "1",
     },
   },
+  internshala: {
+    searchTerm: "marketing",
+    selectedCountry: "india",
+    settings: {
+      jobspyResultsWanted: "1",
+    },
+  },
+  unstop: {
+    searchTerm: "marketing",
+    selectedCountry: "india",
+    settings: {
+      jobspyResultsWanted: "1",
+    },
+  },
+  foundit: {
+    searchTerm: "marketing",
+    selectedCountry: "india",
+    settings: {
+      jobspyResultsWanted: "1",
+    },
+  },
   manual: {
     searchTerm: DEFAULT_HEALTH_SEARCH_TERM,
     selectedCountry: DEFAULT_HEALTH_SELECTED_COUNTRY,

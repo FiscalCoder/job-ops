@@ -212,3 +212,57 @@ describe("JobSpy location evidence", () => {
     expect(usJob.locationEvidence?.country).toBe("US");
   });
 });
+
+describe("JobSpy Indeed state-only locations", () => {
+  const row = {
+    site: "indeed",
+    job_url: "https://in.indeed.com/viewjob?jk=1",
+    title: "Marketing Intern",
+    company: "Example",
+    location: "MH, India",
+  };
+  const mumbaiIntent = {
+    selectedCountry: "india",
+    country: "india",
+    cityLocations: ["mumbai"],
+    workplaceTypes: ["onsite" as const],
+    geoScope: "selected_only" as const,
+    searchScope: "selected_only" as const,
+    matchStrictness: "exact_only" as const,
+  };
+
+  it("records the searched city when Indeed gives only the state", () => {
+    const [job] = mapJobSpyRows([row], "india", "mumbai");
+    expect(job.locationEvidence).toMatchObject({
+      location: "MH, India",
+      country: "IN",
+      city: "mumbai",
+    });
+    expect(matchJobLocationIntent(job, mumbaiIntent).matched).toBe(true);
+  });
+
+  it("drops state-only Indeed postings when no city was searched", () => {
+    const [job] = mapJobSpyRows([row], "india");
+    expect(job.locationEvidence?.city).toBeUndefined();
+    expect(matchJobLocationIntent(job, mumbaiIntent).matched).toBe(false);
+  });
+
+  it("keeps a city Indeed named, even when it differs from the search", () => {
+    const [job] = mapJobSpyRows(
+      [{ ...row, location: "Pune, Maharashtra, India" }],
+      "india",
+      "mumbai",
+    );
+    expect(job.locationEvidence?.city).toBeUndefined();
+    expect(matchJobLocationIntent(job, mumbaiIntent).matched).toBe(false);
+  });
+
+  it("leaves LinkedIn state-only labels alone", () => {
+    const [job] = mapJobSpyRows(
+      [{ ...row, site: "linkedin" }],
+      "india",
+      "mumbai",
+    );
+    expect(job.locationEvidence?.city).toBeUndefined();
+  });
+});
