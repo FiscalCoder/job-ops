@@ -357,6 +357,116 @@ describe("SettingsPage", () => {
     expect(toast.success).toHaveBeenCalledWith("Settings saved");
   });
 
+  describe("fallback provider", () => {
+    const deepSeekFallback = {
+      ...baseSettings,
+      llmFallbackEnabled: { value: true, default: false, override: true },
+      llmFallbackProvider: {
+        value: "openai_compatible",
+        default: "",
+        override: "openai_compatible",
+      },
+      llmFallbackBaseUrl: {
+        value: "https://api.deepseek.com",
+        default: "",
+        override: "https://api.deepseek.com",
+      },
+      llmFallbackModel: {
+        value: "deepseek-flash",
+        default: "",
+        override: "deepseek-flash",
+      },
+      llmFallbackApiKeyHint: "sk-4",
+    };
+    const fallbackCheckbox = () =>
+      screen.getByRole("checkbox", {
+        name: /use a fallback provider when the primary is rate-limited/i,
+      });
+
+    it("shows the saved fallback provider", async () => {
+      vi.mocked(api.getSettings).mockResolvedValue(deepSeekFallback);
+      renderPage();
+      await openModelSection();
+
+      await waitFor(() =>
+        expect(fallbackCheckbox()).toHaveAttribute("data-state", "checked"),
+      );
+      expect(
+        screen.getByDisplayValue("https://api.deepseek.com"),
+      ).toBeInTheDocument();
+      expect(screen.getByDisplayValue("deepseek-flash")).toBeInTheDocument();
+    });
+
+    it("saves a changed fallback model without touching the stored key", async () => {
+      vi.mocked(api.getSettings).mockResolvedValue(deepSeekFallback);
+      vi.mocked(api.updateSettings).mockResolvedValue(deepSeekFallback);
+      renderPage();
+      await openModelSection();
+
+      const modelInput = await screen.findByDisplayValue("deepseek-flash");
+      await waitFor(() => expect(modelInput).toBeEnabled());
+      fireEvent.change(modelInput, { target: { value: " deepseek-chat " } });
+      const saveButton = getSaveButton();
+      await waitFor(() => expect(saveButton).toBeEnabled());
+      fireEvent.click(saveButton);
+
+      await waitFor(() => expect(api.updateSettings).toHaveBeenCalled());
+      const payload = vi.mocked(api.updateSettings).mock.calls[0]?.[0];
+      expect(payload).toEqual(
+        expect.objectContaining({
+          llmFallbackEnabled: true,
+          llmFallbackProvider: "openai_compatible",
+          llmFallbackBaseUrl: "https://api.deepseek.com",
+          llmFallbackModel: "deepseek-chat",
+        }),
+      );
+      expect(payload).not.toHaveProperty("llmFallbackApiKey");
+    });
+
+    it("saves turning the fallback off", async () => {
+      vi.mocked(api.getSettings).mockResolvedValue(deepSeekFallback);
+      vi.mocked(api.updateSettings).mockResolvedValue(baseSettings);
+      renderPage();
+      await openModelSection();
+
+      await waitFor(() =>
+        expect(fallbackCheckbox()).toHaveAttribute("data-state", "checked"),
+      );
+      await waitFor(() => expect(fallbackCheckbox()).toBeEnabled());
+      fireEvent.click(fallbackCheckbox());
+      const saveButton = getSaveButton();
+      await waitFor(() => expect(saveButton).toBeEnabled());
+      fireEvent.click(saveButton);
+
+      await waitFor(() => expect(api.updateSettings).toHaveBeenCalled());
+      expect(api.updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          llmFallbackEnabled: false,
+          llmFallbackProvider: null,
+        }),
+      );
+    });
+
+    it("leaves fallback settings out of unrelated saves", async () => {
+      vi.mocked(api.getSettings).mockResolvedValue(deepSeekFallback);
+      vi.mocked(api.updateSettings).mockResolvedValue(deepSeekFallback);
+      renderPage();
+      await openModelSection();
+
+      const modelInput = screen.getByLabelText(/default model/i);
+      await waitFor(() => expect(modelInput).toBeEnabled());
+      fireEvent.change(modelInput, { target: { value: "gpt-4" } });
+      const saveButton = getSaveButton();
+      await waitFor(() => expect(saveButton).toBeEnabled());
+      fireEvent.click(saveButton);
+
+      await waitFor(() => expect(api.updateSettings).toHaveBeenCalled());
+      expect(
+        vi.mocked(api.updateSettings).mock.calls[0]?.[0],
+      ).not.toHaveProperty("llmFallbackEnabled");
+    });
+  });
+
   it("starts ChatGPT sign-in from the subscription logins panel", async () => {
     vi.mocked(api.getSettings).mockResolvedValue(
       createAppSettings({

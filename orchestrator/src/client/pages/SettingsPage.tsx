@@ -32,6 +32,11 @@ import { ScoringSettingsSection } from "@client/pages/settings/components/Scorin
 import { TracerLinksSettingsSection } from "@client/pages/settings/components/TracerLinksSettingsSection";
 import { WebhooksSection } from "@client/pages/settings/components/WebhooksSection";
 import {
+  buildFallbackPayload,
+  FALLBACK_FORM_DEFAULTS,
+  mapFallbackToForm,
+} from "@client/pages/settings/fallback-form";
+import {
   type LlmProviderId,
   normalizeLlmProvider,
   resumeProjectsEqual,
@@ -77,6 +82,7 @@ const DEFAULT_FORM_VALUES: UpdateSettingsInput = {
   llmApiKey: "",
   llmPurposeOverrides: {},
   llmPurposeApiKeys: {},
+  ...FALLBACK_FORM_DEFAULTS,
   pipelineWebhookUrl: "",
   jobCompleteWebhookUrl: "",
   resumeProjects: null,
@@ -513,6 +519,7 @@ const mapSettingsToForm = (data: AppSettings): UpdateSettingsInput => ({
   llmApiKey: "",
   llmPurposeOverrides: mapPurposeOverridesToForm(data),
   llmPurposeApiKeys: {},
+  ...mapFallbackToForm(data),
   pipelineWebhookUrl: data.pipelineWebhookUrl.override ?? "",
   jobCompleteWebhookUrl: data.jobCompleteWebhookUrl.override ?? "",
   resumeProjects: data.resumeProjects.override,
@@ -1256,6 +1263,7 @@ export const SettingsPage: React.FC = () => {
                   ),
                 }
               : {}),
+            ...buildFallbackPayload(data, dirtyFields),
           }
         : {};
 

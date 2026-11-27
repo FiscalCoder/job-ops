@@ -3,7 +3,7 @@ import { CodexAuthPanel } from "@client/components/CodexAuthPanel";
 import { GeminiCliSetupHint } from "@client/components/GeminiCliSetupHint";
 import { SubscriptionProviderHint } from "@client/components/subscription-logins/SubscriptionProviderHint";
 import { getDefaultModelForProvider } from "@shared/settings-registry";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SettingsInput } from "@/client/pages/settings/components/SettingsInput";
 import {
   formatSecretHint,
@@ -65,9 +65,12 @@ export default function FallbackProviderCard({
   const selectedProvider = hasProvider
     ? normalizeLlmProvider(provider)
     : undefined;
-  const providerConfig = selectedProvider
-    ? getLlmProviderConfig(selectedProvider)
-    : null;
+  // Fork fix: a fresh config object every render re-ran the model-list effect
+  // below forever (render loop + request storm) once a provider was set.
+  const providerConfig = useMemo(
+    () => (selectedProvider ? getLlmProviderConfig(selectedProvider) : null),
+    [selectedProvider],
+  );
   const isCodexProvider = providerConfig?.normalizedProvider === "codex";
   const isGeminiCliProvider =
     providerConfig?.normalizedProvider === "gemini_cli";
