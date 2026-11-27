@@ -295,6 +295,8 @@ function parseCliJsonOutput(stdout: string): {
 async function runClaudeCliOnce(args: {
   spawnFn: ClaudeCliSpawnFn;
   input: string;
+  /** Defaults to CLAUDE_CLI_SYSTEM_PROMPT. */
+  systemPrompt?: string;
   inputFormat: "text" | "stream-json";
   model: string | null;
   jsonSchema: JsonSchemaDefinition;
@@ -324,7 +326,10 @@ async function runClaudeCliOnce(args: {
   }
   procArgs.push("--json-schema", JSON.stringify(args.jsonSchema.schema));
   procArgs.push("--effort", args.effort, ...CLAUDE_CLI_ISOLATION_FLAGS);
-  procArgs.push("--system-prompt", CLAUDE_CLI_SYSTEM_PROMPT);
+  procArgs.push(
+    "--system-prompt",
+    args.systemPrompt ?? CLAUDE_CLI_SYSTEM_PROMPT,
+  );
 
   const shell = shouldSpawnClaudeViaWindowsShell(bin);
 
@@ -521,10 +526,21 @@ export class ClaudeCliClient {
         "CLAUDE_CLI_REQUEST_TIMEOUT_MS",
         DEFAULT_REQUEST_TIMEOUT_MS,
       );
-    const useStreamInput = hasImageInput(options.messages);
+    // Fork: system messages (e.g. the scoring rubric + profile) become the CLI's
+    // system prompt, which it caches, so later calls read them from cache.
+    const turns = options.messages.filter((m) => m.role !== "system");
+    const systemPrompt = [
+      CLAUDE_CLI_SYSTEM_PROMPT,
+      ...options.messages
+        .filter((m) => m.role === "system")
+        .map((m) => getLlmMessageText(m.content).trim()),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const useStreamInput = hasImageInput(turns);
     const input = useStreamInput
-      ? formatMessagesStreamInput(options.messages)
-      : formatMessagesPrompt(options.messages);
+      ? formatMessagesStreamInput(turns)
+      : formatMessagesPrompt(turns);
     const model = options.model?.trim() || null;
     try {
       const context = await this.resolveCallContext();
@@ -532,6 +548,7 @@ export class ClaudeCliClient {
         ...context,
         spawnFn: this.spawnFn,
         input,
+        systemPrompt,
         inputFormat: useStreamInput ? "stream-json" : "text",
         model,
         jsonSchema: options.jsonSchema,

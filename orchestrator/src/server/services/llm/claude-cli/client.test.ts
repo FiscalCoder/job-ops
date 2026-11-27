@@ -158,6 +158,25 @@ describe("ClaudeCliClient", () => {
     expect(stdinInput).toContain("Score this job please");
   });
 
+  it("sends system messages as the CLI system prompt so the CLI caches them", async () => {
+    const cli = mockCli({ stdout: successResult({ value: "x" }) });
+    await createClient(cli.spawnFn).callJson({
+      model: "claude-haiku-5-5",
+      messages: [
+        { role: "system", content: "RUBRIC AND PROFILE" },
+        { role: "user", content: "JOB DATA" },
+      ],
+      jsonSchema: SCHEMA,
+    });
+    const [, args] = spawnCall(cli.spawnFn);
+    expect(args[args.indexOf("--system-prompt") + 1]).toBe(
+      `${CLAUDE_CLI_SYSTEM_PROMPT}\n\nRUBRIC AND PROFILE`,
+    );
+    const stdinInput = cli.stdin.end.mock.calls[0]?.[0] as string;
+    expect(stdinInput).toContain("JOB DATA");
+    expect(stdinInput).not.toContain("RUBRIC AND PROFILE");
+  });
+
   it("defaults effort to medium", async () => {
     const cli = mockCli({ stdout: successResult({ value: "x" }) });
     await createClient(cli.spawnFn, {
