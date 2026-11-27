@@ -1,4 +1,5 @@
 import { LlmModelConfiguration } from "@client/components/llmmodelconfiguration/LlmModelConfiguration";
+import { AiRoutingSummary } from "@client/components/subscription-logins/AiRoutingSummary";
 import { ApiProvidersLockedNote } from "@client/components/subscription-logins/ApiProvidersLockedNote";
 import { SubscriptionLoginsPanel } from "@client/components/subscription-logins/SubscriptionLoginsPanel";
 import { useSubscriptionAccess } from "@client/components/subscription-logins/useSubscriptionAccess";
@@ -104,6 +105,7 @@ export const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
 
   return (
     <SettingsSectionFrame mode={layoutMode} title="Model" value="model">
+      <AiRoutingSummary />
       <SubscriptionLoginsPanel disabled={isSaving} />
       {lockApiProviderSettings ? <ApiProvidersLockedNote /> : null}
       <LlmModelConfiguration
