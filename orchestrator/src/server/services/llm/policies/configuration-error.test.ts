@@ -22,6 +22,36 @@ describe("isConfigurationFailure", () => {
     expect(isConfigurationFailure("Gemini CLI is not logged in")).toBe(true);
   });
 
+  it.each([
+    "Claude subscription is not logged in. Connect your Claude subscription in Settings → AI provider.",
+    "Login expired · Please run /login",
+    "Your login reached its time limit. Please run /login",
+    "Invalid API key · Please run /login",
+    'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}',
+    "OAuth token revoked",
+    "Invalid bearer token",
+    "Claude login expired on 2027-11-27. Reconnect your Claude subscription in Settings → AI provider.",
+  ])("flags Claude subscription login failures: %s", (message) => {
+    expect(isConfigurationFailure(message)).toBe(true);
+  });
+
+  it.each([
+    "API Error: 401 something",
+    '{"type":"error","error":{"type":"authentication_error"}}',
+    "Failed to parse JSON response: the posting says API Error: 401",
+  ])("only trusts 401/authentication_error from the CLI error field: %s", (message) => {
+    expect(isConfigurationFailure(message)).toBe(false);
+  });
+
+  it("does not flag Claude usage limits as configuration", () => {
+    expect(
+      isConfigurationFailure("Claude AI usage limit reached|1764252000"),
+    ).toBe(false);
+    expect(isConfigurationFailure("You've hit your limit · resets 5pm")).toBe(
+      false,
+    );
+  });
+
   it("does not flag transient provider faults", () => {
     expect(isConfigurationFailure("No content in response")).toBe(false);
     expect(isConfigurationFailure("Rate limit exceeded")).toBe(false);

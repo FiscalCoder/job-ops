@@ -207,6 +207,40 @@ describe("LlmService provider normalization", () => {
     expect(codexCallSpy).toHaveBeenCalledTimes(2);
   });
 
+  it("reports a codex usage limit as 429 only when the client tagged it", async () => {
+    const { CodexCliError } = await import("./codex/errors");
+    const schema = {
+      name: "test",
+      schema: {
+        type: "object" as const,
+        properties: { value: { type: "string" } },
+        required: ["value"],
+        additionalProperties: false,
+      },
+    };
+    vi.spyOn(CodexClient.prototype, "callJson").mockRejectedValueOnce(
+      new CodexCliError("You've hit your usage limit.", 429),
+    );
+    const limited = await new LlmService({ provider: "codex" }).callJson({
+      model: "",
+      messages: [{ role: "user", content: "x" }],
+      jsonSchema: schema,
+    });
+    expect(limited).toMatchObject({ success: false, status: 429 });
+
+    vi.spyOn(CodexClient.prototype, "callJson").mockResolvedValueOnce({
+      text: "The job text says usage limit reached and rate limit 429",
+      turnId: "turn-1",
+    });
+    const parseFailure = await new LlmService({ provider: "codex" }).callJson({
+      model: "",
+      messages: [{ role: "user", content: "x" }],
+      jsonSchema: schema,
+    });
+    expect(parseFailure.success).toBe(false);
+    expect(parseFailure).not.toHaveProperty("status");
+  });
+
   it("delegates codex credential validation to the codex client", async () => {
     const validateSpy = vi
       .spyOn(CodexClient.prototype, "validateCredentials")

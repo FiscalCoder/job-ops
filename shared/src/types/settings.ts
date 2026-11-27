@@ -255,6 +255,8 @@ export interface AppSettings {
   llmProvider: Resolved<string>;
   llmBaseUrl: Resolved<string>;
   llmPurposeOverrides: Resolved<LlmPurposeOverrides>;
+  claudeCliEffort: Resolved<"low" | "medium" | "high">;
+  subscriptionFallback: Resolved<boolean>;
   llmFallbackEnabled: Resolved<boolean>;
   llmFallbackProvider: Resolved<string>;
   llmFallbackModel: Resolved<string>;

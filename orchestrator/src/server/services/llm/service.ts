@@ -5,6 +5,7 @@ import { resolveLlmApiKey } from "@server/services/llm/credentials";
 import { mapGlmProviderAlias } from "@shared/settings-registry";
 import { toStringOrNull } from "@shared/utils/type-conversion";
 import { ClaudeCliClient } from "./claude-cli/client";
+import { getLlmErrorStatus } from "./claude-cli/errors";
 import { CodexClient } from "./codex/client";
 import { GeminiCliClient } from "./gemini-cli/client";
 import {
@@ -357,7 +358,14 @@ export class LlmService {
           continue;
         }
 
-        return { success: false, error: message };
+        // Fork: a ChatGPT plan usage limit (tagged by the Codex client from
+        // its own error fields) is reported as 429 for fallback.
+        const status = getLlmErrorStatus(error);
+        return {
+          success: false,
+          error: message,
+          ...(status !== undefined ? { status } : {}),
+        };
       }
     }
 
@@ -441,7 +449,13 @@ export class LlmService {
           continue;
         }
 
-        return { success: false, error: message };
+        // Fork: CLI usage limits carry status 429 so fallback logic sees them.
+        const status = getLlmErrorStatus(error);
+        return {
+          success: false,
+          error: message,
+          ...(status !== undefined ? { status } : {}),
+        };
       }
     }
 

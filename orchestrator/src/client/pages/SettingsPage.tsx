@@ -6,6 +6,7 @@ import {
   SectionWorkspacePanel,
   sectionWorkspaceItemMatchesSearch,
 } from "@client/components/section-workspace/SectionWorkspace";
+import { useSubscriptionSectionBadge } from "@client/components/subscription-logins/useSubscriptionSectionBadge";
 import { useUpdateSettingsMutation } from "@client/hooks/queries/useSettingsMutation";
 import { useRxResumeConfigState } from "@client/hooks/useRxResumeConfigState";
 import { useTracerReadiness } from "@client/hooks/useTracerReadiness";
@@ -904,6 +905,7 @@ export const SettingsPage: React.FC = () => {
     enabled: currentUserQuery.data?.isSystemAdmin === true,
   });
   const updateSettingsMutation = useUpdateSettingsMutation();
+  const subscriptionSectionBadge = useSubscriptionSectionBadge();
   const isLoading = settingsQuery.isLoading;
   const backups = backupsQuery.data?.backups ?? [];
   const nextScheduled = backupsQuery.data?.nextScheduled ?? null;
@@ -1629,6 +1631,7 @@ export const SettingsPage: React.FC = () => {
             }
           : null;
       case "model":
+        if (subscriptionSectionBadge) return subscriptionSectionBadge;
         return model.llmProvider
           ? { label: "Configured", variant: "outline" as const }
           : { label: "Using defaults", variant: "secondary" as const };

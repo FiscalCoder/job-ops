@@ -18,6 +18,26 @@ vi.mock("node:child_process", () => ({
   },
 }));
 
+const { scopeState } = vi.hoisted(() => ({
+  scopeState: { key: "user-a" },
+}));
+
+vi.mock("../subscription-auth/scope", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../subscription-auth/scope")>();
+  return {
+    ...actual,
+    getCliAuthScope: () => ({
+      scopeKey: scopeState.key,
+      baseDir: `/scopes/${scopeState.key}`,
+      claudeDir: `/scopes/${scopeState.key}/claude`,
+      codexHome: `/scopes/${scopeState.key}/codex`,
+      homeDir: `/scopes/${scopeState.key}/home`,
+      workDir: `/scopes/${scopeState.key}/work`,
+    }),
+  };
+});
+
 type JsonRpcRequest = {
   id: number | string;
   method: string;
@@ -95,6 +115,37 @@ describe("CodexClient", () => {
   afterEach(async () => {
     await __resetCodexSharedSessionForTests();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    scopeState.key = "user-a";
+  });
+
+  it("runs a separate app-server per user with that user's CODEX_HOME", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "server-key");
+    const spawnCallsBefore = vi.mocked(spawn).mock.calls.length;
+    mockSpawn((request, helpers) => {
+      if (request.method === "getAuthStatus") {
+        helpers.respond({ authMethod: "chatgpt", requiresOpenaiAuth: true });
+        return;
+      }
+      helpers.respond({});
+    });
+
+    const client = new CodexClient();
+    scopeState.key = "user-a";
+    await client.validateCredentials();
+    await client.validateCredentials();
+    scopeState.key = "user-b";
+    await client.validateCredentials();
+
+    const calls = vi.mocked(spawn).mock.calls.slice(spawnCallsBefore);
+    expect(calls).toHaveLength(2);
+    const [first, second] = calls.map(
+      (call) => call[2] as { cwd: string; env: NodeJS.ProcessEnv },
+    );
+    expect(first?.env.CODEX_HOME).toBe("/scopes/user-a/codex");
+    expect(first?.cwd).toBe("/scopes/user-a/work");
+    expect(second?.env.CODEX_HOME).toBe("/scopes/user-b/codex");
+    expect(first?.env.OPENAI_API_KEY).toBeUndefined();
   });
 
   it("creates an ephemeral thread, waits for completion, and returns assistant text", async () => {
@@ -174,6 +225,47 @@ describe("CodexClient", () => {
     expect(response.text).toContain('"score":99');
     expect(response.turnId).toBe("turn-1");
     expect(threadReadCalls).toBe(0);
+  });
+
+  it.each([
+    [{ message: "You've hit your usage limit. Try again at 5 PM." }, 429],
+    [{ message: "turn failed", codexErrorInfo: "usageLimitExceeded" }, 429],
+    [{ message: "The job ad says rate limit 429 and usage limit" }, undefined],
+  ])("tags a failed turn from the CLI error field %#", async (turnError, expected) => {
+    mockSpawn((request, helpers) => {
+      if (request.method === "thread/start") {
+        helpers.respond({ thread: { id: "thread-1" } });
+        return;
+      }
+      if (request.method === "turn/start") {
+        helpers.respond({ turn: { id: "turn-1" } });
+        helpers.notify("turn/completed", {
+          threadId: "thread-1",
+          turn: { id: "turn-1", status: "failed", error: turnError },
+        });
+        return;
+      }
+      helpers.respond({});
+    });
+
+    const error = await new CodexClient()
+      .callJson({
+        model: "",
+        messages: [{ role: "user", content: "x" }],
+        jsonSchema: {
+          name: "t",
+          schema: {
+            type: "object",
+            properties: {},
+            required: [],
+            additionalProperties: false,
+          },
+        },
+      } as LlmRequestOptions<unknown>)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as { status?: number }).status).toBe(expected);
   });
 
   it("reports missing auth as an invalid credential state", async () => {

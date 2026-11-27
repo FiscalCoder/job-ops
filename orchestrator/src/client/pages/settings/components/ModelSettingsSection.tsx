@@ -1,4 +1,7 @@
 import { LlmModelConfiguration } from "@client/components/llmmodelconfiguration/LlmModelConfiguration";
+import { ApiProvidersLockedNote } from "@client/components/subscription-logins/ApiProvidersLockedNote";
+import { SubscriptionLoginsPanel } from "@client/components/subscription-logins/SubscriptionLoginsPanel";
+import { useSubscriptionAccess } from "@client/components/subscription-logins/useSubscriptionAccess";
 import { SettingsSectionFrame } from "@client/pages/settings/components/SettingsSectionFrame";
 import type { ModelValues } from "@client/pages/settings/types";
 import {
@@ -32,6 +35,8 @@ export const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
     watch("llmProvider") || values.llmProvider || "openrouter",
   );
   const disabled = isLoading || isSaving;
+  // Fork: non-admins may only use their own subscriptions (see panel below).
+  const { lockApiProviderSettings } = useSubscriptionAccess();
 
   const setStringField = (
     field: keyof Pick<
@@ -99,9 +104,11 @@ export const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
 
   return (
     <SettingsSectionFrame mode={layoutMode} title="Model" value="model">
+      <SubscriptionLoginsPanel disabled={isSaving} />
+      {lockApiProviderSettings ? <ApiProvidersLockedNote /> : null}
       <LlmModelConfiguration
         mode="settings"
-        disabled={disabled}
+        disabled={disabled || lockApiProviderSettings}
         selectedProvider={selectedProvider}
         savedProvider={values.llmProvider}
         savedBaseUrl={values.llmBaseUrl}

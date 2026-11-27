@@ -1,9 +1,9 @@
 import * as api from "@client/api";
-import { ClaudeCliSetupHint } from "@client/components/ClaudeCliSetupHint";
 import { CodexAuthPanel } from "@client/components/CodexAuthPanel";
 import { GeminiCliSetupHint } from "@client/components/GeminiCliSetupHint";
 import FallbackProviderCard from "@client/components/llmmodelconfiguration/FallbackProviderCard";
 import PurposeOverrideCard from "@client/components/llmmodelconfiguration/PurposeOverrideCard";
+import { SubscriptionProviderHint } from "@client/components/subscription-logins/SubscriptionProviderHint";
 import { SettingsInput } from "@client/pages/settings/components/SettingsInput";
 import {
   formatSecretHint,
@@ -353,14 +353,21 @@ export function LlmModelConfiguration({
               ) : null}
               <p className={providerHintClass}>{providerConfig.providerHint}</p>
             </div>
-            {isCodexProvider ? (
+            {isCodexProvider && mode === "settings" ? (
+              <SubscriptionProviderHint provider="codex" />
+            ) : isCodexProvider ? (
               <CodexAuthPanel
                 isBusy={disabled}
                 onStatusChange={onCodexAuthStatusChange}
               />
             ) : null}
             {isGeminiCliProvider ? <GeminiCliSetupHint /> : null}
-            {isClaudeCliProvider ? <ClaudeCliSetupHint /> : null}
+            {isClaudeCliProvider ? (
+              <SubscriptionProviderHint
+                provider="claude"
+                variant={mode === "settings" ? "link" : "inline"}
+              />
+            ) : null}
             {showBaseUrl ? (
               <SettingsInput
                 label={mode === "compact" ? "Base URL" : "LLM base URL"}
@@ -460,6 +467,7 @@ export function LlmModelConfiguration({
         <>
           <Separator />
           <FallbackProviderCard
+            mode={mode}
             enabled={fallback.enabled}
             provider={fallback.provider}
             baseUrl={fallback.baseUrl}

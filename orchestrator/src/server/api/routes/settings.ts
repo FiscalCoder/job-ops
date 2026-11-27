@@ -27,6 +27,7 @@ import {
 import { resolveLlmApiKey } from "@server/services/llm/credentials";
 import { isHostedLocalProvider } from "@server/services/llm/hosted-policy";
 import { LlmService } from "@server/services/llm/service";
+import { getCliAuthScope } from "@server/services/llm/subscription-auth/scope";
 import { clearProfileCache } from "@server/services/profile";
 import {
   clearRxResumeResumeCache,
@@ -50,6 +51,10 @@ import {
 } from "@shared/settings-schema";
 import { LLM_PURPOSE_VALUES, type LlmPurpose } from "@shared/types";
 import { type Request, type Response, Router } from "express";
+import {
+  enforceNonAdminSubscriptionRules,
+  isNonAdminSubscriptionSettingsUpdate,
+} from "./settings-subscription-gate";
 
 export const settingsRouter = Router();
 
@@ -95,12 +100,6 @@ const NON_ADMIN_SEARCH_SETTING_KEYS = new Set<keyof UpdateSettingsInput>([
   "jobspyLocation",
 ]);
 
-function requireSystemAdmin(res: Response): boolean {
-  if (getJobOpsAppConfig().appMode === "hosted" || isSystemAdmin()) return true;
-  fail(res, forbidden("System admin access is required"));
-  return false;
-}
-
 function requireSystemAdminOrSearchSettings(
   res: Response,
   input: UpdateSettingsInput,
@@ -110,7 +109,8 @@ function requireSystemAdminOrSearchSettings(
     isSystemAdmin() ||
     Object.keys(input).every((key) =>
       NON_ADMIN_SEARCH_SETTING_KEYS.has(key as keyof UpdateSettingsInput),
-    )
+    ) ||
+    isNonAdminSubscriptionSettingsUpdate(input, NON_ADMIN_SEARCH_SETTING_KEYS)
   ) {
     return true;
   }
@@ -231,19 +231,26 @@ function getDefaultValidationBaseUrl(
 }
 
 const CODEX_AUTH_VALIDATION_TTL_MS = 5_000;
-let codexValidationCache: {
-  value: { valid: boolean; message: string | null; username?: string | null };
-  expiresAtMs: number;
-} | null = null;
-let codexValidationInFlight: Promise<{
+type CodexValidation = {
   valid: boolean;
   message: string | null;
   username?: string | null;
-}> | null = null;
+};
+// Fork: Codex logins are per user, so validation results are cached per user.
+const codexValidationCache = new Map<
+  string,
+  { value: CodexValidation; expiresAtMs: number }
+>();
+const codexValidationInFlight = new Map<string, Promise<CodexValidation>>();
+
+function codexValidationKey(): string {
+  return getCliAuthScope().scopeKey;
+}
 
 function clearCodexValidationCache(): void {
-  codexValidationCache = null;
-  codexValidationInFlight = null;
+  const key = codexValidationKey();
+  codexValidationCache.delete(key);
+  codexValidationInFlight.delete(key);
 }
 
 async function validateCodexCredentials(): Promise<{
@@ -259,28 +266,31 @@ async function getCachedCodexValidation(): Promise<{
   message: string | null;
   username?: string | null;
 }> {
-  const now = Date.now();
-  if (codexValidationCache && codexValidationCache.expiresAtMs > now) {
-    return codexValidationCache.value;
+  const key = codexValidationKey();
+  const cached = codexValidationCache.get(key);
+  if (cached && cached.expiresAtMs > Date.now()) {
+    return cached.value;
   }
 
-  if (codexValidationInFlight) {
-    return await codexValidationInFlight;
+  const inFlight = codexValidationInFlight.get(key);
+  if (inFlight) {
+    return await inFlight;
   }
 
-  codexValidationInFlight = (async () => {
+  const pending = (async () => {
     const validation = await validateCodexCredentials();
-    codexValidationCache = {
+    codexValidationCache.set(key, {
       value: validation,
       expiresAtMs: Date.now() + CODEX_AUTH_VALIDATION_TTL_MS,
-    };
+    });
     return validation;
   })();
+  codexValidationInFlight.set(key, pending);
 
   try {
-    return await codexValidationInFlight;
+    return await pending;
   } finally {
-    codexValidationInFlight = null;
+    codexValidationInFlight.delete(key);
   }
 }
 
@@ -439,6 +449,7 @@ settingsRouter.patch(
 
     const input = updateSettingsSchema.parse(req.body);
     if (!requireSystemAdminOrSearchSettings(res, input)) return;
+    await enforceNonAdminSubscriptionRules(input);
     if (LLM_SETTING_KEYS.some((key) => hasInputKey(input, key))) {
       await assertLlmSettingsEditable();
       assertHostedLlmInputAllowed(input);
@@ -590,7 +601,7 @@ settingsRouter.get(
 settingsRouter.post(
   "/codex-auth/start",
   asyncRoute(async (req: Request, res: Response) => {
-    if (!requireSystemAdmin(res)) return;
+    // Fork: Codex logins are per user (own CODEX_HOME), so no admin gate.
 
     if (isDemoMode()) {
       fail(
@@ -630,7 +641,7 @@ settingsRouter.post(
 settingsRouter.post(
   "/codex-auth/disconnect",
   asyncRoute(async (_req: Request, res: Response) => {
-    if (!requireSystemAdmin(res)) return;
+    // Fork: signs out only the caller's own Codex login.
 
     if (isDemoMode()) {
       return sendDemoBlocked(

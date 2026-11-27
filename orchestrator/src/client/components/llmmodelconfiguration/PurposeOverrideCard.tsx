@@ -1,7 +1,6 @@
 import * as api from "@client/api";
-import { ClaudeCliSetupHint } from "@client/components/ClaudeCliSetupHint";
-import { CodexAuthPanel } from "@client/components/CodexAuthPanel";
 import { GeminiCliSetupHint } from "@client/components/GeminiCliSetupHint";
+import { SubscriptionProviderHint } from "@client/components/subscription-logins/SubscriptionProviderHint";
 import { getDefaultModelForProvider } from "@shared/settings-registry";
 import type {
   LlmProviderId,
@@ -210,13 +209,13 @@ export default function PurposeOverrideCard({
       </div>
 
       {hasProviderOverride && isCodexProvider ? (
-        <CodexAuthPanel isBusy={disabled} />
+        <SubscriptionProviderHint provider="codex" />
       ) : null}
       {hasProviderOverride && isGeminiCliProvider ? (
         <GeminiCliSetupHint />
       ) : null}
       {hasProviderOverride && isClaudeCliProvider ? (
-        <ClaudeCliSetupHint />
+        <SubscriptionProviderHint provider="claude" />
       ) : null}
 
       {hasProviderOverride && providerConfig.showBaseUrl ? (

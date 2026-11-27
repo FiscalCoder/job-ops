@@ -42,6 +42,22 @@ vi.mock("../progress", () => ({
   },
 }));
 
+const { beforeScoreMock, resolveScoringPlanMock } = vi.hoisted(() => {
+  const beforeScore = vi.fn(async () => undefined);
+  return {
+    beforeScoreMock: beforeScore,
+    resolveScoringPlanMock: vi.fn(async () => ({
+      concurrency: 4,
+      throttled: false,
+      beforeScore,
+    })),
+  };
+});
+
+vi.mock("./cli-scoring", () => ({
+  resolveScoringPlan: resolveScoringPlanMock,
+}));
+
 describe("scoreJobsStep auto-skip behavior", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -382,9 +398,7 @@ describe("scoreJobsStep auto-skip behavior", () => {
       "job-junior",
       expect.objectContaining({
         suitabilityScore: 0,
-        suitabilityReason: expect.stringContaining(
-          'blocked keyword "junior"',
-        ),
+        suitabilityReason: expect.stringContaining('blocked keyword "junior"'),
         status: "skipped",
       }),
     );
@@ -555,7 +569,6 @@ describe("scoreJobsStep auto-skip behavior", () => {
     expect(vi.mocked(jobsRepo.updateJob)).not.toHaveBeenCalled();
   });
 
-
   it("stops before processing when cancellation is requested", async () => {
     const jobsRepo = await import("@server/repositories/jobs");
     const scorer = await import("@server/services/scorer");
@@ -577,5 +590,42 @@ describe("scoreJobsStep auto-skip behavior", () => {
     expect(result.scoredJobs).toHaveLength(0);
     expect(vi.mocked(scorer.scoreJobSuitability)).not.toHaveBeenCalled();
     expect(vi.mocked(jobsRepo.updateJob)).not.toHaveBeenCalled();
+  });
+
+  it("waits on the scoring throttle only before real LLM calls", async () => {
+    const jobsRepo = await import("@server/repositories/jobs");
+    vi.mocked(jobsRepo.getUnscoredDiscoveredJobs).mockResolvedValue([
+      createJob({ id: "job-1", title: "Engineer", suitabilityScore: null }),
+      createJob({ id: "job-2", title: "Engineer II", suitabilityScore: null }),
+      createJob({ id: "job-3", title: "Cached", suitabilityScore: 70 }),
+    ]);
+
+    await scoreJobsStep({ profile: {} });
+
+    expect(resolveScoringPlanMock).toHaveBeenCalledOnce();
+    expect(beforeScoreMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("pauses before scoring when the subscription preflight fails", async () => {
+    const scorer = await import("@server/services/scorer");
+    resolveScoringPlanMock.mockRejectedValueOnce(
+      new scorer.LlmNotConfiguredError(
+        "Your Claude login is missing or expired — connect it in Settings, then Resume.",
+      ),
+    );
+
+    await expect(scoreJobsStep({ profile: {} })).rejects.toThrow(
+      /Claude login is missing/,
+    );
+    expect(vi.mocked(scorer.scoreJobSuitability)).not.toHaveBeenCalled();
+  });
+
+  it("skips the preflight when nothing needs scoring", async () => {
+    const jobsRepo = await import("@server/repositories/jobs");
+    vi.mocked(jobsRepo.getUnscoredDiscoveredJobs).mockResolvedValue([]);
+
+    await scoreJobsStep({ profile: {} });
+
+    expect(resolveScoringPlanMock).not.toHaveBeenCalled();
   });
 });

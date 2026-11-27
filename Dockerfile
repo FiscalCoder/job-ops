@@ -14,7 +14,7 @@ ENV CODEX_HOME=/app/codex-home
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ENV PATH=/root/.local/bin:${PATH}
 ARG CODEX_CLI_VERSION=0.144.6
-ARG CLAUDE_CLI_VERSION=2.1.211
+ARG CLAUDE_CLI_VERSION=2.1.332
 
 # Install runtime dependencies shared by build and production stages.
 RUN apt-get update && apt-get install -y --no-install-recommends \

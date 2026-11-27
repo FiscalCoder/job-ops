@@ -1,7 +1,7 @@
 import * as api from "@client/api";
-import { ClaudeCliSetupHint } from "@client/components/ClaudeCliSetupHint";
 import { CodexAuthPanel } from "@client/components/CodexAuthPanel";
 import { GeminiCliSetupHint } from "@client/components/GeminiCliSetupHint";
+import { SubscriptionProviderHint } from "@client/components/subscription-logins/SubscriptionProviderHint";
 import { getDefaultModelForProvider } from "@shared/settings-registry";
 import { useEffect, useState } from "react";
 import { SettingsInput } from "@/client/pages/settings/components/SettingsInput";
@@ -33,6 +33,7 @@ import ModelField from "./ModelField";
  * it shows up in both onboarding's model step and the Settings LLM section.
  */
 export default function FallbackProviderCard({
+  mode = "settings",
   enabled,
   provider,
   baseUrl,
@@ -46,6 +47,7 @@ export default function FallbackProviderCard({
   onModelChange,
   onApiKeyChange,
 }: {
+  mode?: "compact" | "settings";
   enabled: boolean;
   provider: string;
   baseUrl: string;
@@ -213,11 +215,18 @@ export default function FallbackProviderCard({
             </SelectContent>
           </Select>
 
-          {hasProvider && isCodexProvider ? (
+          {hasProvider && isCodexProvider && mode === "settings" ? (
+            <SubscriptionProviderHint provider="codex" />
+          ) : hasProvider && isCodexProvider ? (
             <CodexAuthPanel isBusy={disabled} />
           ) : null}
           {hasProvider && isGeminiCliProvider ? <GeminiCliSetupHint /> : null}
-          {hasProvider && isClaudeCliProvider ? <ClaudeCliSetupHint /> : null}
+          {hasProvider && isClaudeCliProvider ? (
+            <SubscriptionProviderHint
+              provider="claude"
+              variant={mode === "settings" ? "link" : "inline"}
+            />
+          ) : null}
 
           {hasProvider && providerConfig?.showBaseUrl ? (
             <SettingsInput

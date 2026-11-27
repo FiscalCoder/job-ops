@@ -215,6 +215,25 @@ describe.sequential("Auth read-only enforcement", () => {
     });
   });
 
+  it.each([
+    ["GET", "/api/llm-auth/status"],
+    ["POST", "/api/llm-auth/claude/test"],
+  ])("keeps subscription login routes behind auth in demo mode (%s %s)", async (method, path) => {
+    process.env.DEMO_MODE = "true";
+    vi.mocked(countUsers).mockResolvedValue(0);
+
+    const { middleware } = createAuthGuard();
+    const req = createMockRequest({ method, path });
+    const res = createMockResponse();
+    const next = vi.fn() as NextFunction;
+
+    middleware(req, res, next);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(401);
+  });
+
   it("allows OPTIONS preflight without auth even for API routes", async () => {
     vi.mocked(countUsers).mockResolvedValue(1);
 

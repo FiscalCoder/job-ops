@@ -273,6 +273,8 @@ export function createAuthGuard() {
     if (normalizedPath.startsWith("/api/auth/sso/")) return true;
     if (normalizedPath.startsWith("/api/workspaces")) return true;
     if (normalizedPath === "/api/settings/codex-auth") return true;
+    // Fork: per-user subscription logins always need a real signed-in user.
+    if (normalizedPath.startsWith("/api/llm-auth")) return true;
     if (normalizedPath === "/api/settings/rx-resumes") return true;
     if (/^\/api\/settings\/rx-resumes\/[^/]+\/projects$/.test(normalizedPath)) {
       return true;

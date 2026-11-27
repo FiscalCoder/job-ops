@@ -5,6 +5,7 @@
 import { logger } from "@infra/logger";
 import type { ResumeProfile } from "@shared/types";
 import { stripHtmlTags } from "@shared/utils/string";
+import { callJsonWithSubscriptionRecovery } from "./llm/subscription-fallback";
 import type { JsonSchemaDefinition } from "./llm/types";
 import { createConfiguredLlmService, resolveLlmModel } from "./modelSelection";
 import {
@@ -94,7 +95,7 @@ export async function generateTailoring(
   );
 
   const llm = await createConfiguredLlmService("tailoring");
-  const result = await llm.callJson<TailoredData>({
+  const result = await callJsonWithSubscriptionRecovery<TailoredData>(llm, {
     model,
     messages: [{ role: "user", content: prompt }],
     jsonSchema: TAILORING_SCHEMA,

@@ -10,10 +10,19 @@ import * as visaSponsors from "@server/services/visa-sponsors/index";
 import { asyncPool } from "@server/utils/async-pool";
 import type { Job } from "@shared/types";
 import { progressHelpers, updateProgress } from "../progress";
-import { findMatchingKeyword, parseKeywordListSetting } from "./keyword-filters";
+import { resolveScoringPlan, type ScoringPlan } from "./cli-scoring";
+import {
+  findMatchingKeyword,
+  parseKeywordListSetting,
+} from "./keyword-filters";
 import type { ScoredJob } from "./types";
 
 const SCORING_CONCURRENCY = 4;
+const IDLE_SCORING_PLAN: ScoringPlan = {
+  concurrency: SCORING_CONCURRENCY,
+  throttled: false,
+  beforeScore: async () => undefined,
+};
 
 /**
  * A lone job failing transiently should not stop the run, but when this many
@@ -51,9 +60,7 @@ export async function scoreJobsStep(args: {
   const blockedTitleKeywords = parseKeywordListSetting(
     blockedTitleKeywordsRaw ?? undefined,
   );
-  const rejectionPhrasesRaw = await settingsRepo.getSetting(
-    "rejectionPhrases",
-  );
+  const rejectionPhrasesRaw = await settingsRepo.getSetting("rejectionPhrases");
   const rejectionPhrases = parseKeywordListSetting(
     rejectionPhrasesRaw ?? undefined,
   );
@@ -73,10 +80,14 @@ export async function scoreJobsStep(args: {
   let exceptional = 0;
   let failed = 0;
   const scoringInstructions = args.scoringInstructions?.trim();
+  // Fork: subscription CLIs get a login preflight (pauses the run) and a
+  // gentler, spaced-out pool; API providers keep the default plan.
+  const plan =
+    unprocessedJobs.length > 0 ? await resolveScoringPlan() : IDLE_SCORING_PLAN;
 
   await asyncPool({
     items: unprocessedJobs,
-    concurrency: SCORING_CONCURRENCY,
+    concurrency: plan.concurrency,
     shouldStop: args.shouldCancel,
     task: async (job) => {
       if (args.shouldCancel?.()) return;
@@ -150,6 +161,9 @@ export async function scoreJobsStep(args: {
         });
         return;
       }
+
+      await plan.beforeScore();
+      if (args.shouldCancel?.()) return;
 
       const scoringResultPromise = args.hostedUsageReserved
         ? scoreJobSuitability(
@@ -264,7 +278,8 @@ export async function scoreJobsStep(args: {
   logger.info("Scoring step completed", {
     scoredJobs: scoredJobs.length,
     failedJobs: failed,
-    concurrency: SCORING_CONCURRENCY,
+    concurrency: plan.concurrency,
+    throttled: plan.throttled,
   });
 
   return { unprocessedJobs, scoredJobs };

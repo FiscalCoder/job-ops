@@ -5,6 +5,7 @@ import { getCurrentAccountEntitlements } from "@server/services/account-entitlem
 import { getOriginalEnvValue } from "@server/services/envSettings";
 import {
   getDefaultModelForProvider,
+  getDefaultPurposeModelForProvider,
   settingsRegistry,
 } from "@shared/settings-registry";
 import {
@@ -327,10 +328,13 @@ export async function getEffectiveSettings(): Promise<AppSettings> {
       ).find(([, modelKey]) => modelKey === key)?.[0];
       const purposeOverride = purpose ? purposeOverrides[purpose] : undefined;
       const purposeProvider = purposeOverride?.provider ?? effectiveLlmProvider;
+      // Fork: some providers default a purpose to its own model (Claude
+      // subscription scoring → Haiku) before the general model applies.
       const purposeModelDefault =
-        purposeProvider === effectiveLlmProvider
+        getDefaultPurposeModelForProvider(purpose, purposeProvider) ??
+        (purposeProvider === effectiveLlmProvider
           ? modelValue
-          : getDefaultModelForProvider(purposeProvider);
+          : getDefaultModelForProvider(purposeProvider));
       const override =
         normalizeModelForProviderCompatibility(
           purposeProvider,

@@ -1,12 +1,26 @@
-import { getLlmModels } from "@client/api";
+import {
+  getAppStatus,
+  getCodexAuthStatus,
+  getCurrentAuthUser,
+  getLlmModels,
+} from "@client/api";
+import { getLlmAuthStatus } from "@client/api/llm-auth";
+import { renderWithQueryClient } from "@client/test/renderWithQueryClient";
 import {
   act,
   fireEvent,
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  connectedClaude,
+  localAppStatus,
+  makeStatus,
+  signedInUser,
+} from "../subscription-logins/subscription-test-fixtures";
 import { LlmModelConfiguration } from "./LlmModelConfiguration";
 
 vi.mock("@client/api", () => ({
@@ -26,6 +40,12 @@ vi.mock("@client/api", () => ({
   }),
   getLlmModels: vi.fn().mockResolvedValue([]),
   startCodexAuth: vi.fn(),
+  getAppStatus: vi.fn(),
+  getCurrentAuthUser: vi.fn(),
+}));
+
+vi.mock("@client/api/llm-auth", () => ({
+  getLlmAuthStatus: vi.fn(),
 }));
 
 // jsdom has no measured list viewport; keep real dropdown behavior and render its small option set.
@@ -54,8 +74,64 @@ const textField = {
 describe("LlmModelConfiguration", () => {
   beforeEach(() => {
     vi.mocked(getLlmModels).mockReset().mockResolvedValue([]);
+    vi.mocked(getAppStatus).mockResolvedValue(localAppStatus);
+    vi.mocked(getCurrentAuthUser).mockResolvedValue(signedInUser);
+    vi.mocked(getLlmAuthStatus).mockResolvedValue(
+      makeStatus({ claude: connectedClaude }),
+    );
     textField.onChange.mockClear();
   });
+
+  describe("subscription providers", () => {
+    const renderWith = (
+      mode: "compact" | "settings",
+      selectedProvider: "claude_cli" | "codex",
+    ) =>
+      renderWithQueryClient(
+        <LlmModelConfiguration
+          mode={mode}
+          disabled={false}
+          selectedProvider={selectedProvider}
+          provider={textField}
+          baseUrl={textField}
+          apiKey={textField}
+          model={textField}
+        />,
+      );
+
+    it("shows a Claude status line linking to Subscription logins in settings", async () => {
+      renderWith("settings", "claude_cli");
+      const hint = await screen.findByTestId("subscription-hint-claude");
+      expect(
+        await within(hint).findByText(/^Connected · expires/),
+      ).toBeInTheDocument();
+      expect(
+        within(hint).getByRole("link", {
+          name: /manage in subscription logins/i,
+        }),
+      ).toHaveAttribute("href", "/settings#model");
+      expect(
+        screen.queryByText("Claude CLI on this machine"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders the Claude login card inline during onboarding", async () => {
+      renderWith("compact", "claude_cli");
+      expect(
+        await screen.findByTestId("claude-subscription-card"),
+      ).toBeInTheDocument();
+    });
+
+    it("does not mount a second Codex login UI in settings", async () => {
+      renderWith("settings", "codex");
+      expect(
+        await screen.findByTestId("subscription-hint-codex"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Codex Sign-In")).not.toBeInTheDocument();
+      expect(getCodexAuthStatus).not.toHaveBeenCalled();
+    });
+  });
+
   it("does not render an LLM API key affordance for Codex in compact mode", async () => {
     render(
       <LlmModelConfiguration

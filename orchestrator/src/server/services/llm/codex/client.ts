@@ -4,16 +4,23 @@ import { join } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import { logger } from "@infra/logger";
 import {
+  buildCliEnv,
+  type CliAuthScope,
+  getCliAuthScope,
+} from "../subscription-auth/scope";
+import {
   getLlmMessageText,
   type JsonSchemaDefinition,
   type LlmRequestOptions,
 } from "../types";
 import { truncate } from "../utils/string";
+import { codexErrorFromCli } from "./errors";
+import { createScopedSessionPool } from "./session-pool";
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_TURN_TIMEOUT_MS = 120_000;
-const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
+const DEFAULT_IDLE_TIMEOUT_MS = 600_000;
 const MAX_STDERR_LINES = 40;
 const FALLBACK_CLIENT_VERSION = "dev";
 
@@ -306,12 +313,13 @@ class CodexAppServerSession {
   static async start(args: {
     signal?: AbortSignal;
     startupTimeoutMs?: number;
+    scope: CliAuthScope;
   }): Promise<CodexAppServerSession> {
     const command = process.env.CODEX_APP_SERVER_BIN?.trim() || "codex";
     const proc = spawn(command, ["app-server", "--listen", "stdio://"], {
       stdio: "pipe",
-      cwd: process.cwd(),
-      env: process.env,
+      cwd: args.scope.workDir,
+      env: buildCliEnv(args.scope),
     });
     const session = new CodexAppServerSession(proc);
 
@@ -585,7 +593,7 @@ class CodexAppServerSession {
     if (response.error) {
       const message =
         response.error.message || "Unknown Codex app-server request error.";
-      pending.reject(new Error(truncate(message, 500)));
+      pending.reject(codexErrorFromCli(truncate(message, 500)));
       return;
     }
     pending.resolve(response.result);
@@ -645,102 +653,46 @@ class CodexAppServerSession {
   }
 }
 
-let sharedSession: CodexAppServerSession | null = null;
-let startupPromise: Promise<CodexAppServerSession> | null = null;
-let idleTimer: NodeJS.Timeout | null = null;
-let operationTail: Promise<void> = Promise.resolve();
+const DEFAULT_MAX_APP_SERVERS = 10;
 
-function clearIdleTimer(): void {
-  if (idleTimer) {
-    clearTimeout(idleTimer);
-    idleTimer = null;
-  }
-}
-
-async function resetSharedSession(): Promise<void> {
-  clearIdleTimer();
-  const session = sharedSession;
-  sharedSession = null;
-  if (session) {
-    await session.close();
-  }
-}
-
-function scheduleIdleClose(): void {
-  clearIdleTimer();
-  const idleTimeoutMs = getPositiveIntEnv(
-    "CODEX_APP_SERVER_IDLE_TIMEOUT_MS",
-    DEFAULT_IDLE_TIMEOUT_MS,
-  );
-  if (idleTimeoutMs <= 0) return;
-
-  idleTimer = setTimeout(() => {
-    void enqueueSessionOperation(async () => {
-      await resetSharedSession();
-    });
-  }, idleTimeoutMs);
-}
-
-async function getOrStartSession(
-  signal?: AbortSignal,
-): Promise<CodexAppServerSession> {
-  if (sharedSession) {
-    return sharedSession;
-  }
-  if (startupPromise) {
-    return await startupPromise;
-  }
-
-  startupPromise = CodexAppServerSession.start({ signal });
-  try {
-    const session = await startupPromise;
-    sharedSession = session;
-    return session;
-  } finally {
-    startupPromise = null;
-  }
-}
-
-function enqueueSessionOperation<T>(task: () => Promise<T>): Promise<T> {
-  const run = operationTail.then(task, task);
-  operationTail = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
-}
+/**
+ * Fork: one app-server per Job Ops user (scope), each with its own
+ * CODEX_HOME, operation queue and idle shutdown (see `session-pool.ts`).
+ * Codex rewrites auth.json when it refreshes tokens, so a login is never
+ * shared between processes or users.
+ */
+const sessionPool = createScopedSessionPool<CodexAppServerSession>({
+  startSession: (scope, signal) =>
+    CodexAppServerSession.start({ signal, scope }),
+  idleTimeoutMs: () =>
+    getPositiveIntEnv(
+      "CODEX_APP_SERVER_IDLE_TIMEOUT_MS",
+      DEFAULT_IDLE_TIMEOUT_MS,
+    ),
+  maxLivePools: () =>
+    getPositiveIntEnv("CODEX_MAX_APP_SERVERS", DEFAULT_MAX_APP_SERVERS),
+  isInfrastructureError: isSessionInfrastructureError,
+});
 
 async function withCodexSession<T>(args: {
   signal?: AbortSignal;
   task: (session: CodexAppServerSession) => Promise<T>;
 }): Promise<T> {
-  return await enqueueSessionOperation(async () => {
-    clearIdleTimer();
-    const session = await getOrStartSession(args.signal);
-    session.clearBufferedNotifications();
-    try {
+  return await sessionPool.withSession(
+    getCliAuthScope(),
+    args.signal,
+    async (session) => {
+      session.clearBufferedNotifications();
       return await args.task(session);
-    } catch (error) {
-      if (isSessionInfrastructureError(error)) {
-        await resetSharedSession();
-      }
-      throw error;
-    } finally {
-      scheduleIdleClose();
-    }
-  });
+    },
+  );
 }
 
-async function closeCodexSessionForTests(): Promise<void> {
-  await enqueueSessionOperation(async () => {
-    await resetSharedSession();
-  });
-}
-
-export async function resetCodexSession(): Promise<void> {
-  await enqueueSessionOperation(async () => {
-    await resetSharedSession();
-  });
+/** Restart the current user's app-server (after login/logout). */
+export async function resetCodexSession(
+  scope: CliAuthScope = getCliAuthScope(),
+): Promise<void> {
+  await sessionPool.reset(scope.scopeKey);
 }
 
 export class CodexClient {
@@ -999,7 +951,10 @@ export class CodexClient {
               turn?: {
                 id?: string;
                 status?: string;
-                error?: { message?: string | null } | null;
+                error?: {
+                  message?: string | null;
+                  codexErrorInfo?: unknown;
+                } | null;
               };
             }
           | undefined;
@@ -1008,7 +963,11 @@ export class CodexClient {
           const errorMessage =
             completedParams?.turn?.error?.message?.trim() ||
             "Codex turn failed with no error message.";
-          throw new Error(errorMessage);
+          // Fork: tag usage limits from the turn's own error field.
+          throw codexErrorFromCli(
+            errorMessage,
+            completedParams?.turn?.error?.codexErrorInfo,
+          );
         }
         if (status === "interrupted") {
           throw new Error("Codex turn was interrupted.");
@@ -1058,5 +1017,5 @@ export class CodexClient {
 }
 
 export async function __resetCodexSharedSessionForTests(): Promise<void> {
-  await closeCodexSessionForTests();
+  await sessionPool.closeAll();
 }

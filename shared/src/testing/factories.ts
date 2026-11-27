@@ -147,6 +147,8 @@ export const createAppSettings = (
     override: null,
   },
   llmPurposeOverrides: { value: {}, default: {}, override: null },
+  claudeCliEffort: { value: "medium", default: "medium", override: null },
+  subscriptionFallback: { value: true, default: true, override: null },
   llmFallbackEnabled: { value: false, default: false, override: null },
   llmFallbackProvider: { value: "", default: "", override: null },
   llmFallbackModel: { value: "", default: "", override: null },

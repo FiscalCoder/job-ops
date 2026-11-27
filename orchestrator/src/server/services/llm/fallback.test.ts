@@ -1,11 +1,27 @@
+import { getSetting } from "@server/repositories/settings";
 import { resolveLlmFallbackRuntimeSettings } from "@server/services/modelSelection";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { callJsonWithFallback } from "./fallback";
 import type { LlmService } from "./service";
 import type { LlmRequestOptions } from "./types";
 
+vi.mock("@server/repositories/settings", () => ({
+  getSetting: vi.fn(),
+}));
+
 vi.mock("@server/services/modelSelection", () => ({
   resolveLlmFallbackRuntimeSettings: vi.fn(),
+}));
+
+const { recoveryMock } = vi.hoisted(() => ({
+  recoveryMock: vi.fn(
+    (primary: { callJson: (o: unknown) => unknown }, options: unknown) =>
+      primary.callJson(options),
+  ),
+}));
+
+vi.mock("./subscription-fallback", () => ({
+  callJsonWithSubscriptionRecovery: recoveryMock,
 }));
 
 function fakePrimary(
@@ -41,6 +57,14 @@ describe("callJsonWithFallback", () => {
   afterEach(() => {
     global.fetch = originalFetch;
     vi.restoreAllMocks();
+  });
+
+  it("routes the primary call through subscription recovery first", async () => {
+    const primary = fakePrimary({ success: true, data: { score: 90 } });
+
+    await callJsonWithFallback(primary, baseOptions);
+
+    expect(recoveryMock).toHaveBeenCalledWith(primary, baseOptions);
   });
 
   it("returns the primary result unchanged on success", async () => {
@@ -137,5 +161,67 @@ describe("callJsonWithFallback", () => {
     const result = await callJsonWithFallback(primary, baseOptions);
 
     expect(result.success).toBe(false);
+  });
+
+  describe("after a subscription primary", () => {
+    function subscriptionPrimary(provider: string) {
+      return {
+        getProvider: () => provider,
+        callJson: vi.fn().mockResolvedValue({
+          success: false,
+          error: "usage limit",
+          status: 429,
+        }),
+      } as unknown as LlmService;
+    }
+
+    beforeEach(() => {
+      vi.mocked(resolveLlmFallbackRuntimeSettings).mockResolvedValue({
+        provider: "openai_compatible",
+        baseUrl: "https://api.deepseek.com",
+        apiKey: "server-env-key",
+        model: "deepseek-chat",
+      });
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ score: 70 }) } }],
+        }),
+      }) as unknown as typeof fetch;
+    });
+
+    it.each([
+      "claude_cli",
+      "codex",
+    ])("never uses a server env API key after %s fails", async (provider) => {
+      vi.mocked(getSetting).mockResolvedValue(null);
+
+      const result = await callJsonWithFallback(
+        subscriptionPrimary(provider),
+        baseOptions,
+      );
+
+      expect(result).toMatchObject({ success: false, status: 429 });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it("uses the tenant's own stored fallback key", async () => {
+      vi.mocked(getSetting).mockResolvedValue("tenant-key");
+      vi.mocked(resolveLlmFallbackRuntimeSettings).mockResolvedValue({
+        provider: "openai_compatible",
+        baseUrl: "https://api.deepseek.com",
+        apiKey: "tenant-key",
+        model: "deepseek-chat",
+      });
+
+      const result = await callJsonWithFallback(
+        subscriptionPrimary("claude_cli"),
+        baseOptions,
+      );
+
+      expect(result).toEqual({ success: true, data: { score: 70 } });
+      const init = vi.mocked(fetch).mock.calls[0]?.[1];
+      expect(JSON.stringify(init?.headers)).toContain("tenant-key");
+    });
   });
 });

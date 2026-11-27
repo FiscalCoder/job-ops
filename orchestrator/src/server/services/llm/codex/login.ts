@@ -1,5 +1,11 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { mkdir, rm } from "node:fs/promises";
 import { logger } from "@infra/logger";
+import {
+  buildCliEnv,
+  type CliAuthScope,
+  getCliAuthScope,
+} from "../subscription-auth/scope";
 import { truncate } from "../utils/string";
 
 function getPositiveIntEnv(name: string, fallback: number): number {
@@ -47,7 +53,12 @@ export type CodexDeviceAuthSnapshot = {
   message: string | null;
 };
 
-let activeSession: DeviceAuthSession | null = null;
+/**
+ * Fork: one device-auth flow per Job Ops user. Each flow runs with
+ * CODEX_HOME pointed at that user's scope, so `auth.json` lands in the
+ * user's own directory and never in the shared container home.
+ */
+const sessions = new Map<string, DeviceAuthSession>();
 
 function stripAnsi(value: string): string {
   if (!value.includes("\u001B")) {
@@ -307,38 +318,41 @@ function attachExitTracking(session: DeviceAuthSession): void {
   });
 }
 
-export function getCodexDeviceAuthSnapshot(): CodexDeviceAuthSnapshot {
-  return toSnapshot(activeSession);
+export function getCodexDeviceAuthSnapshot(
+  scope: CliAuthScope = getCliAuthScope(),
+): CodexDeviceAuthSnapshot {
+  return toSnapshot(sessions.get(scope.scopeKey) ?? null);
 }
 
-export function consumeCompletedCodexDeviceAuth(): CodexDeviceAuthSnapshot | null {
-  if (activeSession?.status !== "completed") return null;
-  const snapshot = toSnapshot(activeSession);
-  activeSession = null;
-  return snapshot;
+export function consumeCompletedCodexDeviceAuth(
+  scope: CliAuthScope = getCliAuthScope(),
+): CodexDeviceAuthSnapshot | null {
+  const session = sessions.get(scope.scopeKey);
+  if (session?.status !== "completed") return null;
+  sessions.delete(scope.scopeKey);
+  return toSnapshot(session);
 }
 
 export async function startCodexDeviceAuth(
   forceRestart = false,
+  scope: CliAuthScope = getCliAuthScope(),
 ): Promise<CodexDeviceAuthSnapshot> {
-  if (activeSession) {
-    if (
-      activeSession.status === "starting" ||
-      activeSession.status === "running"
-    ) {
+  const existing = sessions.get(scope.scopeKey);
+  if (existing) {
+    if (existing.status === "starting" || existing.status === "running") {
       if (!forceRestart) {
-        return toSnapshot(activeSession);
+        return toSnapshot(existing);
       }
-      stopSessionProcess(activeSession);
-      activeSession = null;
+      stopSessionProcess(existing);
+      sessions.delete(scope.scopeKey);
     }
   }
 
   const command = process.env.CODEX_APP_SERVER_BIN?.trim() || "codex";
   const proc = spawn(command, ["login", "--device-auth"], {
     stdio: "pipe",
-    cwd: process.cwd(),
-    env: process.env,
+    cwd: scope.workDir,
+    env: buildCliEnv(scope),
   });
 
   const session: DeviceAuthSession = {
@@ -352,7 +366,7 @@ export async function startCodexDeviceAuth(
     proc,
   };
 
-  activeSession = session;
+  sessions.set(scope.scopeKey, session);
 
   try {
     const snapshot = await waitForDeviceCode(session);
@@ -365,10 +379,13 @@ export async function startCodexDeviceAuth(
   }
 }
 
-export async function disconnectCodexAuth(): Promise<CodexDeviceAuthSnapshot> {
-  if (activeSession) {
-    stopSessionProcess(activeSession);
-    activeSession = null;
+export async function disconnectCodexAuth(
+  scope: CliAuthScope = getCliAuthScope(),
+): Promise<CodexDeviceAuthSnapshot> {
+  const existing = sessions.get(scope.scopeKey);
+  if (existing) {
+    stopSessionProcess(existing);
+    sessions.delete(scope.scopeKey);
   }
 
   const command = process.env.CODEX_APP_SERVER_BIN?.trim() || "codex";
@@ -376,8 +393,8 @@ export async function disconnectCodexAuth(): Promise<CodexDeviceAuthSnapshot> {
   await new Promise<void>((resolve, reject) => {
     const proc = spawn(command, ["logout"], {
       stdio: "pipe",
-      cwd: process.cwd(),
-      env: process.env,
+      cwd: scope.workDir,
+      env: buildCliEnv(scope),
     });
 
     const output: string[] = [];
@@ -429,12 +446,19 @@ export async function disconnectCodexAuth(): Promise<CodexDeviceAuthSnapshot> {
     });
   });
 
-  return toSnapshot(activeSession);
+  await clearCodexHome(scope);
+  return toSnapshot(sessions.get(scope.scopeKey) ?? null);
+}
+
+/** Remove the user's Codex credentials even if `codex logout` left files. */
+async function clearCodexHome(scope: CliAuthScope): Promise<void> {
+  await rm(scope.codexHome, { recursive: true, force: true });
+  await mkdir(scope.codexHome, { recursive: true, mode: 0o700 });
 }
 
 export function __resetCodexDeviceAuthForTests(): void {
-  if (activeSession) {
-    stopSessionProcess(activeSession);
+  for (const session of sessions.values()) {
+    stopSessionProcess(session);
   }
-  activeSession = null;
+  sessions.clear();
 }

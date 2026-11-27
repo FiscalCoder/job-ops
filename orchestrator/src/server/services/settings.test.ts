@@ -155,4 +155,31 @@ describe("getEffectiveSettings", () => {
       override: null,
     });
   });
+
+  it("defaults Claude subscription scoring to Haiku 5.5", async () => {
+    vi.mocked(getAllSettings).mockResolvedValue({
+      llmProvider: "claude_cli",
+    } as never);
+
+    const settings = await getEffectiveSettings();
+
+    expect(settings.modelScorer).toMatchObject({
+      value: "claude-haiku-5-5",
+      override: null,
+    });
+    expect(settings.modelTailoring.value).toBe("claude-sonnet-5");
+    expect(settings.claudeCliEffort.value).toBe("medium");
+    expect(settings.subscriptionFallback.value).toBe(true);
+  });
+
+  it("keeps an explicit scoring model for Claude subscriptions", async () => {
+    vi.mocked(getAllSettings).mockResolvedValue({
+      llmProvider: "claude_cli",
+      modelScorer: "claude-sonnet-5-5",
+    } as never);
+
+    const settings = await getEffectiveSettings();
+
+    expect(settings.modelScorer.value).toBe("claude-sonnet-5-5");
+  });
 });

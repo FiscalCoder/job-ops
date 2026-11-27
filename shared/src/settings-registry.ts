@@ -90,6 +90,31 @@ export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 export const DEFAULT_GLM_MODEL = "glm-5.1";
 export const DEFAULT_CODEX_MODEL = "gpt-5.4-mini";
 export const DEFAULT_CLAUDE_CLI_MODEL = "claude-sonnet-5";
+/** Fork: scoring through a Claude subscription defaults to the cheaper Haiku. */
+export const DEFAULT_CLAUDE_CLI_SCORING_MODEL = "claude-haiku-5-5";
+export const CLAUDE_CLI_EFFORT_VALUES = ["low", "medium", "high"] as const;
+export type ClaudeCliEffort = (typeof CLAUDE_CLI_EFFORT_VALUES)[number];
+export const DEFAULT_CLAUDE_CLI_EFFORT: ClaudeCliEffort = "medium";
+
+export function parseClaudeCliEffortOrNull(
+  raw: string | null | undefined,
+): ClaudeCliEffort | null {
+  const value = raw?.trim().toLowerCase() ?? "";
+  return (CLAUDE_CLI_EFFORT_VALUES as readonly string[]).includes(value)
+    ? (value as ClaudeCliEffort)
+    : null;
+}
+
+/** Fork: default model for a purpose when the user has not chosen one. */
+export function getDefaultPurposeModelForProvider(
+  purpose: string | null | undefined,
+  provider: string | null | undefined,
+): string | null {
+  if (purpose !== "scoring") return null;
+  return normalizeLlmProviderOrNull(provider ?? undefined) === "claude_cli"
+    ? DEFAULT_CLAUDE_CLI_SCORING_MODEL
+    : null;
+}
 
 export function getDefaultModelForProvider(
   provider: string | null | undefined,
@@ -394,6 +419,22 @@ export const settingsRegistry = {
       const normalized = normalizeLlmPurposeOverrides(value);
       return normalized ? JSON.stringify(normalized) : null;
     },
+  },
+  // Fork: per-user subscription CLI options.
+  claudeCliEffort: {
+    kind: "typed" as const,
+    schema: z.enum(CLAUDE_CLI_EFFORT_VALUES),
+    default: (): ClaudeCliEffort => DEFAULT_CLAUDE_CLI_EFFORT,
+    parse: parseClaudeCliEffortOrNull,
+    serialize: (value: ClaudeCliEffort | null | undefined): string | null =>
+      value ?? null,
+  },
+  subscriptionFallback: {
+    kind: "typed" as const,
+    schema: z.boolean(),
+    default: (): boolean => true,
+    parse: parseBitBoolOrNull,
+    serialize: serializeBitBool,
   },
   llmFallbackEnabled: {
     kind: "typed" as const,

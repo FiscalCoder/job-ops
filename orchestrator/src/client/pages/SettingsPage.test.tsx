@@ -1,10 +1,12 @@
 import { getDefaultPromptTemplate } from "@shared/prompt-template-definitions.js";
 import { createAppSettings } from "@shared/testing/factories.js";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
+import type { AuthUser } from "../api/auth";
+import * as llmAuthApi from "../api/llm-auth";
 import { _resetTracerReadinessCache } from "../hooks/useTracerReadiness";
 import { renderWithQueryClient } from "../test/renderWithQueryClient";
 import { SettingsPage } from "./SettingsPage";
@@ -80,6 +82,17 @@ vi.mock("../api", () => ({
   unlinkSsoIdentity: vi.fn(),
 }));
 
+vi.mock("../api/llm-auth", () => ({
+  getLlmAuthStatus: vi.fn(),
+  startClaudeLogin: vi.fn(),
+  submitClaudeLoginCode: vi.fn(),
+  saveClaudeToken: vi.fn(),
+  testClaudeConnection: vi.fn(),
+  disconnectClaude: vi.fn(),
+  startCodexLogin: vi.fn(),
+  disconnectCodex: vi.fn(),
+}));
+
 vi.mock("sonner", () => ({
   toast: {
     success: vi.fn(),
@@ -106,6 +119,38 @@ const baseSettings = createAppSettings({
     },
   ],
 });
+
+const nonAdminUser: AuthUser = {
+  id: "user-1",
+  username: "test",
+  displayName: null,
+  isSystemAdmin: false,
+  isDisabled: false,
+  hasPassword: true,
+  workspaceId: "tenant_default",
+  workspaceName: "JobOps",
+  createdAt: "2026-04-27T00:00:00.000Z",
+  updatedAt: "2026-04-27T00:00:00.000Z",
+};
+const adminUser = { ...nonAdminUser, isSystemAdmin: true };
+
+const missingLlmAuthStatus: llmAuthApi.LlmAuthStatus = {
+  claude: {
+    connected: false,
+    source: null,
+    createdAt: null,
+    expiresAt: null,
+    state: "missing",
+    login: null,
+  },
+  codex: {
+    connected: false,
+    state: "missing",
+    lastRefreshAt: null,
+    login: null,
+  },
+  subscriptionFallback: { enabled: true, available: false },
+};
 
 const localAppStatus = {
   appMode: "local" as const,
@@ -201,6 +246,11 @@ describe("SettingsPage", () => {
     });
     _resetTracerReadinessCache();
     vi.mocked(api.getAppStatus).mockResolvedValue(localAppStatus);
+    // Fork: model settings are admin-editable; non-admin tests opt in below.
+    vi.mocked(api.getCurrentAuthUser).mockResolvedValue(adminUser);
+    vi.mocked(llmAuthApi.getLlmAuthStatus).mockResolvedValue(
+      missingLlmAuthStatus,
+    );
     vi.mocked(api.getBillingStatus).mockResolvedValue({
       plan: "free",
       platformAiIncluded: false,
@@ -249,6 +299,7 @@ describe("SettingsPage", () => {
   });
 
   it("does not request system backups for non-admin users", async () => {
+    vi.mocked(api.getCurrentAuthUser).mockResolvedValue(nonAdminUser);
     vi.mocked(api.getSettings).mockResolvedValue(baseSettings);
     renderPage();
 
@@ -258,6 +309,7 @@ describe("SettingsPage", () => {
   });
 
   it("hides installation-wide database clearing from non-admin users", async () => {
+    vi.mocked(api.getCurrentAuthUser).mockResolvedValue(nonAdminUser);
     vi.mocked(api.getSettings).mockResolvedValue(baseSettings);
     renderPage();
 
@@ -305,7 +357,7 @@ describe("SettingsPage", () => {
     expect(toast.success).toHaveBeenCalledWith("Settings saved");
   });
 
-  it("starts codex sign-in from model settings", async () => {
+  it("starts ChatGPT sign-in from the subscription logins panel", async () => {
     vi.mocked(api.getSettings).mockResolvedValue(
       createAppSettings({
         llmProvider: {
@@ -315,29 +367,34 @@ describe("SettingsPage", () => {
         },
       }),
     );
+    vi.mocked(llmAuthApi.startCodexLogin).mockResolvedValue({
+      ...missingLlmAuthStatus,
+      codex: {
+        ...missingLlmAuthStatus.codex,
+        login: {
+          status: "running",
+          verificationUrl: "https://auth.openai.com/codex/device",
+          userCode: "ABCD-EFGH",
+          expiresAt: "2026-04-14T16:15:00.000Z",
+          message: null,
+        },
+      },
+    });
 
     renderPage();
     await openModelSection();
 
-    await waitFor(() => expect(api.getCodexAuthStatus).toHaveBeenCalled());
+    const codexCard = await screen.findByTestId("codex-subscription-card");
+    fireEvent.click(within(codexCard).getByRole("button", { name: "Connect" }));
 
-    const startButton = await screen.findByRole("button", {
-      name: /start sign-in/i,
-    });
-    fireEvent.click(startButton);
-
-    await waitFor(() => expect(api.startCodexAuth).toHaveBeenCalled());
-    expect(await screen.findByText(/ABCD-EFGH/)).toBeInTheDocument();
-    const openVerificationLink = await screen.findByRole("link", {
-      name: /open verification page/i,
-    });
-    expect(openVerificationLink).toHaveAttribute(
-      "href",
-      "https://auth.openai.com/codex/device",
-    );
+    await waitFor(() => expect(llmAuthApi.startCodexLogin).toHaveBeenCalled());
+    expect(await screen.findByText("ABCD-EFGH")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /open chatgpt sign-in/i }),
+    ).toHaveAttribute("href", "https://auth.openai.com/codex/device");
   });
 
-  it("hides stale codex device code after login completes", async () => {
+  it("shows one Codex login UI in settings: a status hint instead of the old panel", async () => {
     vi.mocked(api.getSettings).mockResolvedValue(
       createAppSettings({
         llmProvider: {
@@ -347,37 +404,34 @@ describe("SettingsPage", () => {
         },
       }),
     );
-    vi.mocked(api.getCodexAuthStatus).mockResolvedValueOnce({
-      authenticated: false,
-      username: null,
-      validationMessage:
-        "Codex is not authenticated in this container. Run `codex login` and try again.",
-      flowStatus: "completed",
-      loginInProgress: false,
-      verificationUrl: "https://auth.openai.com/codex/device",
-      userCode: "ABCD-EFGH",
-      startedAt: "2026-04-14T16:00:00.000Z",
-      expiresAt: "2026-04-14T16:15:00.000Z",
-      flowMessage: "Codex login completed.",
-    });
 
     renderPage();
     await openModelSection();
 
     expect(
-      await screen.findByText(
-        "Codex is not authenticated in this container. Run `codex login` and try again.",
-      ),
+      await screen.findByTestId("subscription-hint-codex"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("Codex login completed."),
+      screen.queryByRole("button", { name: /start sign-in/i }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText(/ABCD-EFGH/)).not.toBeInTheDocument();
+    expect(api.getCodexAuthStatus).not.toHaveBeenCalled();
+  });
+
+  it("locks API provider fields for non-admins but keeps subscription logins", async () => {
+    vi.mocked(api.getCurrentAuthUser).mockResolvedValue(nonAdminUser);
+    vi.mocked(api.getSettings).mockResolvedValue(baseSettings);
+
+    renderPage();
+    await openModelSection();
+
     expect(
-      screen.queryByRole("button", { name: /check status/i }),
-    ).not.toBeInTheDocument();
+      await screen.findByTestId("api-providers-locked-note"),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByLabelText(/default model/i)).toBeDisabled(),
+    );
     expect(
-      screen.getByRole("button", { name: /start sign-in/i }),
+      await screen.findByTestId("claude-subscription-card"),
     ).toBeInTheDocument();
   });
 

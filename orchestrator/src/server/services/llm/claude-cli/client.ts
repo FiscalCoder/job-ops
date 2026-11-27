@@ -1,11 +1,21 @@
 import { spawn } from "node:child_process";
 import { logger } from "@infra/logger";
 import {
+  type ClaudeCliEffort,
+  DEFAULT_CLAUDE_CLI_EFFORT,
+} from "@shared/settings-registry";
+import {
+  type ClaudeCliRuntime,
+  resolveClaudeCliEffort,
+  resolveClaudeCliRuntime,
+} from "../subscription-auth/claude-runtime";
+import {
   getLlmMessageText,
   type JsonSchemaDefinition,
   type LlmRequestOptions,
 } from "../types";
 import { truncate } from "../utils/string";
+import { claudeCliErrorFromCli, toClaudeCliError } from "./errors";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const DEFAULT_VALIDATION_TIMEOUT_MS = 60_000;
@@ -23,10 +33,30 @@ const VALIDATION_SCHEMA: JsonSchemaDefinition = {
 
 /** Models commonly available via Claude Code CLI. */
 export const CLAUDE_CLI_SUGGESTED_MODELS: string[] = [
+  "claude-sonnet-5-5",
+  "claude-haiku-5-5",
   "claude-sonnet-5",
+  "claude-opus-5-5",
   "claude-opus-4-8",
   "claude-haiku-4-5-20251001",
   "claude-fable-5",
+];
+
+/**
+ * Structured-output calls need no tools, MCP servers, user settings, slash
+ * commands or session history; skipping them keeps each call lean and keeps
+ * the per-user config dir from influencing results. (`--bare` is not used:
+ * it ignores subscription OAuth tokens.)
+ */
+export const CLAUDE_CLI_ISOLATION_FLAGS: readonly string[] = [
+  "--setting-sources",
+  "project",
+  "--strict-mcp-config",
+  "--tools",
+  "",
+  "--no-session-persistence",
+  "--disable-slash-commands",
+  "--exclude-dynamic-system-prompt-sections",
 ];
 
 function getPositiveIntEnv(name: string, fallback: number): number {
@@ -172,29 +202,72 @@ type ClaudeCliResultEnvelope = {
   structured_output?: unknown;
 };
 
-function parseCliJsonOutput(stdout: string): { response: string } {
-  const trimmed = stdout.trim();
-  let parsed: ClaudeCliResultEnvelope | undefined;
+function tryParseEnvelope(text: string): ClaudeCliResultEnvelope | null {
   try {
-    parsed = JSON.parse(trimmed) as ClaudeCliResultEnvelope;
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object"
+      ? (parsed as ClaudeCliResultEnvelope)
+      : null;
   } catch {
-    const lines = trimmed.split(/\r?\n/);
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-      const candidate = JSON.parse(lines[index]) as ClaudeCliResultEnvelope;
-      if (candidate.type === "result") {
-        parsed = candidate;
-        break;
-      }
-    }
+    return null;
   }
+}
+
+/** The final `result` event; stream events before it may hold model text. */
+function findResultEnvelope(stdout: string): ClaudeCliResultEnvelope | null {
+  const trimmed = stdout.trim();
+  const whole = tryParseEnvelope(trimmed);
+  if (whole) return whole;
+  const lines = trimmed.split(/\r?\n/);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const candidate = tryParseEnvelope(lines[index] ?? "");
+    if (candidate?.type === "result") return candidate;
+  }
+  return null;
+}
+
+function envelopeErrorText(envelope: ClaudeCliResultEnvelope): string {
+  return (
+    toNonEmptyString(envelope.result) ||
+    `Claude CLI reported an error (subtype: ${envelope.subtype ?? "unknown"}).`
+  );
+}
+
+/**
+ * Fork: error text the CLI itself produced on a failed run — stderr, the
+ * result envelope when `is_error`, and stdout lines that are not JSON events
+ * (plain CLI messages). JSON events that are not an error result are skipped
+ * because they can carry model output.
+ */
+function collectCliErrorText(stdout: string, stderr: string): string {
+  const trimmed = stdout.trim();
+  const whole = trimmed ? tryParseEnvelope(trimmed) : null;
+  const lines = whole
+    ? []
+    : trimmed
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+  const errorFromEvent = (event: ClaudeCliResultEnvelope) =>
+    event.is_error === true ? envelopeErrorText(event) : "";
+  const fromStdout = whole
+    ? [errorFromEvent(whole)]
+    : lines.map((line) => {
+        const event = tryParseEnvelope(line);
+        return event ? errorFromEvent(event) : line;
+      });
+  return [stderr, ...fromStdout].filter(Boolean).join(" | ");
+}
+
+function parseCliJsonOutput(stdout: string): { response: string } {
+  const parsed = findResultEnvelope(stdout);
   if (!parsed) {
-    throw new Error("Claude CLI stream output did not include a result event.");
+    throw new Error(
+      "Claude CLI output did not include a parseable result event.",
+    );
   }
   if (parsed.is_error) {
-    throw new Error(
-      toNonEmptyString(parsed.result) ||
-        `Claude CLI reported an error (subtype: ${parsed.subtype ?? "unknown"}).`,
-    );
+    throw claudeCliErrorFromCli(envelopeErrorText(parsed));
   }
   if (parsed.structured_output !== undefined) {
     return { response: JSON.stringify(parsed.structured_output) };
@@ -216,6 +289,8 @@ async function runClaudeCliOnce(args: {
   jsonSchema: JsonSchemaDefinition;
   timeoutMs: number;
   signal?: AbortSignal;
+  runtime: ClaudeCliRuntime;
+  effort: ClaudeCliEffort;
 }): Promise<{ stdout: string; stderr: string }> {
   const bin = process.env.CLAUDE_CLI_BIN?.trim() || "claude";
   const procArgs: string[] = ["-p"];
@@ -228,7 +303,8 @@ async function runClaudeCliOnce(args: {
       "--verbose",
     );
   } else {
-    procArgs.push(args.input, "--output-format", "json");
+    // Prompt goes on stdin: long prompts on argv hit ENAMETOOLONG on Windows.
+    procArgs.push("--output-format", "json");
   }
   procArgs.push("--permission-mode", "plan");
   const cliModel = args.model?.trim();
@@ -236,6 +312,7 @@ async function runClaudeCliOnce(args: {
     procArgs.push("--model", cliModel);
   }
   procArgs.push("--json-schema", JSON.stringify(args.jsonSchema.schema));
+  procArgs.push("--effort", args.effort, ...CLAUDE_CLI_ISOLATION_FLAGS);
 
   const shell = shouldSpawnClaudeViaWindowsShell(bin);
 
@@ -246,7 +323,8 @@ async function runClaudeCliOnce(args: {
 
     const child = args.spawnFn(bin, procArgs, {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
+      env: { ...args.runtime.env },
+      cwd: args.runtime.cwd,
       windowsHide: true,
       shell,
     });
@@ -311,9 +389,8 @@ async function runClaudeCliOnce(args: {
         const stderr = stderrLines.join(" | ");
         if (code !== 0) {
           reject(
-            new Error(
-              stderr ||
-                stdout ||
+            claudeCliErrorFromCli(
+              collectCliErrorText(stdout, stderr) ||
                 `Claude CLI exited with code ${code ?? "unknown"}.`,
             ),
           );
@@ -327,21 +404,42 @@ async function runClaudeCliOnce(args: {
       clearTimeout(timer);
       finish(() => reject(error));
     });
-    child.stdin.end(
-      args.inputFormat === "stream-json" ? args.input : undefined,
-    );
+    child.stdin.end(args.input);
   });
 }
 
 export type ClaudeCliClientOptions = {
   spawnFn?: ClaudeCliSpawnFn;
+  /** Env + cwd for the call; defaults to the current user's stored login. */
+  resolveRuntime?: () => Promise<ClaudeCliRuntime>;
+  /** Reasoning effort; defaults to the `claudeCliEffort` setting. */
+  resolveEffort?: () => Promise<ClaudeCliEffort>;
+  /** Overrides CLAUDE_CLI_REQUEST_TIMEOUT_MS for callJson. */
+  requestTimeoutMs?: number;
 };
 
 export class ClaudeCliClient {
   private readonly spawnFn: ClaudeCliSpawnFn;
+  private readonly resolveRuntime: () => Promise<ClaudeCliRuntime>;
+  private readonly resolveEffort: () => Promise<ClaudeCliEffort>;
+  private readonly requestTimeoutMs: number | null;
 
   constructor(options: ClaudeCliClientOptions = {}) {
     this.spawnFn = options.spawnFn ?? spawn;
+    this.resolveRuntime = options.resolveRuntime ?? resolveClaudeCliRuntime;
+    this.resolveEffort = options.resolveEffort ?? resolveClaudeCliEffort;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? null;
+  }
+
+  private async resolveCallContext(): Promise<{
+    runtime: ClaudeCliRuntime;
+    effort: ClaudeCliEffort;
+  }> {
+    const [runtime, effort] = await Promise.all([
+      this.resolveRuntime(),
+      this.resolveEffort().catch(() => DEFAULT_CLAUDE_CLI_EFFORT),
+    ]);
+    return { runtime, effort };
   }
 
   async validateCredentials(signal?: AbortSignal): Promise<{
@@ -354,7 +452,9 @@ export class ClaudeCliClient {
       DEFAULT_VALIDATION_TIMEOUT_MS,
     );
     try {
+      const context = await this.resolveCallContext();
       const { stdout } = await runClaudeCliOnce({
+        ...context,
         spawnFn: this.spawnFn,
         input: "Return the structured output exactly as instructed.",
         inputFormat: "text",
@@ -403,25 +503,33 @@ export class ClaudeCliClient {
   async callJson(
     options: LlmRequestOptions<unknown>,
   ): Promise<{ text: string }> {
-    const timeoutMs = getPositiveIntEnv(
-      "CLAUDE_CLI_REQUEST_TIMEOUT_MS",
-      DEFAULT_REQUEST_TIMEOUT_MS,
-    );
+    const timeoutMs =
+      this.requestTimeoutMs ??
+      getPositiveIntEnv(
+        "CLAUDE_CLI_REQUEST_TIMEOUT_MS",
+        DEFAULT_REQUEST_TIMEOUT_MS,
+      );
     const useStreamInput = hasImageInput(options.messages);
     const input = useStreamInput
       ? formatMessagesStreamInput(options.messages)
       : formatMessagesPrompt(options.messages);
     const model = options.model?.trim() || null;
-    const { stdout } = await runClaudeCliOnce({
-      spawnFn: this.spawnFn,
-      input,
-      inputFormat: useStreamInput ? "stream-json" : "text",
-      model,
-      jsonSchema: options.jsonSchema,
-      timeoutMs,
-      signal: options.signal,
-    });
-    const { response } = parseCliJsonOutput(stdout);
-    return { text: response };
+    try {
+      const context = await this.resolveCallContext();
+      const { stdout } = await runClaudeCliOnce({
+        ...context,
+        spawnFn: this.spawnFn,
+        input,
+        inputFormat: useStreamInput ? "stream-json" : "text",
+        model,
+        jsonSchema: options.jsonSchema,
+        timeoutMs,
+        signal: options.signal,
+      });
+      const { response } = parseCliJsonOutput(stdout);
+      return { text: response };
+    } catch (error) {
+      throw toClaudeCliError(error);
+    }
   }
 }

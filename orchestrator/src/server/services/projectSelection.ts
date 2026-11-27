@@ -3,6 +3,7 @@
  */
 
 import { stripHtmlTags } from "@shared/utils/string";
+import { callJsonWithSubscriptionRecovery } from "./llm/subscription-fallback";
 import type { JsonSchemaDefinition } from "./llm/types";
 import { createConfiguredLlmService, resolveLlmModel } from "./modelSelection";
 import type { ResumeProjectSelectionItem } from "./resumeProjects";
@@ -46,7 +47,9 @@ export async function pickProjectIdsForJob(args: {
       resolveLlmModel("projectSelection"),
       createConfiguredLlmService("projectSelection"),
     ]);
-    const result = await llm.callJson<{ selectedProjectIds: string[] }>({
+    const result = await callJsonWithSubscriptionRecovery<{
+      selectedProjectIds: string[];
+    }>(llm, {
       model,
       messages: [
         {
