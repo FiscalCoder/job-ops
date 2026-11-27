@@ -56,6 +56,18 @@ function scoreTextClass(score: number | null): string {
   return "text-muted-foreground/60";
 }
 
+// Fork: Gmail snippets arrive HTML-escaped and LinkedIn pads them with U+034F.
+function readableSnippet(snippet: string): string {
+  const text =
+    new DOMParser().parseFromString(snippet, "text/html").documentElement
+      .textContent ?? snippet;
+  return text.replace(/͏/g, "").replace(/\s+/g, " ").trim();
+}
+
+function proposalReason(payload: Record<string, unknown> | null): string {
+  return typeof payload?.reason === "string" ? payload.reason : "";
+}
+
 function formatAppliedJobLabel(job: JobListItem): string {
   const employer = job.employer.trim();
   const title = job.title.trim();
@@ -106,6 +118,21 @@ const EmailViewerRow: React.FC<EmailViewerRowProps> = ({
         </div>
 
         <p className="truncate text-sm font-medium">{item.message.subject}</p>
+        {item.message.snippet ? (
+          <p className="line-clamp-2 text-xs text-muted-foreground">
+            {readableSnippet(item.message.snippet)}
+          </p>
+        ) : null}
+        {item.message.stageTarget ? (
+          <p className="text-xs">
+            <span className="font-medium">
+              Proposed: {item.message.stageTarget.replace(/_/g, " ")}
+            </span>
+            {proposalReason(item.message.classificationPayload)
+              ? ` — ${proposalReason(item.message.classificationPayload)}`
+              : null}
+          </p>
+        ) : null}
         {item.message.matchedJobId ? null : (
           <p className="text-xs text-amber-600">
             Relevant email with no reliable job match. Please select the correct
