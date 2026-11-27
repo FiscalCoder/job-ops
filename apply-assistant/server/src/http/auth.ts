@@ -38,7 +38,7 @@ export function createAuthMiddleware(
     req.user = user;
     req.jobOpsToken = token;
     onUser(user, token);
-    runAsUser(user, () => next());
+    runAsUser({ ...user, token }, () => next());
   };
 
   return async function requireJobOpsUser(

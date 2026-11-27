@@ -455,6 +455,8 @@ export function createApp() {
   // keep a larger JSON limit scoped to this endpoint to allow the maximum
   // validated payload through to route-level validation.
   app.use("/api/jobs/:id/chat", express.json({ limit: "12mb" }));
+  // Fork: apply-assistant Claude calls carry page screenshots.
+  app.use("/api/llm/claude-messages", express.json({ limit: "12mb" }));
   app.use(express.json());
 
   // Logging middleware

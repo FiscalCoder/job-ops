@@ -17,6 +17,7 @@ describe("loadConfig", () => {
         apiKey: null,
         mapModel: "claude-haiku-5-5",
         draftModel: "claude-sonnet-5-5",
+        dailyTokenLimit: 1_000_000,
       },
     });
   });
@@ -31,7 +32,17 @@ describe("loadConfig", () => {
       apiKey: "sk-ant-test",
       mapModel: "claude-haiku-5-5",
       draftModel: "claude-sonnet-5-5",
+      dailyTokenLimit: 1_000_000,
     });
+  });
+
+  it("reads the daily Claude token cap, 0 turning it off", () => {
+    const config = loadConfig({
+      JOBOPS_BASE_URL: "http://job-ops:3001",
+      APPLY_DATA_DIR: "/data",
+      APPLY_DAILY_CLAUDE_TOKENS: "0",
+    });
+    expect(config.claude.dailyTokenLimit).toBe(0);
   });
 
   it("treats a blank key as no key", () => {

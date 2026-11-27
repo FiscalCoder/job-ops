@@ -157,6 +157,41 @@ const deepSeekSpend = z.object({
 const aiSpendData = z.object({ deepseek: deepSeekSpend });
 export type JobOpsAiSpend = z.infer<typeof aiSpendData>;
 
+export interface SubscriptionCallBody {
+  readonly model: string;
+  readonly purpose?: string;
+  readonly effort?: "low" | "medium" | "high";
+  readonly system?: string;
+  readonly messages: readonly {
+    readonly role: "user" | "assistant";
+    readonly content:
+      | string
+      | readonly (
+          | { readonly type: "text"; readonly text: string }
+          | {
+              readonly type: "image";
+              readonly mediaType: string;
+              readonly data: string;
+            }
+        )[];
+  }[];
+  readonly schema: Record<string, unknown>;
+}
+const count = z.number().int().nonnegative().nullish();
+const subscriptionReply = z.object({
+  text: z.string(),
+  usage: z
+    .object({
+      input_tokens: count,
+      output_tokens: count,
+      cache_read_input_tokens: count,
+      cache_creation_input_tokens: count,
+    })
+    .passthrough()
+    .nullable(),
+});
+export type SubscriptionReply = z.infer<typeof subscriptionReply>;
+
 const errorEnvelope = z.object({
   ok: z.literal(false),
   error: z.object({ code: z.string(), message: z.string() }),
@@ -384,6 +419,18 @@ export class JobOpsClient implements JobOpsApi {
 
   async getAiSpend(token: string): Promise<JobOpsAiSpend> {
     return this.request("/api/ai-spend", aiSpendData, { token });
+  }
+
+  /** One Claude call on the caller's own Claude subscription (Job Ops runs the CLI). */
+  async claudeMessages(
+    token: string,
+    body: SubscriptionCallBody,
+  ): Promise<SubscriptionReply> {
+    return this.request("/api/llm/claude-messages", subscriptionReply, {
+      method: "POST",
+      token,
+      body,
+    });
   }
 
   private async request<T>(

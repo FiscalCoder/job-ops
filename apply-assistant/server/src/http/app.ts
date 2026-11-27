@@ -5,7 +5,11 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { z } from "zod";
 import { createClaudeAnswerer, type MessagesApi } from "../claude/answerer.js";
-import type { JobOpsApi } from "../jobops/client.js";
+import type {
+  JobOpsApi,
+  SubscriptionCallBody,
+  SubscriptionReply,
+} from "../jobops/client.js";
 import { createPlans } from "../plan/plans-service.js";
 import { createAnswerBankRepo } from "../store/answer-bank-repo.js";
 import { createApplyTargetsRepo } from "../store/apply-targets-repo.js";
@@ -27,7 +31,9 @@ import { createOperateRoutes } from "./operate-routes.js";
 import { createLearnedAnswersRepo } from "../store/learned-answers-repo.js";
 import { createClaudeAccess } from "../claude/access.js";
 import { aiJobContext } from "../claude/ai-context.js";
+import { dailyTokenCap } from "../claude/daily-cap.js";
 import { loggedMessages } from "../claude/logged-messages.js";
+import { subscriptionFirst } from "../claude/subscription.js";
 import { type AiCallStore, createAiCallStore } from "../store/ai-call-store.js";
 import { createAppliedCleanup } from "../store/applied-cleanup.js";
 import { createChoicePicksRepo } from "../store/choice-picks-repo.js";
@@ -75,6 +81,13 @@ export interface AppDeps {
     readonly messages: MessagesApi | null;
     /** Claude's API with a user's own key (tests leave it out: their keys then aren't used). */
     readonly messagesFor?: (apiKey: string) => MessagesApi;
+    /** One call on the user's own Claude subscription via Job Ops; tried before any API key. */
+    readonly subscription?: (
+      token: string,
+      body: SubscriptionCallBody,
+    ) => Promise<SubscriptionReply>;
+    /** Tokens a user may spend a day (UTC) across both routes; 0 or absent: no cap. */
+    readonly dailyTokenLimit?: number;
     readonly mapModel: string;
     readonly draftModel: string;
   } | null;
@@ -174,8 +187,26 @@ export function createApp({
           }),
       })
     : null;
-  // Every call through the user's (or the server's) key is logged end to end.
-  const messages = access ? loggedMessages(access.messages, aiCalls) : null;
+  // Every call is logged end to end: subscription first, else the user's (or the server's) key,
+  // both under one daily token cap.
+  const routed =
+    access && claude?.subscription
+      ? subscriptionFirst({
+          call: claude.subscription,
+          fallback: access.messages,
+          ...(log ? { log } : {}),
+        })
+      : access?.messages;
+  const messages = routed
+    ? loggedMessages(
+        dailyTokenCap(
+          routed,
+          aiCalls.tokensUsedSince,
+          claude?.dailyTokenLimit ?? 0,
+        ),
+        aiCalls,
+      )
+    : null;
   const answerer =
     claude && access && messages
       ? createClaudeAnswerer({

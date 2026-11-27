@@ -72,8 +72,9 @@ try {
   log(`[usage] cost backfill failed: ${String(error)}`);
 }
 setInterval(prune, PRUNE_EVERY_MS).unref();
+const jobOps = new JobOpsClient(config.jobOpsBaseUrl);
 const app = createApp({
-  jobOps: new JobOpsClient(config.jobOpsBaseUrl),
+  jobOps,
   db,
   authCacheSeconds: config.authCacheSeconds,
   claude: {
@@ -81,6 +82,8 @@ const app = createApp({
       ? new Anthropic({ apiKey: config.claude.apiKey }).messages
       : null,
     messagesFor: (apiKey) => new Anthropic({ apiKey }).messages,
+    subscription: (token, body) => jobOps.claudeMessages(token, body),
+    dailyTokenLimit: config.claude.dailyTokenLimit,
     mapModel: config.claude.mapModel,
     draftModel: config.claude.draftModel,
   },

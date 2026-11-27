@@ -11,20 +11,35 @@ interface Owner {
   readonly id: string;
   /** Job Ops' admin: the person who runs this server (its own Claude key is theirs). */
   readonly isSystemAdmin: boolean;
+  /** Their Job Ops token, inside a request: Claude calls use their subscription with it. */
+  readonly token?: string;
 }
 
 const owner = new AsyncLocalStorage<Owner>();
 
 export function runAsUser<T>(
-  user: string | { readonly id: string; readonly isSystemAdmin?: boolean },
+  user:
+    | string
+    | {
+        readonly id: string;
+        readonly isSystemAdmin?: boolean;
+        readonly token?: string;
+      },
   work: () => T,
 ): T {
   const who =
     typeof user === "string"
       ? { id: user, isSystemAdmin: false }
-      : { id: user.id, isSystemAdmin: user.isSystemAdmin === true };
+      : {
+          id: user.id,
+          isSystemAdmin: user.isSystemAdmin === true,
+          ...(user.token ? { token: user.token } : {}),
+        };
   return owner.run(who, work);
 }
+
+export const currentUserToken = (): string | null =>
+  owner.getStore()?.token ?? null;
 
 /** The signed-in user; throws outside a request, so data is never read or written unowned. */
 export function currentUser(): string {

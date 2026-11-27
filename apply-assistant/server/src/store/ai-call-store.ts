@@ -147,6 +147,11 @@ export function createAiCallStore(options: AiCallStoreOptions) {
     "select * from ai_calls where user_id = ? and job_id = ? order by created_at, id",
   );
   const byId = db.prepare("select * from ai_calls where user_id = ? and id = ?");
+  // input_tokens already counts cached prompt parts at their price weight (pricing.ts).
+  const tokensSince = db.prepare(
+    `select coalesce(sum(coalesce(input_tokens, 0) + coalesce(output_tokens, 0)), 0) as n
+       from ai_calls where user_id = ? and created_at >= ?`,
+  );
   const clearPayload = db.prepare(
     "update ai_calls set payload_file = null, image_files = null where id = ?",
   );
@@ -230,6 +235,11 @@ export function createAiCallStore(options: AiCallStoreOptions) {
         log(`[ai-calls] couldn't log a ${input.context.purpose} call: ${String(error)}`);
         return null;
       }
+    },
+
+    /** Tokens the signed-in user's Claude calls used since `iso` (subscription and API key). */
+    tokensUsedSince(iso: string): number {
+      return Number((tokensSince.get(currentUser(), iso) as { n: number }).n);
     },
 
     /** The signed-in user's calls for a job, oldest first. */
