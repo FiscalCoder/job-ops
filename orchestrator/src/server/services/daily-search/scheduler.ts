@@ -113,6 +113,29 @@ async function startForOwner(
   );
 }
 
+/**
+ * Fork: run one owner's saved daily search now (used by the scoring catch-up
+ * after a subscription usage reset). Same preset and settings as the daily run.
+ */
+export async function startDailySearchForOwner(owner: {
+  tenantId: string;
+  userId: string | null;
+}): Promise<"started" | "busy" | "no-preset"> {
+  const { presetName } = getDailySearchConfig();
+  if (!presetName) return "no-preset";
+  const presets = await db
+    .select()
+    .from(pipelineSearchPresets)
+    .where(eq(pipelineSearchPresets.name, presetName));
+  const preset = presets.find(
+    (candidate) =>
+      candidate.tenantId === owner.tenantId &&
+      (owner.userId === null || (candidate.userId ?? null) === owner.userId),
+  );
+  if (!preset) return "no-preset";
+  return (await startForOwner(preset)) ? "started" : "busy";
+}
+
 async function runDailySearch(): Promise<void> {
   const { presetName } = getDailySearchConfig();
   if (!presetName) return;

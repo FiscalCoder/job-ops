@@ -55,18 +55,85 @@ function primaryWith(
   return { getProvider: () => provider, callJson };
 }
 
+const NOW = Date.UTC(2026, 10, 27, 18, 40);
+
 function makeDeps(overrides: Partial<SubscriptionRecoveryDeps> = {}) {
   const fallbackCall = vi.fn().mockResolvedValue(OK);
+  const exhausted = new Map<string, number>();
   const deps: SubscriptionRecoveryDeps = {
     resolveScope: () => SCOPE,
     isConnected: vi.fn(async () => true),
     isFallbackEnabled: vi.fn(async () => true),
     createService: vi.fn(() => ({ callJson: fallbackCall })),
     waitForBackoff: vi.fn(async () => undefined),
+    getExhaustedUntil: (key) => {
+      const until = exhausted.get(key);
+      return until !== undefined && until > NOW ? until : null;
+    },
+    markExhausted: vi.fn((key: string, until: number) => {
+      exhausted.set(key, until);
+    }),
+    now: () => NOW,
     ...overrides,
   };
-  return { deps, fallbackCall };
+  return { deps, fallbackCall, exhausted };
 }
+
+describe("usage exhaustion", () => {
+  it("marks the subscription out of usage until the stated reset", async () => {
+    const primary = primaryWith("claude_cli", LIMIT, {
+      ...LIMIT,
+      error: "5-hour limit reached ∙ resets 9pm (UTC)",
+    });
+    const { deps, exhausted } = makeDeps({
+      isConnected: vi.fn(async () => false),
+    });
+    await callJsonWithSubscriptionRecovery(primary, OPTIONS, deps);
+    expect(exhausted.get("user-a:claude_cli")).toBe(
+      Date.UTC(2026, 10, 27, 21, 0),
+    );
+  });
+
+  it("assumes a full five-hour window when no reset is stated", async () => {
+    const primary = primaryWith("claude_cli", LIMIT, LIMIT);
+    const { deps, exhausted } = makeDeps({
+      isConnected: vi.fn(async () => false),
+    });
+    await callJsonWithSubscriptionRecovery(primary, OPTIONS, deps);
+    expect(exhausted.get("user-a:claude_cli")).toBe(NOW + 5 * 3_600_000);
+  });
+
+  it("skips an exhausted subscription without calling or waiting", async () => {
+    const primary = primaryWith("claude_cli", OK);
+    const { deps, exhausted, fallbackCall } = makeDeps();
+    exhausted.set("user-a:claude_cli", NOW + 3_600_000);
+    const result = await callJsonWithSubscriptionRecovery(
+      primary,
+      OPTIONS,
+      deps,
+    );
+    expect(primary.callJson).not.toHaveBeenCalled();
+    expect(deps.waitForBackoff).not.toHaveBeenCalled();
+    expect(result).toBe(OK);
+    expect(fallbackCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a 429 while exhausted when no other subscription is connected", async () => {
+    const primary = primaryWith("claude_cli", OK);
+    const { deps, exhausted } = makeDeps({
+      isConnected: vi.fn(async () => false),
+    });
+    exhausted.set("user-a:claude_cli", NOW + 3_600_000);
+    const result = await callJsonWithSubscriptionRecovery(
+      primary,
+      OPTIONS,
+      deps,
+    );
+    expect(result.success).toBe(false);
+    expect(result.success ? null : result.status).toBe(429);
+    expect(primary.callJson).not.toHaveBeenCalled();
+  });
+});
 
 describe("callJsonWithSubscriptionRecovery", () => {
   afterEach(() => {

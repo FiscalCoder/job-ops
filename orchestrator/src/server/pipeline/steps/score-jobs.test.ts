@@ -58,6 +58,19 @@ vi.mock("./cli-scoring", () => ({
   resolveScoringPlan: resolveScoringPlanMock,
 }));
 
+const { scheduleCatchUpMock } = vi.hoisted(() => ({
+  scheduleCatchUpMock: vi.fn(() => true),
+}));
+
+vi.mock("@server/services/daily-search/scoring-catch-up", () => ({
+  scheduleScoringCatchUp: scheduleCatchUpMock,
+}));
+
+vi.mock("@infra/request-context", () => ({
+  getTenantId: () => "tenant-a",
+  getUserId: () => "user-1",
+}));
+
 describe("scoreJobsStep auto-skip behavior", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -627,5 +640,46 @@ describe("scoreJobsStep auto-skip behavior", () => {
     await scoreJobsStep({ profile: {} });
 
     expect(resolveScoringPlanMock).not.toHaveBeenCalled();
+  });
+  it("stops scoring without pausing when the subscription runs out of usage, and schedules a catch-up", async () => {
+    const jobsRepo = await import("@server/repositories/jobs");
+    const scorer = await import("@server/services/scorer");
+    const resetAt = Date.now() + 3_600_000;
+    let exhausted = false;
+
+    resolveScoringPlanMock.mockResolvedValueOnce({
+      concurrency: 1,
+      throttled: true,
+      beforeScore: beforeScoreMock,
+      usageExhaustedUntil: () => (exhausted ? resetAt : null),
+    } as never);
+    vi.mocked(jobsRepo.getUnscoredDiscoveredJobs).mockResolvedValue(
+      Array.from({ length: 6 }, (_, index) =>
+        createJob({
+          id: `job-${index + 1}`,
+          title: `Role ${index + 1}`,
+          employer: "Acme",
+          suitabilityScore: null,
+        }),
+      ),
+    );
+    vi.mocked(scorer.scoreJobSuitability)
+      .mockResolvedValueOnce({ score: 80, reason: "fit", jobBrief: null })
+      .mockImplementation(async () => {
+        exhausted = true;
+        throw new scorer.ScoringUnavailableError(
+          "AI scoring failed: Subscription usage limit reached",
+        );
+      });
+
+    const result = await scoreJobsStep({ profile: {} });
+
+    expect(result.scoredJobs).toHaveLength(1);
+    // One call hit the limit; the remaining four never reach the scorer.
+    expect(vi.mocked(scorer.scoreJobSuitability)).toHaveBeenCalledTimes(2);
+    expect(scheduleCatchUpMock).toHaveBeenCalledWith(
+      { tenantId: "tenant-a", userId: "user-1" },
+      resetAt,
+    );
   });
 });

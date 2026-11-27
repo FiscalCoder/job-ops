@@ -13,6 +13,9 @@ describe("claude cli error mapping", () => {
     "Claude AI usage limit reached|1764252000",
     "You've hit your limit · resets 5pm (Europe/London)",
     "You've hit your usage limit",
+    "5-hour limit reached ∙ resets 9pm (UTC)",
+    "Weekly limit reached · resets Dec 2, 4am",
+    "You've hit your limit · resets 3am (Asia/Kolkata)",
     'API Error: 429 {"type":"error","error":{"type":"rate_limit_error"}}',
     "rate_limit_error",
   ])("maps CLI usage limits to status 429: %s", (message) => {

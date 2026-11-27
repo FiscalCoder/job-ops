@@ -1,6 +1,8 @@
 import { logger } from "@infra/logger";
+import { getTenantId, getUserId } from "@infra/request-context";
 import * as jobsRepo from "@server/repositories/jobs";
 import * as settingsRepo from "@server/repositories/settings";
+import { scheduleScoringCatchUp } from "@server/services/daily-search/scoring-catch-up";
 import {
   LlmNotConfiguredError,
   ScoringUnavailableError,
@@ -79,6 +81,8 @@ export async function scoreJobsStep(args: {
   let completed = 0;
   let exceptional = 0;
   let failed = 0;
+  /** Set once the scoring subscription is out of usage (its reset time). */
+  let usageLimitedUntil: number | null = null;
   const scoringInstructions = args.scoringInstructions?.trim();
   // Fork: subscription CLIs get a login preflight (pauses the run) and a
   // gentler, spaced-out pool; API providers keep the default plan.
@@ -162,8 +166,10 @@ export async function scoreJobsStep(args: {
         return;
       }
 
+      // Out of subscription usage: leave the rest unscored for the catch-up.
+      if (usageLimitedUntil !== null) return;
       await plan.beforeScore();
-      if (args.shouldCancel?.()) return;
+      if (args.shouldCancel?.() || usageLimitedUntil !== null) return;
 
       const scoringResultPromise = args.hostedUsageReserved
         ? scoreJobSuitability(
@@ -183,6 +189,12 @@ export async function scoreJobsStep(args: {
         // Configuration errors still abort the pool — every remaining job
         // would fail the same way until the user fixes their settings.
         if (!(error instanceof ScoringUnavailableError)) throw error;
+        const exhaustedUntil = plan.usageExhaustedUntil?.() ?? null;
+        if (exhaustedUntil !== null) {
+          // Not a configuration fault: stop scoring, never pause the run.
+          usageLimitedUntil = exhaustedUntil;
+          return;
+        }
         failed += 1;
         completed += 1;
         if (scoredJobs.length === 0 && failed >= SYSTEMIC_FAILURE_THRESHOLD) {
@@ -282,5 +294,23 @@ export async function scoreJobsStep(args: {
     throttled: plan.throttled,
   });
 
+  if (usageLimitedUntil !== null) {
+    handleUsageLimitedRun(
+      usageLimitedUntil,
+      unprocessedJobs.length - scoredJobs.length,
+    );
+  }
+
   return { unprocessedJobs, scoredJobs };
+}
+
+/** Log the early stop and schedule one catch-up run after the reset. */
+function handleUsageLimitedRun(resetAtMs: number, leftUnscored: number): void {
+  logger.warn("Subscription out of usage — leaving jobs unscored until reset", {
+    leftUnscored,
+    resetAt: new Date(resetAtMs).toISOString(),
+  });
+  const tenantId = getTenantId();
+  if (!tenantId) return;
+  scheduleScoringCatchUp({ tenantId, userId: getUserId() ?? null }, resetAtMs);
 }

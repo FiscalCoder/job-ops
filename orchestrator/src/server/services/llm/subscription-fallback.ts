@@ -13,7 +13,13 @@ import {
   isSubscriptionProvider,
   type SubscriptionProvider,
 } from "./subscription-auth/status";
-import { waitForUsageBackoff } from "./subscription-auth/usage-backoff";
+import {
+  DEFAULT_USAGE_EXHAUSTED_MS,
+  getUsageExhaustedUntil,
+  markUsageExhausted,
+  parseUsageResetAt,
+  waitForUsageBackoff,
+} from "./subscription-auth/usage-backoff";
 import type { LlmRequestOptions, LlmResponse } from "./types";
 
 /**
@@ -38,6 +44,10 @@ export type SubscriptionRecoveryDeps = {
   isFallbackEnabled: () => Promise<boolean>;
   createService: (provider: SubscriptionProvider) => JsonCaller;
   waitForBackoff: (key: string) => Promise<void>;
+  /** Reset time while this user + provider is out of usage, else null. */
+  getExhaustedUntil: (key: string) => number | null;
+  markExhausted: (key: string, untilMs: number) => void;
+  now: () => number;
 };
 
 const RATE_LIMIT_STATUS = 429;
@@ -63,7 +73,18 @@ const defaultDeps: SubscriptionRecoveryDeps = {
   createService: (provider) =>
     new LlmService({ provider, allowCliProviders: true }),
   waitForBackoff: (key) => waitForUsageBackoff(key),
+  getExhaustedUntil: (key) => getUsageExhaustedUntil(key),
+  markExhausted: markUsageExhausted,
+  now: Date.now,
 };
+
+function exhaustedResponse<T>(untilMs: number): LlmResponse<T> {
+  return {
+    success: false,
+    status: RATE_LIMIT_STATUS,
+    error: `Subscription usage limit reached — paused until ${new Date(untilMs).toISOString()}`,
+  };
+}
 
 function otherSubscription(
   provider: SubscriptionProvider,
@@ -92,26 +113,50 @@ export async function callJsonWithSubscriptionRecovery<T>(
   deps: SubscriptionRecoveryDeps = defaultDeps,
 ): Promise<LlmResponse<T>> {
   const provider = primary.getProvider?.();
-  const first = await primary.callJson<T>(options);
-  if (first.success || !isSubscriptionProvider(provider)) return first;
-  if (!isRecoverable(first)) return first;
+  if (!isSubscriptionProvider(provider)) return primary.callJson<T>(options);
 
-  let scope: CliAuthScope;
+  let scope: CliAuthScope | null = null;
   try {
     scope = deps.resolveScope();
   } catch {
+    scope = null;
+  }
+  const usageKey = scope ? `${scope.scopeKey}:${provider}` : null;
+  const pausedUntil = usageKey ? deps.getExhaustedUntil(usageKey) : null;
+
+  // Out of usage until its reset: don't spend a call (and a backoff) on it.
+  const first =
+    pausedUntil !== null
+      ? exhaustedResponse<T>(pausedUntil)
+      : await primary.callJson<T>(options);
+  if (first.success || !isRecoverable(first) || !scope || !usageKey) {
     return first;
   }
 
   let latest: LlmResponse<T> = first;
-  if (!first.success && first.status === RATE_LIMIT_STATUS) {
+  if (
+    pausedUntil === null &&
+    !first.success &&
+    first.status === RATE_LIMIT_STATUS
+  ) {
     logger.warn("Subscription usage limit hit — backing off before retry", {
       jobId: options.jobId ?? "unknown",
       provider,
     });
-    await deps.waitForBackoff(`${scope.scopeKey}:${provider}`);
+    await deps.waitForBackoff(usageKey);
     latest = await primary.callJson<T>(options);
     if (latest.success || !isRecoverable(latest)) return latest;
+    if (latest.status === RATE_LIMIT_STATUS) {
+      const now = deps.now();
+      const resetAt =
+        parseUsageResetAt(latest.error, now) ??
+        now + DEFAULT_USAGE_EXHAUSTED_MS;
+      deps.markExhausted(usageKey, resetAt);
+      logger.warn("Subscription out of usage — skipping it until reset", {
+        provider,
+        resetAt: new Date(resetAt).toISOString(),
+      });
+    }
   }
 
   const fallbackProvider = otherSubscription(provider);

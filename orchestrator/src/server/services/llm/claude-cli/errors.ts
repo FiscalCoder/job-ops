@@ -17,7 +17,7 @@ export class ClaudeCliError extends Error {
  * process stderr) — never against model output, which can quote job ads.
  */
 const USAGE_LIMIT_PATTERN =
-  /(Claude AI usage limit reached|you'?ve hit your (usage )?limit|usage limit reached|API Error: 429|rate_limit_error)/i;
+  /(Claude AI usage limit reached|you'?ve hit your (usage )?limit|usage limit reached|\b(5-hour|five-hour|session|weekly) limit reached|API Error: 429|rate_limit_error)/i;
 const AUTH_FAILURE_PATTERN =
   /(OAuth token has expired|OAuth token revoked|invalid (bearer|oauth) token|Login expired|reached its time limit|please run \/login|not logged in|API Error: 401|authentication_error)/i;
 

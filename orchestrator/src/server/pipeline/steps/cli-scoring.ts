@@ -9,6 +9,7 @@ import {
   isSubscriptionProvider,
   type SubscriptionProvider,
 } from "@server/services/llm/subscription-auth/status";
+import { getUsageExhaustedUntil } from "@server/services/llm/subscription-auth/usage-backoff";
 import { resolveLlmRuntimeSettings } from "@server/services/modelSelection";
 import { LlmNotConfiguredError } from "@server/services/scorer";
 import { settingsRegistry } from "@shared/settings-registry";
@@ -31,6 +32,11 @@ export type ScoringPlan = Readonly<{
   concurrency: number;
   throttled: boolean;
   beforeScore: () => Promise<void>;
+  /**
+   * When scoring runs on a subscription that is out of usage, its reset time;
+   * otherwise null. Scoring stops early then instead of failing every job.
+   */
+  usageExhaustedUntil?: () => number | null;
 }>;
 
 export type CliScoringDeps = {
@@ -42,6 +48,7 @@ export type CliScoringDeps = {
   ) => Promise<boolean>;
   isFallbackEnabled: () => Promise<boolean>;
   sleep: (ms: number) => Promise<void>;
+  getExhaustedUntil?: (key: string) => number | null;
 };
 
 const THROTTLE_DEFAULTS: CliScoringThrottleConfig = {
@@ -192,9 +199,12 @@ export async function resolveScoringPlan(
   }
   await assertSubscriptionScoringReady(provider, deps);
   const config = readCliScoringThrottleConfig();
+  const usageKey = `${deps.resolveScope().scopeKey}:${provider}`;
+  const getExhaustedUntil = deps.getExhaustedUntil ?? getUsageExhaustedUntil;
   return {
     concurrency: config.concurrency,
     throttled: true,
     beforeScore: createStartThrottle(config, deps.sleep),
+    usageExhaustedUntil: () => getExhaustedUntil(usageKey),
   };
 }
