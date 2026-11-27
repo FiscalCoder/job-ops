@@ -85,6 +85,9 @@ export function buildDefaultProviderPatch(
     Object.keys(pinned).length !== Object.keys(overrides).length;
   return {
     llmProvider: provider,
+    // Subscriptions take no base URL; a leftover API one would be blanked by
+    // the settings form on every load and keep the section "Unsaved".
+    llmBaseUrl: null,
     model: null,
     modelScorer: null,
     modelTailoring: null,

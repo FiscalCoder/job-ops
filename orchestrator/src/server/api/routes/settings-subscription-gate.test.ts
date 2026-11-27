@@ -37,6 +37,9 @@ describe("isNonAdminSubscriptionSettingsUpdate", () => {
     [{ claudeCliEffort: "low" }],
     [{ subscriptionFallback: false }],
     [{ searchTerms: ["x"], llmProvider: "claude_cli" }],
+    // Clearing a leftover API base URL when switching to a subscription.
+    [{ llmProvider: "codex", llmBaseUrl: null, model: null }],
+    [{ llmProvider: "claude_cli", llmBaseUrl: "" }],
   ])("allows subscription-only changes %#", (input) => {
     expect(check(input)).toBe(true);
   });
@@ -45,6 +48,7 @@ describe("isNonAdminSubscriptionSettingsUpdate", () => {
     [{ llmProvider: "openai" }],
     [{ llmProvider: null }],
     [{ llmProvider: "claude_cli", llmBaseUrl: "https://evil.test" }],
+    [{ llmBaseUrl: null }],
     [{ llmProvider: "codex", llmApiKey: "sk-x" }],
     [{ llmPurposeOverrides: { scoring: { provider: "openrouter" } } }],
     [{ llmPurposeOverrides: { scoring: { model: "x" } } }],

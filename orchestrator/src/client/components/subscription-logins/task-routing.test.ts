@@ -39,13 +39,16 @@ describe("task routing patches", () => {
     expect(patch).toEqual({ llmPurposeOverrides: {}, modelScorer: null });
   });
 
-  it("switches the default provider and resets models", () => {
+  it("switches the default provider and resets models and the old base URL", () => {
     expect(
       buildDefaultProviderPatch("codex", {
         tailoring: { provider: "claude_cli" },
       }),
     ).toEqual({
       llmProvider: "codex",
+      // A leftover API base URL is blanked by the form on load, leaving the
+      // Model section permanently "Unsaved".
+      llmBaseUrl: null,
       model: null,
       modelScorer: null,
       modelTailoring: null,

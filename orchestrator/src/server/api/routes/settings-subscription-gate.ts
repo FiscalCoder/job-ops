@@ -32,6 +32,10 @@ function isSubscriptionProviderValue(value: unknown): boolean {
   );
 }
 
+function isBlank(value: unknown): boolean {
+  return value == null || (typeof value === "string" && value.trim() === "");
+}
+
 function hasOnlySubscriptionOverrides(value: unknown): boolean {
   if (typeof value !== "object" || value === null) return false;
   return Object.values(value).every((override) => {
@@ -56,7 +60,11 @@ export function isNonAdminSubscriptionSettingsUpdate(
   if (subscriptionKeys.length === 0) return false;
   if (
     !keys.every(
-      (key) => SUBSCRIPTION_SETTING_KEYS.has(key) || searchSettingKeys.has(key),
+      (key) =>
+        SUBSCRIPTION_SETTING_KEYS.has(key) ||
+        searchSettingKeys.has(key) ||
+        // Clearing a leftover base URL never points at server credentials.
+        (key === "llmBaseUrl" && isBlank(input.llmBaseUrl)),
     )
   ) {
     return false;
