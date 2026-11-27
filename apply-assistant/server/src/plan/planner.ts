@@ -390,7 +390,11 @@ export function daysForDateAnswers<T extends PlanEntry>(
       typeof entry.value === "string" ? ISO_DATE.exec(entry.value) : null;
     if (!date || !/\bdays?\b/i.test(entry.label)) return entry;
     const at = Date.UTC(Number(date[1]), Number(date[2]) - 1, Number(date[3]));
-    const from = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    const from = Date.UTC(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate(),
+    );
     const days = Math.max(0, Math.round((at - from) / DAY_MS));
     return {
       ...entry,
@@ -677,7 +681,9 @@ const CURRENT_ROLE =
  * Before, this went to Claude's takeover, which could only conclude the same thing.
  */
 export const currentRoleEndDate = (field: FormField, why: string): boolean =>
-  !field.required && END_DATE_LABEL.test(field.label.trim()) && CURRENT_ROLE.test(why);
+  !field.required &&
+  END_DATE_LABEL.test(field.label.trim()) &&
+  CURRENT_ROLE.test(why);
 
 function resolveClaude(
   field: FormField,
@@ -727,7 +733,15 @@ function resolveClaude(
       };
     }
     case "draft":
-      return { value: answer.value, source: `${by} draft` };
+      return {
+        value: answer.value,
+        source: `${by} draft`,
+        ...(answer.unverified?.length
+          ? {
+              check: `Not in your resume or the posting: ${answer.unverified.slice(0, 6).join(", ")}`,
+            }
+          : {}),
+      };
   }
 }
 

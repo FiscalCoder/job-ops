@@ -66,77 +66,99 @@ function setup(...replies: Anthropic.Message[]) {
 describe("Claude answerer", () => {
   it("maps all questions in one call, drafts written ones, and caches both", () =>
     runAsUser("u1", async () => {
-    const { create, answerer } = setup(
-      mapReply([answer({}), answer({ ref: "q2", kind: "write", answer: [] })]),
-      reply("I like building APIs."),
-    );
-    const first = await answerer.answer([yesNo, why], context);
-    expect(first.get("q1")).toMatchObject({ kind: "answer", value: "Yes" });
-    expect(first.get("q2")).toEqual({
-      kind: "draft",
-      value: "I like building APIs.",
-      model: "claude-sonnet-5-5",
-    });
-    expect(create).toHaveBeenCalledTimes(2);
-    const mapCall = create.mock.calls[0]?.[0];
-    expect(mapCall).toMatchObject({
-      model: "claude-haiku-5-5",
-      output_config: { effort: "low", format: { type: "json_schema" } },
-    });
-    expect(create.mock.calls[1]?.[0]).toMatchObject({
-      model: "claude-sonnet-5-5",
-    });
+      const { create, answerer } = setup(
+        mapReply([
+          answer({}),
+          answer({ ref: "q2", kind: "write", answer: [] }),
+        ]),
+        reply("I like building APIs."),
+      );
+      const first = await answerer.answer([yesNo, why], context);
+      expect(first.get("q1")).toMatchObject({ kind: "answer", value: "Yes" });
+      expect(first.get("q2")).toEqual({
+        kind: "draft",
+        value: "I like building APIs.",
+        model: "claude-sonnet-5-5",
+      });
+      expect(create).toHaveBeenCalledTimes(2);
+      const mapCall = create.mock.calls[0]?.[0];
+      expect(mapCall).toMatchObject({
+        model: "claude-haiku-5-5",
+        output_config: { effort: "low", format: { type: "json_schema" } },
+      });
+      expect(create.mock.calls[1]?.[0]).toMatchObject({
+        model: "claude-sonnet-5-5",
+      });
 
-    const again = await answerer.answer([yesNo, why], context);
-    expect(again).toEqual(first);
-    expect(create).toHaveBeenCalledTimes(2);
+      const again = await answerer.answer([yesNo, why], context);
+      expect(again).toEqual(first);
+      expect(create).toHaveBeenCalledTimes(2);
+    }));
+
+  it("lists what a draft claims that the resume and posting don't back, cached or not", () =>
+    runAsUser("u1", async () => {
+      const { answerer } = setup(
+        mapReply([answer({ ref: "q2", kind: "write", answer: [] })]),
+        reply("At Initech I led a team of 40 engineers."),
+      );
+      const first = await answerer.answer([why], context);
+      expect(first.get("q2")).toMatchObject({
+        kind: "draft",
+        unverified: ["Initech", "40"],
+      });
+      const again = await answerer.answer([why], context);
+      expect(again.get("q2")).toEqual(first.get("q2"));
     }));
 
   it("only asks about questions that aren't cached", () =>
     runAsUser("u1", async () => {
-    const { create, answerer } = setup(
-      mapReply([answer({})]),
-      mapReply([answer({ ref: "q3", answer: ["No"] })]),
-    );
-    await answerer.answer([yesNo], context);
-    const q3 = { ...yesNo, ref: "q3", label: "Go?" };
-    const both = await answerer.answer([yesNo, q3], context);
-    expect(both.get("q3")).toMatchObject({ value: "No" });
-    expect(create.mock.calls[1]?.[0].messages[0]?.content).not.toContain(
-      'ref="q1"',
-    );
+      const { create, answerer } = setup(
+        mapReply([answer({})]),
+        mapReply([answer({ ref: "q3", answer: ["No"] })]),
+      );
+      await answerer.answer([yesNo], context);
+      const q3 = { ...yesNo, ref: "q3", label: "Go?" };
+      const both = await answerer.answer([yesNo, q3], context);
+      expect(both.get("q3")).toMatchObject({ value: "No" });
+      expect(create.mock.calls[1]?.[0].messages[0]?.content).not.toContain(
+        'ref="q1"',
+      );
     }));
 
   it("turns a refusal into 'unknown' without caching it", () =>
     runAsUser("u1", async () => {
-    const { create, answerer } = setup(
-      reply("", "refusal"),
-      mapReply([answer({})]),
-    );
-    expect((await answerer.answer([yesNo], context)).get("q1")).toMatchObject({
-      kind: "unknown",
-      why: "Claude declined to answer",
-    });
-    expect((await answerer.answer([yesNo], context)).get("q1")).toMatchObject({
-      kind: "answer",
-    });
-    expect(create).toHaveBeenCalledTimes(2);
+      const { create, answerer } = setup(
+        reply("", "refusal"),
+        mapReply([answer({})]),
+      );
+      expect((await answerer.answer([yesNo], context)).get("q1")).toMatchObject(
+        {
+          kind: "unknown",
+          why: "Claude declined to answer",
+        },
+      );
+      expect((await answerer.answer([yesNo], context)).get("q1")).toMatchObject(
+        {
+          kind: "answer",
+        },
+      );
+      expect(create).toHaveBeenCalledTimes(2);
     }));
 
   it("fails loudly on a cut-off or malformed reply (the plan then asks you)", () =>
     runAsUser("u1", async () => {
-    await expect(
-      setup(reply("{", "max_tokens")).answerer.answer([yesNo], context),
-    ).rejects.toThrow("cut off");
-    await expect(
-      setup(reply("nope")).answerer.answer([yesNo], context),
-    ).rejects.toThrow();
+      await expect(
+        setup(reply("{", "max_tokens")).answerer.answer([yesNo], context),
+      ).rejects.toThrow("cut off");
+      await expect(
+        setup(reply("nope")).answerer.answer([yesNo], context),
+      ).rejects.toThrow();
     }));
 
   it("makes no call when there are no questions", () =>
     runAsUser("u1", async () => {
-    const { create, answerer } = setup();
-    expect((await answerer.answer([], context)).size).toBe(0);
-    expect(create).not.toHaveBeenCalled();
+      const { create, answerer } = setup();
+      expect((await answerer.answer([], context)).size).toBe(0);
+      expect(create).not.toHaveBeenCalled();
     }));
 });

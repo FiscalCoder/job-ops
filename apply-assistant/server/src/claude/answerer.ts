@@ -1,12 +1,22 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { ClaudeAnswersRepo } from "../store/claude-answers-repo.js";
+import {
+  ACT_SCHEMA,
+  ACT_SYSTEM,
+  type ActAnswer,
+  type ActRequest,
+  actPrompt,
+  checkActReply,
+} from "./act.js";
 import { withAiPurpose } from "./ai-context.js";
+import { factSources, unverifiedFacts } from "./fact-guard.js";
 import { type ClaudeUsage, usageOfMessage } from "./pricing.js";
 import {
   type ClaudeAnswer,
   cacheKey,
   checkMapItem,
   DRAFT_SYSTEM,
+  draftPrompt,
   draftPromptBlocks,
   MAP_SCHEMA,
   MAP_SYSTEM,
@@ -17,14 +27,6 @@ import {
   type QuestionContext,
 } from "./questions.js";
 import {
-  ACT_SCHEMA,
-  ACT_SYSTEM,
-  type ActAnswer,
-  type ActRequest,
-  actPrompt,
-  checkActReply,
-} from "./act.js";
-import {
   checkTellReply,
   TELL_SCHEMA,
   TELL_SYSTEM,
@@ -32,6 +34,21 @@ import {
   TellRejectedError,
   tellPrompt,
 } from "./tell.js";
+
+/** A draft with what in it the resume, saved answers and posting don't back. */
+function factChecked(
+  answer: ClaudeAnswer,
+  question: Question,
+  context: QuestionContext,
+): ClaudeAnswer {
+  if (answer.kind !== "draft") return answer;
+  const sources = factSources([
+    draftPrompt(question, context),
+    ...context.bank.values(),
+  ]);
+  const unverified = unverifiedFacts(answer.value, sources);
+  return unverified.length > 0 ? { ...answer, unverified } : answer;
+}
 
 /**
  * Answers the questions the rules don't recognise: one mapping call (Haiku) for all of a form's
@@ -129,7 +146,9 @@ export function createClaudeAnswerer(
         model: mapModel,
         max_tokens: MAP_MAX_TOKENS,
         system: MAP_SYSTEM,
-        messages: [{ role: "user", content: mapPromptBlocks(questions, context) }],
+        messages: [
+          { role: "user", content: mapPromptBlocks(questions, context) },
+        ],
         output_config: {
           effort: "low",
           format: { type: "json_schema", schema: MAP_SCHEMA },
@@ -166,13 +185,15 @@ export function createClaudeAnswerer(
   ): Promise<ClaudeAnswer> {
     const key = cacheKey("draft", draftModel, question, context);
     const cached = cache.get(key) as ClaudeAnswer | null;
-    if (cached) return cached;
+    if (cached) return factChecked(cached, question, context);
     const message = await withAiPurpose("draft-answer", () =>
       messages.create({
         model: draftModel,
         max_tokens: DRAFT_MAX_TOKENS,
         system: DRAFT_SYSTEM,
-        messages: [{ role: "user", content: draftPromptBlocks(question, context) }],
+        messages: [
+          { role: "user", content: draftPromptBlocks(question, context) },
+        ],
         output_config: { effort: "low" },
       }),
     );
@@ -189,7 +210,7 @@ export function createClaudeAnswerer(
       model: draftModel,
     };
     cache.save(key, answer, draftModel);
-    return answer;
+    return factChecked(answer, question, context);
   }
 
   return {

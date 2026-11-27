@@ -387,6 +387,27 @@ describe("buildPlan with Claude's answers", () => {
       status: "needs-you",
       reason: "Claude: Not on your resume",
     });
+    expect(entry(built, TEXT).check).toBeUndefined();
+  });
+
+  it("still fills a draft with claims the resume doesn't back, and lists them at review", () => {
+    const built = plan(
+      new Map<string, ClaudeAnswer>([
+        [
+          TEXT,
+          {
+            kind: "draft",
+            value: "I led 12 people at Initech.",
+            model: "claude-sonnet-5-5",
+            unverified: ["12", "Initech"],
+          },
+        ],
+      ]),
+    );
+    expect(entry(built, TEXT)).toMatchObject({
+      status: "fill",
+      check: "Not in your resume or the posting: 12, Initech",
+    });
   });
 
   it("says why there's no answer when Claude isn't available", () => {

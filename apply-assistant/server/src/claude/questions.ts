@@ -51,7 +51,13 @@ export type ClaudeAnswer =
       readonly why: string;
       readonly model: string;
     }
-  | { readonly kind: "draft"; readonly value: string; readonly model: string }
+  | {
+      readonly kind: "draft";
+      readonly value: string;
+      readonly model: string;
+      /** Names and numbers in the draft that the resume, saved answers and posting don't back (fact-guard.ts). */
+      readonly unverified?: readonly string[];
+    }
   | { readonly kind: "unknown"; readonly why: string; readonly model: string };
 
 /** Fields the rules send to Claude: required, with a type Claude can answer. */
