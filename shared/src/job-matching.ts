@@ -3,6 +3,7 @@ import {
   matchesRequestedCountry,
   shouldApplyStrictCityFilter,
 } from "./search-cities.js";
+import { mayBeSameJob } from "./job-matching-guards.js";
 import { postingKeysOf } from "./posting-key.js";
 import type { CreateJobInput } from "./types/jobs.js";
 import type { LocationIntent } from "./types/location";
@@ -313,6 +314,7 @@ export function deduplicateJobsByTitleAndEmployer(
 
     const match = merged.find((entry) => {
       if (!entry.normalizedTitle || !entry.normalizedEmployer) return false;
+      if (!mayBeSameJob(incoming, entry.job)) return false;
       const titleScore = calculateSimilarity(
         normalizedTitle,
         entry.normalizedTitle,
